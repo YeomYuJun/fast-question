@@ -1,33 +1,102 @@
-"""Skill 을 ~/.claude/skills/qa 로 복사하고, MCP 서버 fast-question 을 Claude Code 사용자 범위에 등록한다.
+"""Skill 을 ~/.claude/skills 로 복사하고, MCP 서버 fast-question 을 Claude Code 사용자 범위에 등록하고,
+즉석 질문 훅(hooks/ask_kb.py)을 ~/.claude/settings.json 의 UserPromptSubmit 에 등록한다.
 
 사용: .venv\\Scripts\\python.exe scripts\\install.py
-되돌리기: claude mcp remove -s user fast-question, ~/.claude/skills/qa 폴더 삭제
+훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
+되돌리기: 위 훅 지우기, claude mcp remove -s user fast-question, ~/.claude/skills 아래 qa·qa-harvest 폴더 삭제
 """
 import filecmp
+import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SKILL_SRC = ROOT / "skill" / "qa"
-SKILL_DST = Path.home() / ".claude" / "skills" / "qa"
+SKILLS_SRC = ROOT / "skill"
+SKILLS_DST = Path.home() / ".claude" / "skills"
+SETTINGS = Path.home() / ".claude" / "settings.json"
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 ENTRY = ROOT / "run_mcp.py"
+HOOK = ROOT / "hooks" / "ask_kb.py"
+HOOK_EVENT = "UserPromptSubmit"
+HOOK_TIMEOUT_S = 10
 NAME = "fast-question"
 
 
-def install_skill() -> str:
-    if SKILL_DST.exists():
-        cmp = filecmp.dircmp(SKILL_SRC, SKILL_DST)
-        if not (cmp.left_only or cmp.right_only or cmp.diff_files):
-            return f"Skill 그대로: {SKILL_DST}"
-        shutil.rmtree(SKILL_DST)
-        shutil.copytree(SKILL_SRC, SKILL_DST)
-        return f"Skill 덮어씀(내용이 달랐다): {SKILL_DST}"
-    SKILL_DST.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(SKILL_SRC, SKILL_DST)
-    return f"Skill 복사: {SKILL_DST}"
+def _same_tree(a: Path, b: Path) -> bool:
+    cmp = filecmp.dircmp(a, b)
+    if cmp.left_only or cmp.right_only or cmp.diff_files or cmp.funny_files:
+        return False
+    return all(_same_tree(a / d, b / d) for d in cmp.common_dirs)
+
+
+def install_skill(src: Path, dst: Path) -> str:
+    if dst.exists():
+        if _same_tree(src, dst):
+            return f"Skill 그대로: {dst}"
+        shutil.rmtree(dst)
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+        return f"Skill 덮어씀(내용이 달랐다): {dst}"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+    return f"Skill 복사: {dst}"
+
+
+def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST) -> list[str]:
+    return [install_skill(d, dst_root / d.name) for d in sorted(src_root.iterdir())
+            if d.is_dir() and (d / "SKILL.md").exists()]
+
+
+def hook_command() -> str:
+    return f'"{PYTHON.as_posix()}" "{HOOK.as_posix()}"'
+
+
+def _is_ours(hook: dict) -> bool:
+    return "hooks/ask_kb.py" in str(hook.get("command", "")).replace("\\", "/")
+
+
+def _read(settings: Path) -> dict:
+    # 윈도우에서 만든 JSON 은 BOM 이 붙어 온다
+    return json.loads(settings.read_text(encoding="utf-8-sig")) if settings.exists() else {}
+
+
+def _write(settings: Path, data: dict) -> None:
+    if settings.exists():
+        backup = settings.with_name(settings.name + ".fast-question.bak")
+        shutil.copy2(settings, backup)
+    tmp = settings.with_name(settings.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, settings)
+
+
+def install_hook(settings: Path = SETTINGS) -> str:
+    data = _read(settings)
+    groups = data.setdefault("hooks", {}).setdefault(HOOK_EVENT, [])
+    if any(_is_ours(h) for g in groups for h in g.get("hooks", [])):
+        return f"훅 이미 등록됨: {settings} {HOOK_EVENT}"
+    groups.append({"hooks": [{"type": "command", "command": hook_command(), "timeout": HOOK_TIMEOUT_S}]})
+    _write(settings, data)
+    return f"훅 등록: {settings} {HOOK_EVENT} (이전 내용은 {settings.name}.fast-question.bak)"
+
+
+def remove_hook(settings: Path = SETTINGS) -> str:
+    data = _read(settings)
+    groups = data.get("hooks", {}).get(HOOK_EVENT, [])
+    kept = []
+    for g in groups:
+        hooks = [h for h in g.get("hooks", []) if not _is_ours(h)]
+        if hooks:
+            kept.append(dict(g, hooks=hooks))
+    if kept == groups:
+        return f"훅 없음: {settings}"
+    if kept:
+        data["hooks"][HOOK_EVENT] = kept
+    else:
+        del data["hooks"][HOOK_EVENT]
+    _write(settings, data)
+    return f"훅 제거: {settings} {HOOK_EVENT}"
 
 
 def register_mcp() -> str:
@@ -43,15 +112,20 @@ def register_mcp() -> str:
     return f"MCP 등록 {'완료' if r.returncode == 0 else '실패'}: {out}"
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
+    if "--remove-hook" in argv:
+        print(remove_hook())
+        return 0
     if not PYTHON.exists():
         print(f"가상환경이 없다: {PYTHON}")
         return 1
-    print(install_skill())
+    for msg in install_skills():
+        print(msg)
     print(register_mcp())
+    print(install_hook())
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
