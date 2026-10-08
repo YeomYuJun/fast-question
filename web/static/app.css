@@ -186,9 +186,9 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 /* 편집 폼 */
 .edit { display: flex; flex-direction: column; gap: var(--space-2); padding: 12px 14px; }
 .eline { display: flex; align-items: center; gap: var(--space-2); }
-.eline.top { align-items: flex-start; }
+.eline.multi { align-items: flex-start; }
 .eline .tag-q, .eline .tag-a { padding-top: 0; }
-.eline.top .tag-a, .eline.top .count { padding-top: 7px; }
+.eline.multi .tag-a, .eline.multi .count { padding-top: 7px; }
 .edit .fq { flex: 1; font: var(--text-question); padding: 5px 9px; }
 .edit .fa { flex: 1; font: var(--text-answer); padding: 5px 9px; resize: vertical; overflow-y: auto; }
 .count { font-family: var(--font-mono); font-size: 11px; color: var(--faint); width: 52px; text-align: right; flex: none; }
