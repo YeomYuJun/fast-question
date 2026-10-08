@@ -89,6 +89,18 @@ def test_githead_changes_after_commit(repo):
     assert check(row)[0] == "changed"
 
 
+def test_auto_on_git_ignored_file_is_file(repo):
+    (repo / ".gitignore").write_text("docs/\n", encoding="utf-8")
+    doc = repo / "docs" / "설계.md"
+    doc.parent.mkdir()
+    doc.write_text("v1", encoding="utf-8")
+
+    row = capture({"kind": "auto", "path": str(doc)})
+    assert row["kind"] == "file"
+    doc.write_text("v2", encoding="utf-8")
+    assert check(row)[0] == "changed"
+
+
 def test_auto_outside_git_is_file(base):
     f = base / "메모.txt"
     f.write_text("x", encoding="utf-8")

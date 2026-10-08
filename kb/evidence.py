@@ -98,6 +98,15 @@ def spec_matcher(specs: list[str]) -> Callable[[str], bool]:
     return lambda rel: any(t(rel) for t in tests)
 
 
+def _ignored(top: Path, p: Path) -> bool:
+    try:
+        r = subprocess.run(["git", "-C", str(top), "check-ignore", "-q", "--", p.relative_to(top).as_posix()],
+                           capture_output=True, timeout=8)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+    return r.returncode == 0
+
+
 def _exists(path: str | None) -> Path:
     if not path:
         raise ValidationError("근거 경로가 없다: (비어 있음)")
@@ -145,7 +154,8 @@ def capture(spec: Mapping) -> dict:
     if kind == "auto":
         p = _exists(spec.get("path"))
         top = repo_top(p)
-        if top is not None:
+        # git 이 무시하는 파일(.gitignore)은 diff·ls-files 에 나오지 않아 git 근거로는 변경을 못 잡는다
+        if top is not None and not _ignored(top, p):
             return _capture_git(str(top), [p.relative_to(top).as_posix()], None, anchor)
         kind = "dir" if p.is_dir() else "file"
     if kind == "file":
