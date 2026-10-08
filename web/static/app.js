@@ -103,6 +103,7 @@ const state = {
   editing: null, // 편집 중인 항목 id
   details: new Map(), // id -> 상세(근거·연결·이력)
   pin: null, // 주소(#qa/id)로 연 항목. 최근 목록에 없으면 끼워 넣는다
+  counts: null, // 검색어가 있을 때 분류별 일치 건수
 };
 const rows = new Map(); // id -> 행 요소(row.hit 에 검색 결과 항목)
 const groups = new Map(); // 묶음 키 -> 묶음 요소
@@ -126,14 +127,31 @@ function facet(name, n, on, onclick, cls) {
     el("span", { class: "name" }, name), el("span", { class: "n" }, n));
 }
 
+// 검색어가 있으면 분류별 건수는 그 검색의 일치 건수다(state.counts). 없으면 분류 전체 건수다
 function renderTree() {
-  const total = state.cats.reduce((a, c) => a + c.count, 0);
+  const hits = state.counts;
+  const own = (c) => (hits ? hits.byCat.get(c.id) || 0 : null);
+  const countOf = (t) => (hits ? own(t) + t.children.reduce((a, c) => a + own(c), 0) : t.count);
+  const total = hits ? hits.total : state.cats.reduce((a, c) => a + c.count, 0);
   fill($("#cat-tree"),
     facet("전체", total, state.cat === null, () => setCat(null), "top"),
     state.cats.flatMap((t) => [
-      facet(t.name, t.count, state.cat === t.id, () => setCat(t.id), "top"),
-      ...t.children.map((c) => facet(c.name, c.count, state.cat === c.id, () => setCat(c.id), "child")),
+      facet(t.name, countOf(t), state.cat === t.id, () => setCat(t.id), "top"),
+      ...t.children.map((c) => facet(c.name, hits ? own(c) : c.count, state.cat === c.id, () => setCat(c.id), "child")),
     ]));
+}
+
+async function searchCounts(res) {
+  if (!state.q) return null;
+  let groups = res.groups;
+  let total = res.total;
+  if (state.cat) { // 분류로 거른 결과에는 다른 분류의 건수가 없어서, 거르지 않은 검색을 한 번 더 한다
+    const all = await api("GET", "/api/search?" + new URLSearchParams({ q: state.q, limit: 1 })).catch(() => null);
+    if (!all) return null;
+    groups = all.groups;
+    total = all.total;
+  }
+  return { total, byCat: new Map(groups.map((g) => [g.category_id, g.count])) };
 }
 
 function renderChip() {
@@ -204,7 +222,11 @@ async function runSearch() {
     if (my === searchSeq) $("#sum-count").textContent = e.message;
     return;
   }
-  if (my === searchSeq) render(res); // 늦게 도착한 이전 응답은 버린다
+  const counts = await searchCounts(res);
+  if (my !== searchSeq) return; // 늦게 도착한 이전 응답은 버린다
+  state.counts = counts;
+  renderTree();
+  render(res);
 }
 
 function render(res) {
@@ -660,9 +682,10 @@ function move(dir) {
 
 // ---------- 테마 ----------
 
-function setTheme(t) {
+// 저장은 사용자가 상단에서 바꿨을 때만 한다. 저장값이 없으면 계속 OS 설정을 따른다
+function setTheme(t, save) {
   document.documentElement.setAttribute("data-theme", t);
-  store("fq-theme", t);
+  if (save) store("fq-theme", t);
   $("#theme-btn").setAttribute("aria-label", t === "dark" ? "라이트 테마로 바꾸기" : "다크 테마로 바꾸기");
 }
 
@@ -726,7 +749,7 @@ function init() {
   });
   $("#cat-form").addEventListener("submit", addCategory);
   $("#theme-btn").addEventListener("click", () => {
-    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
   });
   setTheme(document.documentElement.getAttribute("data-theme") || "light");
   openSide(store("fq-side") === "1");
