@@ -185,7 +185,7 @@ def test_stopwords_seeded_once(tmp_path):
     c = connect(path)
     words = sorted(r[0] for r in c.execute("SELECT word FROM stopword"))
     assert words == ["경우", "때"]
-    assert get_meta(c, "schema_version") == "1"
+    assert get_meta(c, "schema_version") == "2"
     c.close()
 
 
@@ -196,7 +196,7 @@ def test_connect_existing_db_takes_no_write_lock(tmp_path):
     t0 = time.perf_counter()
     c = connect(path)
     assert time.perf_counter() - t0 < 1.0
-    assert get_meta(c, "schema_version") == "1"
+    assert get_meta(c, "schema_version") == "2"
     holder.execute("ROLLBACK")
     c.close()
     holder.close()
@@ -221,3 +221,57 @@ def test_text_checks():
         check_question("가" * 151)
     with pytest.raises(ValidationError, match="비어"):
         check_name("   ")
+
+
+@pytest.mark.parametrize(
+    "cols, vals",
+    [
+        ("created_at", "'2001-01-01T00:00:00.000Z'"),
+        ("updated_at", "'2001-01-01T00:00:00.000Z'"),
+        ("version", "77"),
+        ("deleted_at", "'2001-01-01T00:00:00.000Z'"),
+        ("reviewed_at", "'2001-01-01T00:00:00.000Z'"),
+    ],
+)
+def test_insert_managed_values_rejected(conn, cols, vals):
+    cid = add_cat(conn, "가")
+    with pytest.raises(sqlite3.IntegrityError, match="managed_column"):
+        conn.execute(f"INSERT INTO qa(category_id, question, answer, created_by, updated_by, {cols}) "
+                     f"VALUES (?, '질문', '답변', 'user', 'user', {vals})", (cid,))
+
+
+def test_insert_actor_mismatch_rejected(conn):
+    with pytest.raises(sqlite3.IntegrityError, match="managed_column"):
+        conn.execute("INSERT INTO category(name, created_by, updated_by) VALUES ('가', 'claude', 'user')")
+
+
+def test_insert_reviewed_now_allowed(conn):
+    cid = add_cat(conn, "가")
+    conn.execute("INSERT INTO qa(category_id, question, answer, created_by, updated_by, reviewed_at, reviewed_by) "
+                 "VALUES (?, '질문', '답변', 'user', 'user', strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'user')", (cid,))
+
+
+@pytest.mark.parametrize("col", ["deleted_at", "reviewed_at"])
+def test_update_fake_time_rejected(conn, col):
+    cid = add_cat(conn, "가")
+    qid = add_qa(conn, cid)
+    with pytest.raises(sqlite3.IntegrityError, match="managed_column"):
+        conn.execute(f"UPDATE qa SET {col} = '1999-01-01T00:00:00.000Z', updated_by = 'user', {BUMP} WHERE id = ?", (qid,))
+    conn.execute(f"UPDATE qa SET {col} = strftime('%Y-%m-%dT%H:%M:%fZ','now'), updated_by = 'user', {BUMP} WHERE id = ?", (qid,))
+
+
+def test_revision_fake_time_rejected(conn):
+    with pytest.raises(sqlite3.IntegrityError, match="revision_append_only"):
+        conn.execute("INSERT INTO revision(table_name, row_id, op, actor, at) VALUES ('qa', 1, 'update', 'user', '1990-01-01')")
+
+
+def test_old_schema_triggers_replaced_on_connect(tmp_path):
+    path = tmp_path / "kb.sqlite3"
+    c = connect(path)
+    c.execute("DROP TRIGGER qa_insert_guard")
+    set_meta(c, "schema_version", "1")
+    c.close()
+    c = connect(path)
+    assert get_meta(c, "schema_version") == "2"
+    assert c.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'qa_insert_guard'").fetchone()[0] == 1
+    c.close()

@@ -73,6 +73,23 @@ def test_git_path_tracks_only_its_paths(repo):
     assert verdict == "changed" and "NasFileStorage.java" in detail
 
 
+def test_git_deleted_file_is_changed(repo):
+    target = repo / "src" / "NasFileStorage.java"
+    row = capture({"kind": "auto", "path": str(target)})
+    target.unlink()
+    assert check(row)[0] == "changed"
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "삭제")
+    assert check(row)[0] == "changed"
+
+
+def test_git_renamed_file_is_changed(repo):
+    row = capture({"kind": "auto", "path": str(repo / "src" / "NasFileStorage.java")})
+    git(repo, "mv", "src/NasFileStorage.java", "src/NasStorage.java")
+    git(repo, "commit", "-q", "-m", "이름 변경")
+    assert check(row)[0] == "changed"
+
+
 def test_git_untracked_file_in_scope(repo):
     row = capture({"kind": "git", "repo": str(repo), "paths": ["src/**"]})
     assert check(row)[0] == "same"

@@ -1,12 +1,17 @@
 """DDL 생성. 감사 대상 테이블마다 같은 감독 트리거를 만든다.
 
 감독 규칙(어느 진입점으로 쓰든 DB 가 강제한다)
-- 생성 정보는 바꿀 수 없다. UPDATE 는 BUMP 를 함께 써야 하고, 버전은 1씩만, 수정 시각은 DB 현재 시각만 받는다(<t>_guard).
+- INSERT 는 생성·수정 시각 = DB 현재 시각, 버전 1, 보관 아님, 생성 주체 = 수정 주체만 받는다(<t>_insert_guard).
+- 생성 정보는 바꿀 수 없다. UPDATE 는 BUMP 를 함께 써야 하고, 버전은 1씩만, 수정·보관·검토·판정 시각은
+  DB 현재 시각만 받는다(<t>_guard).
+- 트리거는 연결할 때 스키마 버전이 다르면 지우고 다시 만든다(이전 DB 의 트리거 갱신).
 - 모든 INSERT·UPDATE 는 revision 에 전후 값이 남는다. revision 은 추가만 된다.
 - 물리 DELETE 는 거부한다. 삭제는 deleted_at 을 채우는 보관 처리다.
 """
 
-SCHEMA_VERSION = "1"
+import re
+
+SCHEMA_VERSION = "2"
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 BUMP = f"version = version + 1, updated_at = {NOW}"
 ACTORS = "('user','claude','system')"
@@ -127,6 +132,8 @@ CREATE TABLE IF NOT EXISTS revision (
 );
 CREATE INDEX IF NOT EXISTS revision_row ON revision(table_name, row_id);
 
+CREATE TRIGGER IF NOT EXISTS revision_insert_guard BEFORE INSERT ON revision WHEN NEW.at IS NOT {NOW}
+BEGIN SELECT RAISE(ABORT, 'revision_append_only'); END;
 CREATE TRIGGER IF NOT EXISTS revision_no_update BEFORE UPDATE ON revision
 BEGIN SELECT RAISE(ABORT, 'revision_append_only'); END;
 CREATE TRIGGER IF NOT EXISTS revision_no_delete BEFORE DELETE ON revision
@@ -163,7 +170,8 @@ SEED = """
 INSERT INTO stopword(word, created_by, updated_by)
 SELECT w, 'system', 'system' FROM (SELECT '때' AS w UNION ALL SELECT '경우')
 WHERE NOT EXISTS (SELECT 1 FROM meta WHERE key = 'schema_version');
-INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '{version}');
+INSERT INTO meta(key, value) VALUES ('schema_version', '{version}')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 """
 
 
@@ -172,13 +180,26 @@ def _json(prefix: str, cols: list[str]) -> str:
     return "json_object(" + ", ".join(f"'{c}', {prefix}.{c}" for c in cols) + ")"
 
 
+# 테이블별로 "값을 넣으면 DB 현재 시각이어야 하는" 시각 열
+TIME_COLS = {"qa": ["reviewed_at"], "evidence": ["checked_at"]}
+
+
 def _audit_triggers(table: str, cols: list[str]) -> str:
     # 모든 UPDATE 는 BUMP(버전 +1, 수정 시각 = DB 현재 시각)를 함께 써야 한다.
-    # 'now' 는 한 문장을 실행하는 동안 같은 값이라 SET 의 값과 트리거의 값이 일치한다.
+    # 'now' 는 한 문장을 실행하는 동안 같은 값이라 SET·기본값의 값과 트리거의 값이 일치한다.
+    times = TIME_COLS.get(table, [])
+    ins_times = "".join(f" OR (NEW.{c} IS NOT NULL AND NEW.{c} IS NOT {NOW})" for c in times)
+    upd_times = "".join(f" OR (NEW.{c} IS NOT OLD.{c} AND NEW.{c} IS NOT NULL AND NEW.{c} IS NOT {NOW})"
+                        for c in times + ["deleted_at"])
     return f"""
+CREATE TRIGGER IF NOT EXISTS {table}_insert_guard BEFORE INSERT ON {table}
+WHEN NEW.created_at IS NOT {NOW} OR NEW.updated_at IS NOT {NOW} OR NEW.version IS NOT 1
+  OR NEW.deleted_at IS NOT NULL OR NEW.deleted_by IS NOT NULL OR NEW.updated_by IS NOT NEW.created_by{ins_times}
+BEGIN SELECT RAISE(ABORT, 'managed_column'); END;
+
 CREATE TRIGGER IF NOT EXISTS {table}_guard BEFORE UPDATE ON {table}
 WHEN NEW.created_at IS NOT OLD.created_at OR NEW.created_by IS NOT OLD.created_by
-  OR NEW.version IS NOT OLD.version + 1 OR NEW.updated_at IS NOT {NOW}
+  OR NEW.version IS NOT OLD.version + 1 OR NEW.updated_at IS NOT {NOW}{upd_times}
 BEGIN SELECT RAISE(ABORT, 'managed_column'); END;
 
 CREATE TRIGGER IF NOT EXISTS {table}_rev_ins AFTER INSERT ON {table} BEGIN
@@ -201,5 +222,7 @@ BEGIN SELECT RAISE(ABORT, 'no_physical_delete'); END;
 
 
 def ddl() -> str:
-    triggers = "".join(_audit_triggers(t, cols) for t, cols in AUDITED.items())
-    return TABLES + triggers + SEED.format(version=SCHEMA_VERSION)
+    body = TABLES + "".join(_audit_triggers(t, cols) for t, cols in AUDITED.items())
+    # 트리거는 상태가 없으므로 지우고 다시 만들어 이전 버전 DB 의 트리거도 바꾼다
+    drops = "".join(f"DROP TRIGGER IF EXISTS {n};\n" for n in re.findall(r"CREATE TRIGGER IF NOT EXISTS (\w+)", body))
+    return drops + body + SEED.format(version=SCHEMA_VERSION)

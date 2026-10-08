@@ -49,4 +49,6 @@ def check_name(s: str) -> str:
         raise ValidationError("이름은 한 줄로 쓴다.")
     if len(s) > NAME_MAX:
         raise ValidationError(f"이름은 {NAME_MAX}자까지 쓸 수 있다. 지금 {len(s)}자다.")
+    if ">" in s:  # "대분류 > 중분류" 경로 구분자와 겹친다
+        raise ValidationError("분류 이름에는 > 를 쓸 수 없다.")
     return s

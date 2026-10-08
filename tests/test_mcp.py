@@ -4,17 +4,23 @@ import json
 import pytest
 from mcp.client import Client
 
-from kb.store import Store
-from mcp_server.server import TOOLS, build_server
+from kb.db import connect
+from mcp_server.server import TOOLS, build_server, store_factory
 
 EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
                   "kb_archive", "kb_link", "kb_evidence", "kb_recheck", "kb_dict"}
 
 
 @pytest.fixture
-def server(conn):
-    store = Store(conn, "claude")
-    return build_server(lambda: store)
+def db(tmp_path):
+    path = tmp_path / "kb.sqlite3"
+    connect(path).close()
+    return path
+
+
+@pytest.fixture
+def server(db):
+    return build_server(store_factory(db, None))
 
 
 def call(server, name, args=None):
@@ -110,3 +116,17 @@ def test_categories_tree(server):
     call(server, "kb_add_category", {"name": "NAS", "parent": "이관"})
     err, tree = call(server, "kb_categories")
     assert not err and tree["categories"][0]["children"][0]["path"] == "이관 > NAS"
+
+
+def test_parallel_tool_calls_use_separate_connections(server, db):
+    async def go():
+        async with Client(server) as c:
+            await c.call_tool("kb_add_category", {"name": "이관"})
+            return await asyncio.gather(*[
+                c.call_tool("kb_add", {"category": "이관", "question": f"병렬 등록 확인 {i} 호 {i * 7919}",
+                                       "answer": "병렬 답변", "force": True}) for i in range(30)])
+    results = asyncio.run(go())
+    assert [r.content[0].text[:80] for r in results if r.is_error] == []
+    c = connect(db)
+    assert c.execute("SELECT count(*) FROM qa").fetchone()[0] == 30
+    c.close()

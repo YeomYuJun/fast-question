@@ -10,6 +10,7 @@ from typing import Callable
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
@@ -22,6 +23,30 @@ from kb.morph import Analyzer, pending_count, reindex
 from kb.store import Store
 
 STATIC = Path(__file__).resolve().parent / "static"
+
+
+class SameOriginOnly:
+    """Host 가 허용 목록(127.0.0.1·localhost + 포트)이고, Origin 이 있으면 같은 출처인 요청만 받는다.
+
+    다른 사이트가 사용자 브라우저로 보내는 요청(text/plain POST 는 사전 확인 없이 간다)과
+    DNS 재바인딩으로 KB 를 읽거나 사용자 이름으로 항목을 심는 것을 막는다.
+    """
+
+    def __init__(self, app, hosts: set[str]):
+        self.app = app
+        self.hosts = hosts
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = {k.lower(): v.decode("latin-1").lower() for k, v in scope["headers"]}
+            host = headers.get(b"host", "")
+            origin = headers.get(b"origin")
+            if host not in self.hosts or (origin is not None and origin.split("://", 1)[-1] not in self.hosts):
+                resp = JSONResponse({"error": "이 서버는 127.0.0.1·localhost 의 같은 출처 요청만 받는다."},
+                                    status_code=403)
+                await resp(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _flag(request: Request, name: str) -> bool:
@@ -145,7 +170,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/status", api(status)),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
-    app = Starlette(routes=routes)
+    hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
+    app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)])
     app.state.db_path = path
     app.state.analyzer = analyzer
     app.state.run_jobs = run_jobs

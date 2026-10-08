@@ -19,7 +19,8 @@ def db(tmp_path):
 
 @pytest.fixture
 def client(db, analyzer):
-    with TestClient(create_app(db_path=db, run_jobs=False, analyzer=analyzer)) as c:
+    app = create_app(db_path=db, run_jobs=False, analyzer=analyzer)
+    with TestClient(app, base_url="http://127.0.0.1:8765") as c:
         yield c
 
 
@@ -151,3 +152,24 @@ def test_search_options_and_filters(client):
     assert r["total"] == 1
     assert client.get("/api/search", params={"q": "", "only": "unreviewed"}).json()["hits"] == []
     assert client.get("/api/search", params={"q": "x", "only": "bad"}).status_code == 400
+
+
+@pytest.mark.parametrize("headers", [
+    {"origin": "https://evil.example", "content-type": "text/plain"},
+    {"host": "attacker.example:8765"},
+    {"origin": "null"},
+])
+def test_rejects_cross_site_requests(client, headers):
+    r = client.post("/api/categories", content='{"name": "심은 분류"}', headers=headers)
+    assert r.status_code == 403
+    assert client.get("/api/categories").json()["categories"] == []
+
+
+def test_rejects_foreign_host_on_read(client):
+    assert client.get("/api/search", params={"q": "x"}, headers={"host": "attacker.example:8765"}).status_code == 403
+
+
+@pytest.mark.parametrize("origin", ["http://127.0.0.1:8765", "http://localhost:8765"])
+def test_accepts_same_origin(client, origin):
+    r = client.post("/api/categories", json={"name": "정상 분류"}, headers={"origin": origin})
+    assert r.status_code == 200

@@ -263,10 +263,11 @@ class Checker:
             dirty, untracked = cap.get("dirty", {}), cap.get("untracked", {})
             changed = []
             now_dirty = [f for f in diff if match(f)]
-            changed += [f for f in now_dirty if dirty.get(f) != hash_file(Path(repo) / f)]
+            # 기록 때 없던 키는 기록 뒤 바뀐 것이다(삭제·이름 변경 포함. 둘 다 None 이어도 같다고 보지 않는다)
+            changed += [f for f in now_dirty if f not in dirty or dirty[f] != hash_file(Path(repo) / f)]
             changed += [f for f in dirty if f not in now_dirty]
             now_untr = [f for f in untr if match(f)]
-            changed += [f for f in now_untr if untracked.get(f) != hash_file(Path(repo) / f)]
+            changed += [f for f in now_untr if f not in untracked or untracked[f] != hash_file(Path(repo) / f)]
             changed += [f for f in untracked if f not in now_untr]
             if not changed:
                 return "same", ""

@@ -301,7 +301,7 @@ function renderDetail(it) {
       it.reviewed ? null : el("button", { onclick: post("/review", undefined, "검토 완료로 표시했다.") }, "검토 완료"),
       it.archived
         ? el("button", { onclick: post("/restore", { version: it.version }, "복원했다.") }, "복원")
-        : el("button", { onclick: post("/archive", { version: it.version, note: note.value || null }, "보관했다.") }, "보관"),
+        : el("button", { onclick: () => post("/archive", { version: it.version, note: note.value || null }, "보관했다.")() }, "보관"), // 사유는 누를 때 읽는다
     ),
     evidenceSection(it),
     linkSection(it),

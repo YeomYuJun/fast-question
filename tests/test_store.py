@@ -197,3 +197,8 @@ def test_concurrent_writers_do_not_lock(tmp_path):
     c = connect(path)
     assert len(Store(c, "user").categories()) == 40
     c.close()
+
+
+def test_category_name_cannot_contain_path_separator(user):
+    with pytest.raises(ValidationError, match=">"):
+        user.add_category("CI>CD")

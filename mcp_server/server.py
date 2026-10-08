@@ -4,10 +4,12 @@
 KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현재 값을 붙인다.
 """
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 
+from kb.db import connect
 from kb.errors import ConflictError, KbError
 from kb.morph import reindex
 from kb.store import Store
@@ -38,16 +40,25 @@ def _detail(item: dict) -> dict:
     return out
 
 
+def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
+    """호출마다 새 연결을 여는 Store 생성기. 도구 호출은 작업 스레드에서 병렬로 돌기 때문에
+    연결 하나를 나눠 쓰면 트랜잭션과 lastrowid 가 섞인다. 형태소 분석기는 내부 잠금이 있어 공유한다."""
+    return lambda: Store(connect(db_path), "claude", analyzer=analyzer)
+
+
 def build_server(open_store: Callable[[], Store]) -> MCPServer:
     server = MCPServer("fast-question", instructions=INSTRUCTIONS)
 
     def run(fn: Callable[[Store], Any]) -> Any:
+        store = open_store()
         try:
-            return fn(open_store())
+            return fn(store)
         except ConflictError as e:
             raise ValueError(f"{e.message} 현재 값: {json.dumps(_detail(e.current), ensure_ascii=False)}") from e
         except KbError as e:
             raise ValueError(e.message) from e
+        finally:
+            store.conn.close()
 
     @server.tool()
     def kb_search(query: str, category: str | None = None, limit: int = 20, include_archived: bool = False) -> dict:

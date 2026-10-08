@@ -13,16 +13,15 @@ sys.path.insert(0, str(ROOT))
 from kb.config import load_config  # noqa: E402
 from kb.db import connect  # noqa: E402
 from kb.morph import Analyzer  # noqa: E402
-from kb.store import Store  # noqa: E402
-from mcp_server.server import build_server  # noqa: E402
+from mcp_server.server import build_server, store_factory  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=Path, default=None)
     cfg = load_config(ap.parse_args().config)
-    store = Store(connect(cfg.db_path), "claude", analyzer=Analyzer())
-    build_server(lambda: store).run("stdio")
+    connect(cfg.db_path).close()  # 스키마 준비
+    build_server(store_factory(cfg.db_path, Analyzer())).run("stdio")
 
 
 if __name__ == "__main__":
