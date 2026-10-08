@@ -16,6 +16,8 @@ KINDS = ("auto", "file", "dir", "git", "githead", "url", "note")
 DIR_SKIP = {".git", "node_modules"}
 DIR_CAP = 50000
 IS_WIN = os.name == "nt"
+# pythonw 로 뜬 web 이 git 을 부를 때 콘솔 창이 깜빡이지 않게 한다
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def _sha(data: bytes) -> str:
@@ -32,7 +34,7 @@ def hash_file(p: Path) -> str | None:
 def run_git(repo: Path | str, *args: str) -> str | None:
     try:
         r = subprocess.run(["git", "-C", str(repo), "-c", "core.quotepath=false", *args],
-                           capture_output=True, timeout=8)
+                           capture_output=True, timeout=8, creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if r.returncode != 0:
@@ -101,7 +103,7 @@ def spec_matcher(specs: list[str]) -> Callable[[str], bool]:
 def _ignored(top: Path, p: Path) -> bool:
     try:
         r = subprocess.run(["git", "-C", str(top), "check-ignore", "-q", "--", p.relative_to(top).as_posix()],
-                           capture_output=True, timeout=8)
+                           capture_output=True, timeout=8, creationflags=NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
     return r.returncode == 0

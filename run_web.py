@@ -1,9 +1,14 @@
 """웹 서버 진입점. 쓰기 주체는 user 다.
 
+로그는 config 의 log_dir(기본 data/logs)에 web.log 로 남기고 자정마다 넘겨 log_keep_days 일치를 둔다.
+pythonw 로 띄우면(scripts/autostart.py) 표준 출력이 없어 로그 파일에만 쓴다.
 사용: <venv python> run_web.py [--config <config.json>]
 """
 import argparse
+import logging
+import os
 import sys
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -11,15 +16,30 @@ sys.path.insert(0, str(ROOT))
 
 import uvicorn  # noqa: E402
 
-from kb.config import load_config  # noqa: E402
+from kb.config import Config, load_config  # noqa: E402
 from web.app import create_app  # noqa: E402
+
+
+def setup_logging(cfg: Config) -> None:
+    cfg.log_dir.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = [TimedRotatingFileHandler(
+        cfg.log_dir / "web.log", when="midnight", backupCount=cfg.log_keep_days, encoding="utf-8")]
+    if sys.stderr is None:  # pythonw: 표준 출력이 없으면 print·경고가 실패하지 않게 버린다
+        sys.stdout = sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    else:
+        handlers.append(logging.StreamHandler())
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s",
+                        handlers=handlers, force=True)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=Path, default=None)
     cfg = load_config(ap.parse_args().config)
-    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning")
+    setup_logging(cfg)
+    logging.getLogger("fast-question.web").info("시작: http://%s:%s, DB %s", cfg.host, cfg.port, cfg.db_path)
+    # log_config=None: uvicorn 로그도 위 핸들러로 간다. 접근 로그는 warning 수준이라 남지 않는다
+    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning", log_config=None)
 
 
 if __name__ == "__main__":

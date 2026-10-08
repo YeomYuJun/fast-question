@@ -4,10 +4,14 @@
 요청마다 SQLite 연결을 새로 열고(스레드 풀에서 실행), 형태소 분석기는 앱에 하나를 둔다.
 오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
 쓰기 잠금 대기 초과 503 으로 돌려준다.
+run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
 """
+import dataclasses
 import json
+import logging
 import sqlite3
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -23,10 +27,13 @@ from kb.config import Config, load_config
 from kb.db import connect
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
+from kb.jobs import run_due
 from kb.morph import Analyzer
 from kb.store import Store
 
 STATIC = Path(__file__).resolve().parent / "static"
+JOB_INTERVAL_S = 600
+log = logging.getLogger("fast-question.web")
 
 
 class SameOriginOnly:
@@ -80,6 +87,24 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             conn.close()
 
     threading.Thread(target=warm_up, name="kiwi-warmup", daemon=True).start()
+
+    job_cfg = cfg if db_path is None else dataclasses.replace(cfg, db_path=path)
+
+    def jobs_loop(stop: threading.Event) -> None:
+        while not stop.is_set():
+            try:
+                run_due(job_cfg, analyzer)
+            except Exception:  # 다음 주기에 다시 돈다
+                log.exception("주기 작업 실패")
+            stop.wait(JOB_INTERVAL_S)
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        stop = threading.Event()
+        if run_jobs:
+            threading.Thread(target=jobs_loop, args=(stop,), name="jobs", daemon=True).start()
+        yield
+        stop.set()
 
     def api(fn: Callable[[Store, Request, dict], object]):
         async def handler(request: Request) -> JSONResponse:
@@ -147,7 +172,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
-    app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)])
+    app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)], lifespan=lifespan)
     app.state.db_path = path
     app.state.analyzer = analyzer
     app.state.run_jobs = run_jobs
