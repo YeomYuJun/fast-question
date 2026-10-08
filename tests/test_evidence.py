@@ -274,3 +274,28 @@ def test_update_with_bad_evidence_changes_nothing(conn, base):
         s.update_qa(item["id"], item["version"], answer="바꾼 답변",
                     evidence=[{"kind": "auto", "path": str(base / "없는 파일")}])
     assert s.get_qa(item["id"])["answer"] == "답변"
+
+
+def test_recheck_does_not_overwrite_concurrent_recapture(conn, base, monkeypatch):
+    """재검증이 판정하는 동안 다른 쪽이 근거를 재기록하면, 재검증은 옛 행 기준 판정으로 덮어쓰지 않는다."""
+    import kb.store as store_mod
+
+    f = base / "근거.txt"
+    f.write_text("v1", encoding="utf-8")
+    user = Store(conn, "user")
+    user.add_category("이관")
+    item = user.add_qa("이관", "질문", "답변", evidence=[{"kind": "auto", "path": str(f)}])["item"]
+    ev_id = item["evidence"][0]["id"]
+    f.write_text("v2", encoding="utf-8")
+
+    class RacingChecker(store_mod.Checker):
+        def check(self, row):
+            result = super().check(row)  # 옛 기록 기준으로 "바뀜"
+            Store(conn, "claude").recapture_evidence(ev_id)  # 그 사이 Claude 가 다시 읽고 재기록
+            return result
+    monkeypatch.setattr(store_mod, "Checker", RacingChecker)
+
+    results = Store(conn, "system").recheck()
+    assert results[0]["changed"] is False
+    assert user.get_qa(item["id"])["evidence"][0]["verdict"] == "same"
+    assert user.get_qa(item["id"])["evidence_state"] == "trusted"

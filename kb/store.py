@@ -354,8 +354,11 @@ class Store:
             for r, verdict, detail in judged:
                 changed = verdict != r["verdict"] or (detail or None) != r["verdict_detail"]
                 if changed:
-                    c.execute(f"UPDATE evidence SET verdict = ?, verdict_detail = ?, checked_at = {NOW}, "
-                              f"updated_by = 'system', {BUMP} WHERE id = ?", (verdict, detail or None, r["id"]))
+                    # 판정하는 동안 다른 쪽이 재기록했으면(version 이 바뀌었으면) 옛 기록 기준 판정을 쓰지 않는다
+                    changed = c.execute(
+                        f"UPDATE evidence SET verdict = ?, verdict_detail = ?, checked_at = {NOW}, "
+                        f"updated_by = 'system', {BUMP} WHERE id = ? AND version = ?",
+                        (verdict, detail or None, r["id"], r["version"])).rowcount == 1
                 results.append({"evidence_id": r["id"], "qa_id": r["qa_id"], "verdict": verdict,
                                 "detail": detail, "changed": changed})
             for q in {r["qa_id"] for r, _, _ in judged}:
