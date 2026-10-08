@@ -33,8 +33,12 @@ def test_install_hook_keeps_other_hooks_and_writes_without_bom(tmp_path):
 def test_install_hook_is_idempotent(tmp_path):
     p = _settings(tmp_path, {}, bom=False)
     install.install_hook(p)
+    original = (tmp_path / "settings.json.fast-question.bak").read_bytes()
     assert "이미" in install.install_hook(p)
     assert len(_ours(json.loads(p.read_text(encoding="utf-8")))) == 1
+    install.remove_hook(p)
+    assert (tmp_path / "settings.json.fast-question.bak").read_bytes() == original
+    assert b"\r\n" not in p.read_bytes()
 
 
 def test_remove_hook_removes_only_ours(tmp_path):

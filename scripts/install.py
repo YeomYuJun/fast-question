@@ -63,11 +63,12 @@ def _read(settings: Path) -> dict:
 
 
 def _write(settings: Path, data: dict) -> None:
-    if settings.exists():
-        backup = settings.with_name(settings.name + ".fast-question.bak")
+    backup = settings.with_name(settings.name + ".fast-question.bak")
+    if settings.exists() and not backup.exists():  # 처음 고치기 전의 원본만 남긴다
         shutil.copy2(settings, backup)
     tmp = settings.with_name(settings.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # settings.json 은 LF 로 저장되어 있다. 윈도우 기본 줄바꿈(CRLF)으로 바꾸지 않는다
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
     os.replace(tmp, settings)
 
 
@@ -78,7 +79,7 @@ def install_hook(settings: Path = SETTINGS) -> str:
         return f"훅 이미 등록됨: {settings} {HOOK_EVENT}"
     groups.append({"hooks": [{"type": "command", "command": hook_command(), "timeout": HOOK_TIMEOUT_S}]})
     _write(settings, data)
-    return f"훅 등록: {settings} {HOOK_EVENT} (이전 내용은 {settings.name}.fast-question.bak)"
+    return f"훅 등록: {settings} {HOOK_EVENT} (처음 고치기 전 원본: {settings.name}.fast-question.bak)"
 
 
 def remove_hook(settings: Path = SETTINGS) -> str:
