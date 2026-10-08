@@ -185,10 +185,17 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
         return run(go)
 
     @server.tool()
-    def kb_add_many(items: list[dict]) -> dict:
+    def kb_add_many(items: list[dict] | None = None, file: str | None = None) -> dict:
         """Q&A 를 한 번에 여러 건(최대 100) 등록한다. 항목은 kb_add 의 인자와 같다:
         {"category", "question", "answer", "evidence"?, "links"?, "force"?}. 항목마다 따로 처리해 하나가 실패해도
-        나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다."""
+        나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다.
+        file 에 항목 배열 JSON 파일의 절대경로를 주면 그 파일을 읽는다. 초안 파일을 그대로 넣을 때는 file 을 쓴다
+        (항목을 다시 옮겨 적으면 글자가 바뀔 수 있다). 항목의 다른 키는 무시한다."""
+        if file:
+            # 윈도우에서 만든 JSON 은 BOM 이 붙어 온다
+            items = json.loads(Path(file).read_text(encoding="utf-8-sig"))
+        if not items:
+            raise ValueError("kb_add_many 에는 items 나 file 이 필요하다.")
         if len(items) > ADD_MANY_MAX:
             raise ValueError(f"kb_add_many 는 한 번에 {ADD_MANY_MAX}건까지 받는다. 지금 {len(items)}건이다.")
 

@@ -197,3 +197,15 @@ def test_harvest_record_roundtrip(server):
     assert res["record"]["created"] == 12
     err, res = call(server, "kb_harvest", {"action": "list"})
     assert [r["root"] for r in res["records"]] == ["d:/work"]
+
+
+def test_add_many_reads_draft_file(server, tmp_path):
+    call(server, "kb_add_category", {"name": "이관"})
+    draft = tmp_path / "draft.json"
+    items = [{"category": "이관", "question": "재암호화 대상에서 뺀 컬럼은?", "answer": "길이가 맞지 않는 컬럼은 대상에서 뺐다."}]
+    draft.write_bytes(b"\xef\xbb\xbf" + json.dumps(items, ensure_ascii=False).encode("utf-8"))
+    err, res = call(server, "kb_add_many", {"file": str(draft)})
+    assert not err and res["created"] == 1
+    assert call(server, "kb_search", {"query": "뺐다"})[1]["hits"][0]["answer"] == items[0]["answer"]
+    err, text = call(server, "kb_add_many", {})
+    assert err and "items 나 file" in text
