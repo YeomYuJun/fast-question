@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from kb.schema import BUMP, NOW, ddl
+from kb.schema import BUMP, NOW, SCHEMA_VERSION, ddl
 
 __all__ = ["BUMP", "NOW", "connect", "tx", "get_meta", "set_meta"]
 
@@ -23,9 +23,18 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.create_function("regexp", 2, _regexp, deterministic=True)
-    # 두 프로세스가 동시에 처음 열어도 한쪽만 만들도록 스크립트 전체를 IMMEDIATE 트랜잭션으로 감싼다
-    conn.executescript("BEGIN IMMEDIATE;\n" + ddl() + "\nCOMMIT;")
+    if _schema_version(conn) != SCHEMA_VERSION:
+        # 두 프로세스가 동시에 처음 열어도 한쪽만 만들도록 스크립트 전체를 IMMEDIATE 트랜잭션으로 감싼다
+        conn.executescript("BEGIN IMMEDIATE;\n" + ddl() + "\nCOMMIT;")
     return conn
+
+
+def _schema_version(conn: sqlite3.Connection) -> str | None:
+    """스키마가 이미 있으면 쓰기 잠금 없이 확인만 한다(web 은 요청마다 연결을 연다)."""
+    try:
+        return get_meta(conn, "schema_version")
+    except sqlite3.OperationalError:  # meta 테이블이 아직 없다
+        return None
 
 
 @contextmanager

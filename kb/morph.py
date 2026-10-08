@@ -2,7 +2,7 @@
 
 - Kiwi 는 처음 쓸 때 띄운다(약 2.5초). 분석은 쓰기 트랜잭션 밖에서 한다.
 - 분석기 버전은 DB 의 사용자 단어 목록에서 계산한다. web 과 MCP 가 각자 띄운 Kiwi 는
-  쓰기·검색 전에 이 버전을 비교해 다르면 다시 띄운다(spec §6.4).
+  쓰기·검색 전에 이 버전을 비교해 다르면 다시 띄운다.
 - 색인 행의 ver 가 현재 버전과 다르거나 행이 없으면 재색인 대상이다.
 """
 import functools
@@ -73,6 +73,7 @@ class Analyzer:
                     kiwi = self._loader()
                     for w, tag in words:
                         kiwi.add_user_word(w, tag)
+                    kiwi.tokenize("초기화")  # 첫 분석 때 늦게 불러오는 모델을 여기서 미리 불러온다
                 except Exception as e:  # noqa: BLE001 - 어떤 실패든 형태소 계층을 끈다
                     self.enabled, self.error, self._kiwi = False, f"{type(e).__name__}: {e}", None
                     return False

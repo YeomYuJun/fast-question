@@ -1,5 +1,5 @@
 """검색. E 정확히 일치 → Y 동의어 → M 형태소 계층을 합치고, 합친 결과가 0건이면 F 비슷한 결과를
-따로 돌려준다(spec §6.1). 강조 위치는 서버가 원문 기준으로 계산한다.
+따로 돌려준다. 강조 위치는 서버가 원문 기준으로 계산한다.
 
 검색에 쓰는 열은 프로세스 메모리 사본(_corpus)에서 읽는다. 사본은 revision 최대 id 와 qa 최대 id 가
 바뀌면 다시 읽는다. 모든 쓰기가 revision 을 남기므로 다른 프로세스가 쓴 변경도 다음 검색에서 반영된다.
@@ -137,7 +137,8 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
     ok = _filter(store, include_archived, category_id, only)
-    morph_on = bool(analyzer is not None and analyzer.ready(conn))
+    # 빈 검색(최근 목록)에는 형태소가 필요 없으므로 Kiwi 를 띄우지 않는다
+    morph_on = bool(q and analyzer is not None and analyzer.ready(conn))
     result = {"query": q, "total": 0, "groups": [], "hits": [], "similar": [],
               "morph": "on" if morph_on else "off", "elapsed_ms": 0.0}
     docs = _corpus(conn)

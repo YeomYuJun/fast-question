@@ -189,6 +189,19 @@ def test_stopwords_seeded_once(tmp_path):
     c.close()
 
 
+def test_connect_existing_db_takes_no_write_lock(tmp_path):
+    path = tmp_path / "kb.sqlite3"
+    holder = connect(path)
+    holder.execute("BEGIN IMMEDIATE")  # 다른 연결이 쓰기 잠금을 쥔 상태
+    t0 = time.perf_counter()
+    c = connect(path)
+    assert time.perf_counter() - t0 < 1.0
+    assert get_meta(c, "schema_version") == "1"
+    holder.execute("ROLLBACK")
+    c.close()
+    holder.close()
+
+
 def test_meta_roundtrip(conn):
     set_meta(conn, "x", "1")
     set_meta(conn, "x", "2")

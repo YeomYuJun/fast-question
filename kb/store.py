@@ -449,6 +449,29 @@ class Store:
                       "WHERE a_id = ? AND b_id = ? AND deleted_at IS NULL", (self.actor, self.actor, a, b))
         return {"a": a, "b": b, "linked": False}
 
+    # ---------- 감독 ----------
+
+    def oversight(self, limit: int = 50) -> dict:
+        """미검토(Claude 등록·수정분), 재확인 필요(근거 바뀜·판정 불가), 최근 변경."""
+        recent = []
+        for r in self.conn.execute(
+                "SELECT id, table_name, row_id, op, actor, at, before_json, after_json FROM revision "
+                "ORDER BY id DESC LIMIT ?", (limit,)):
+            data = json.loads(r["after_json"] or r["before_json"] or "{}")
+            if r["table_name"] == "qa_link":
+                label = f"{data.get('a_id')} ↔ {data.get('b_id')}"
+            elif r["table_name"] == "evidence":
+                label = f"{data.get('kind')} {data.get('path') or ''}".strip()
+            else:
+                label = data.get("question") or data.get("name") or data.get("term") or data.get("word") or ""
+            recent.append({"id": r["id"], "table": r["table_name"], "row_id": r["row_id"], "op": r["op"],
+                           "actor": r["actor"], "at": r["at"], "label": label})
+        return {
+            "unreviewed": self.search("", only="unreviewed", limit=200)["hits"],
+            "stale": self.search("", only="stale", limit=200)["hits"],
+            "recent": recent,
+        }
+
     # ---------- 이력 ----------
 
     def history(self, table: str, row_id: int, limit: int = 20) -> list[dict]:

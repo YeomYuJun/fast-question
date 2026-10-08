@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fast-question</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">fast-question</div>
+  <nav class="tabs">
+    <button data-tab="search" class="on">검색</button>
+    <button data-tab="new">새 Q&amp;A</button>
+    <button data-tab="cats">분류</button>
+    <button data-tab="dict">사전</button>
+    <button data-tab="watch">감독 <span id="watch-count" class="count"></span></button>
+  </nav>
+  <div id="status" class="status"></div>
+</header>
+
+<main>
+  <section id="tab-search" class="tab on">
+    <div class="searchbar">
+      <input id="q" type="search" placeholder="검색어  ( / 로 이동, Esc 로 지우기, ↑↓ Enter 로 열기 )" autocomplete="off" spellcheck="false">
+      <button id="opt-case" class="toggle" title="대소문자 구분">Aa</button>
+      <button id="opt-regex" class="toggle" title="정규식">.*</button>
+    </div>
+    <div class="filters">
+      <select id="f-cat" title="분류"><option value="">전체 분류</option></select>
+      <select id="f-only" title="상태">
+        <option value="">전체 상태</option>
+        <option value="unreviewed">미검토만</option>
+        <option value="stale">재확인 필요만</option>
+      </select>
+      <label><input type="checkbox" id="f-archived"> 보관 포함</label>
+    </div>
+    <div id="summary" class="summary"></div>
+    <div class="split">
+      <div id="results" class="results"></div>
+      <aside id="detail" class="detail"><p class="muted">항목을 고르면 여기에 열린다.</p></aside>
+    </div>
+  </section>
+
+  <section id="tab-new" class="tab">
+    <form id="new-form" class="form">
+      <label>분류 <select id="new-cat" required></select></label>
+      <label>질문 <span class="counter" data-for="new-q"></span>
+        <input id="new-q" maxlength="150" required placeholder="한 줄, 150자 이하">
+      </label>
+      <label>답변 <span class="counter" data-for="new-a"></span>
+        <textarea id="new-a" rows="3" required placeholder="1~2줄, 400자 이하. 사실만 쓴다."></textarea>
+      </label>
+      <fieldset>
+        <legend>근거 (선택)</legend>
+        <div class="row">
+          <select id="new-ev-kind">
+            <option value="">없음 (일반 지식)</option>
+            <option value="auto">파일·폴더 경로</option>
+            <option value="url">URL</option>
+            <option value="note">사람 확인 메모</option>
+          </select>
+          <input id="new-ev-value" placeholder="경로 / URL / 누가 어떻게 확인">
+          <input id="new-ev-anchor" placeholder="기준점 (심볼, 찾을 문자열) 선택">
+        </div>
+      </fieldset>
+      <div class="row"><button type="submit" class="primary">등록</button><span id="new-msg" class="muted"></span></div>
+      <div id="new-similar"></div>
+    </form>
+  </section>
+
+  <section id="tab-cats" class="tab">
+    <form id="cat-form" class="form row">
+      <input id="cat-name" placeholder="새 분류 이름" required>
+      <select id="cat-parent"><option value="">(대분류로 만들기)</option></select>
+      <input id="cat-desc" placeholder="설명 (선택)">
+      <button type="submit" class="primary">추가</button>
+    </form>
+    <div id="cat-tree"></div>
+  </section>
+
+  <section id="tab-dict" class="tab">
+    <div class="cols">
+      <div>
+        <h2>동의어</h2>
+        <p class="muted">같은 그룹의 단어는 검색할 때 서로 대신한다. 바꿔도 재색인하지 않는다.</p>
+        <form id="syn-form" class="row"><input id="syn-terms" placeholder="새 그룹: 쉼표로 2개 이상 (규칙, 룰, rule)" required><button class="primary">추가</button></form>
+        <div id="syn-list"></div>
+      </div>
+      <div>
+        <h2>사용자 단어</h2>
+        <p class="muted">형태소 분석이 잘못 쪼개는 고유명사를 한 단어로 묶는다. 바꾸면 재색인한다.</p>
+        <form id="uw-form" class="row">
+          <input id="uw-word" placeholder="단어 (공백 없이)" required>
+          <select id="uw-tag"><option>NNP</option><option>NNG</option><option>SL</option><option>XR</option><option>VV</option><option>VA</option></select>
+          <button class="primary">추가</button>
+        </form>
+        <div id="uw-list"></div>
+        <h2>불용어</h2>
+        <p class="muted">형태소 검색에서 질의 쪽에서만 뺀다.</p>
+        <form id="sw-form" class="row"><input id="sw-word" placeholder="단어" required><button class="primary">추가</button></form>
+        <div id="sw-list"></div>
+        <div id="reindex-box" class="row"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-watch" class="tab">
+    <div class="cols">
+      <div>
+        <h2>미검토 <span class="muted">(Claude 가 등록·수정한 항목)</span></h2>
+        <div id="w-unreviewed"></div>
+        <h2>재확인 필요 <span class="muted">(근거가 바뀌었거나 판정 못 함)</span></h2>
+        <div class="row"><button id="w-recheck">전체 근거 재검증</button><span id="w-recheck-msg" class="muted"></span></div>
+        <div id="w-stale"></div>
+      </div>
+      <div>
+        <h2>최근 변경</h2>
+        <div id="w-recent"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

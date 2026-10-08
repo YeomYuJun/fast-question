@@ -9,7 +9,7 @@ from tests.conftest import load_sample
 from tests.test_search import CASES as BASE_CASES
 from tests.test_search import synthetic
 
-# spec 부록 A.2 의 형태소 계층 기대값. (E·Y 는 형태소 계층이 없을 때와 같아야 한다)
+# 설계 문서(docs/specs/2026-10-08-qa-kb-design.md) 부록 A.2 의 형태소 계층 기대값. (E·Y 는 형태소 계층이 없을 때와 같아야 한다)
 MORPH = {
     "볼륨이": {1, 3},
     "재 암호화": {6},
@@ -98,6 +98,20 @@ def test_search_without_kiwi_falls_back(conn):
     assert tiers(res, "exact") == {3}
     assert s.analyzer.error and "kiwipiepy" in s.analyzer.error
     assert pending_count(conn) == 11  # Kiwi 가 없는 동안 쓴 행은 재색인 대상
+
+
+def test_empty_query_does_not_load_kiwi(conn):
+    calls = []
+
+    def counting():
+        calls.append(1)
+        raise ImportError("불러오면 안 된다")
+
+    s = Store(conn, "user", analyzer=Analyzer(loader=counting))
+    s.add_category("이관")
+    s.search("")
+    s.search("", only="unreviewed")
+    assert calls == []
 
 
 def test_update_rewrites_morph_index(store):
