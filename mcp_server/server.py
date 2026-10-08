@@ -12,11 +12,14 @@ from mcp.server.mcpserver import MCPServer
 from kb.db import connect
 from kb.errors import ConflictError, KbError
 from kb.morph import reindex
+from kb.rules import check_claude_qa
 from kb.store import Store
 
 INSTRUCTIONS = """\
-fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분을 검토하지 않으므로 아래 양식을 지킨다.
-- 질문은 한 줄(150자 이하)로, 대상 이름을 넣고 "?" 로 끝낸다. 답변은 1~2문장(400자 이하) 서술형이다. 사실만 쓰고 비유를 쓰지 않는다.
+fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분을 검토하지 않으므로 아래 양식을 지킨다. 규칙 원본은 ~/.claude/skills/qa/rules.md 다.
+- 질문은 한 줄(150자 이하)의 묻는 문장이다. 질문만 읽어도 대상이 식별되게 대상 이름을 넣고, 대상이 일반 명사면 시스템 이름을 붙인다.
+  답변은 1~2문장(400자 이하) 서술형이다. 사실만 쓰고 비유를 쓰지 않는다. 확인하지 않은 추정, 진행 상태, 비밀값·개인정보·IP 주소는 넣지 않는다.
+  답변 문장 수와 민감 정보는 kb_add·kb_update 가 검사해 위반이면 거부한다.
 - 분류는 kb_categories 를 보고 고른다. 맞는 것이 없으면 사용자에게 묻지 않고 kb_add_category 로 만든다(대분류 = 작업 주제, 중분류 = 대상 이름).
 - 로컬 파일에서 확인한 사실은 evidence 에 {"kind": "auto", "path": "<파일 절대경로>", "anchor": "<심볼이나 찾을 문자열>"} 를 단다.
   일반 지식(k8s 개념, 수학 등)은 근거 없이 쓴다. 사람에게 확인한 사실은 {"kind": "note", "text": "누가 어떻게 확인"} 을 단다.
@@ -97,6 +100,7 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
         evidence 형식: {"kind": "auto"|"file"|"dir", "path", "anchor"?}, {"kind": "git", "repo", "paths": [...]},
         {"kind": "githead", "repo"}, {"kind": "url", "url"}, {"kind": "note", "text"}."""
         def go(s: Store):
+            check_claude_qa(question, answer, evidence)
             res = s.add_qa(category, question, answer, evidence=evidence, links=links, force=force)
             if res["status"] == "similar_found":
                 return {"status": "similar_found", "similar": [_hit(i) for i in res["similar"]]}
@@ -107,8 +111,11 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
     def kb_update(id: int, version: int, question: str | None = None, answer: str | None = None,
                   category: str | None = None, reason: str | None = None) -> dict:
         """Q&A 를 고친다. version 은 kb_get 으로 읽은 값이다. 다르면 현재 값과 함께 거부된다."""
-        return run(lambda s: _detail(s.update_qa(id, version, question=question, answer=answer,
-                                                 category=category, note=reason)))
+        def go(s: Store):
+            check_claude_qa(question, answer)
+            return _detail(s.update_qa(id, version, question=question, answer=answer,
+                                       category=category, note=reason))
+        return run(go)
 
     @server.tool()
     def kb_archive(id: int, version: int, reason: str | None = None) -> dict:
@@ -129,6 +136,7 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
             if action == "add":
                 if id is None or not spec:
                     raise KbError("add 에는 id 와 spec 이 필요하다.")
+                check_claude_qa(evidence=[spec])
                 return _detail(s.add_evidence(id, spec))
             if action in ("recapture", "archive"):
                 if evidence_id is None:

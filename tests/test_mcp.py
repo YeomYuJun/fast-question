@@ -68,6 +68,29 @@ def test_validation_error_is_tool_error(server):
     assert err and "2줄까지" in text
 
 
+def test_format_rules_reject_claude_writes(server):
+    call(server, "kb_add_category", {"name": "이관"})
+    err, text = call(server, "kb_add", {"category": "이관", "question": "세 문장 답의 질문",
+                                        "answer": "하나다. 둘이다. 셋이다."})
+    assert err and "3문장" in text and "rules.md" in text
+    assert call(server, "kb_search", {"query": "세 문장"})[1]["total"] == 0
+
+    item = call(server, "kb_add", {"category": "이관", "question": "운영 DB 위치", "answer": "설정 파일에 있다."})[1]["item"]
+    err, text = call(server, "kb_update", {"id": item["id"], "version": item["version"],
+                                           "answer": "10.20.30.40 에 있다."})
+    assert err and "IP 주소" in text
+    err, text = call(server, "kb_evidence", {"action": "add", "id": item["id"],
+                                             "spec": {"kind": "note", "text": "hong@example.com 확인"}})
+    assert err and "이메일" in text
+
+
+def test_format_rules_do_not_apply_to_user_writes(db):
+    from kb.store import Store
+    s = Store(connect(db), "user")
+    s.add_category("이관")
+    assert s.add_qa("이관", "사람이 쓴 질문", "하나다. 둘이다. 셋이다.")["status"] == "created"
+
+
 def test_conflict_reports_current_value(server):
     call(server, "kb_add_category", {"name": "이관"})
     item = call(server, "kb_add", {"category": "이관", "question": "질문 하나", "answer": "답변 하나"})[1]["item"]
