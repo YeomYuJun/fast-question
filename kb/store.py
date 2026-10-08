@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Iterator, Literal
 
-from kb.db import NOW, tx
+from kb.db import BUMP, NOW, tx
 from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
 from kb.schema import AUDITED
 from kb.text import check_answer, check_name, check_question, clean
@@ -89,7 +89,7 @@ class Store:
 
     def _update(self, table: str, id: int, version: int | None, sets: dict, current) -> None:
         """version 이 None 이면 버전 검사 없이 고친다. 0행이면 충돌 또는 없음."""
-        cols = ", ".join(f"{k} = ?" for k in sets) + ", updated_by = ?"
+        cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}"
         params = list(sets.values()) + [self.actor, id]
         where = "id = ?"
         if version is not None:
@@ -197,7 +197,7 @@ class Store:
                 f"분류에 보관되지 않은 Q&A {n_qa}건, 하위 분류 {n_child}개가 있다. 먼저 옮기거나 보관한다.")
         with self._writing() as c:
             n = c.execute(
-                f"UPDATE category SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, change_note = ? "
+                f"UPDATE category SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, change_note = ?, {BUMP} "
                 "WHERE id = ? AND version = ? AND deleted_at IS NULL",
                 (self.actor, self.actor, note, id, version),
             ).rowcount
@@ -276,7 +276,7 @@ class Store:
         params = [self.actor] if archived else []
         with self._writing() as c:
             n = c.execute(
-                f"UPDATE qa SET {deleted}, updated_by = ?, change_note = ? WHERE id = ? AND version = ?",
+                f"UPDATE qa SET {deleted}, updated_by = ?, change_note = ?, {BUMP} WHERE id = ? AND version = ?",
                 params + [self.actor, note, id, version],
             ).rowcount
         if n == 0:
@@ -293,7 +293,7 @@ class Store:
         row = self._qa_row(id)
         if row["reviewed_at"] is None:
             with self._writing() as c:
-                c.execute(f"UPDATE qa SET reviewed_at = {NOW}, reviewed_by = ?, updated_by = ? WHERE id = ?",
+                c.execute(f"UPDATE qa SET reviewed_at = {NOW}, reviewed_by = ?, updated_by = ?, {BUMP} WHERE id = ?",
                           (self.actor, self.actor, id))
         return self.get_qa(id)
 
@@ -319,7 +319,7 @@ class Store:
     def unlink(self, a: int, b: int) -> dict:
         a, b = sorted((a, b))
         with self._writing() as c:
-            c.execute(f"UPDATE qa_link SET deleted_at = {NOW}, deleted_by = ?, updated_by = ? "
+            c.execute(f"UPDATE qa_link SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                       "WHERE a_id = ? AND b_id = ? AND deleted_at IS NULL", (self.actor, self.actor, a, b))
         return {"a": a, "b": b, "linked": False}
 

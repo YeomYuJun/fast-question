@@ -1,13 +1,14 @@
 """DDL 생성. 감사 대상 테이블마다 같은 감독 트리거를 만든다.
 
 감독 규칙(어느 진입점으로 쓰든 DB 가 강제한다)
-- 생성 정보는 바꿀 수 없다. 수정 시각과 버전은 DB 가 정한다(<t>_guard, <t>_touch).
+- 생성 정보는 바꿀 수 없다. UPDATE 는 BUMP 를 함께 써야 하고, 버전은 1씩만, 수정 시각은 DB 현재 시각만 받는다(<t>_guard).
 - 모든 INSERT·UPDATE 는 revision 에 전후 값이 남는다. revision 은 추가만 된다.
 - 물리 DELETE 는 거부한다. 삭제는 deleted_at 을 채우는 보관 처리다.
 """
 
 SCHEMA_VERSION = "1"
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+BUMP = f"version = version + 1, updated_at = {NOW}"
 ACTORS = "('user','claude','system')"
 
 # 테이블 -> revision 에 남길 열 (공통 열 deleted_at, deleted_by, change_note 는 자동 추가)
@@ -172,23 +173,20 @@ def _json(prefix: str, cols: list[str]) -> str:
 
 
 def _audit_triggers(table: str, cols: list[str]) -> str:
+    # 모든 UPDATE 는 BUMP(버전 +1, 수정 시각 = DB 현재 시각)를 함께 써야 한다.
+    # 'now' 는 한 문장을 실행하는 동안 같은 값이라 SET 의 값과 트리거의 값이 일치한다.
     return f"""
 CREATE TRIGGER IF NOT EXISTS {table}_guard BEFORE UPDATE ON {table}
 WHEN NEW.created_at IS NOT OLD.created_at OR NEW.created_by IS NOT OLD.created_by
-  OR ((NEW.updated_at IS NOT OLD.updated_at) <> (NEW.version IS NOT OLD.version))
+  OR NEW.version IS NOT OLD.version + 1 OR NEW.updated_at IS NOT {NOW}
 BEGIN SELECT RAISE(ABORT, 'managed_column'); END;
-
-CREATE TRIGGER IF NOT EXISTS {table}_touch AFTER UPDATE ON {table}
-WHEN NEW.version = OLD.version
-BEGIN UPDATE {table} SET updated_at = {NOW}, version = OLD.version + 1 WHERE id = NEW.id; END;
 
 CREATE TRIGGER IF NOT EXISTS {table}_rev_ins AFTER INSERT ON {table} BEGIN
     INSERT INTO revision(table_name, row_id, op, before_json, after_json, actor)
     VALUES ('{table}', NEW.id, 'insert', NULL, {_json('NEW', cols)}, NEW.created_by);
 END;
 
-CREATE TRIGGER IF NOT EXISTS {table}_rev_upd AFTER UPDATE ON {table}
-WHEN NEW.version = OLD.version BEGIN
+CREATE TRIGGER IF NOT EXISTS {table}_rev_upd AFTER UPDATE ON {table} BEGIN
     INSERT INTO revision(table_name, row_id, op, before_json, after_json, actor)
     VALUES ('{table}', NEW.id,
         CASE WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN 'archive'

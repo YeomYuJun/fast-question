@@ -5,9 +5,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from kb.schema import NOW, ddl
+from kb.schema import BUMP, NOW, ddl
 
-__all__ = ["NOW", "connect", "tx", "get_meta", "set_meta"]
+__all__ = ["BUMP", "NOW", "connect", "tx", "get_meta", "set_meta"]
 
 
 def _regexp(pattern: str, value: str | None) -> bool:

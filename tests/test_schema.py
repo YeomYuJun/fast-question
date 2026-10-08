@@ -10,6 +10,9 @@ from kb.errors import ValidationError, from_sqlite
 from kb.text import check_answer, check_name, check_question
 
 
+BUMP = "version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+
+
 def add_cat(conn, name, parent=None, actor="user"):
     cur = conn.execute(
         "INSERT INTO category(name, parent_id, created_by, updated_by) VALUES (?,?,?,?)",
@@ -35,7 +38,7 @@ def test_update_sets_time_and_version_by_db(conn):
     before = row(conn, "category", cid)
     time.sleep(0.01)
 
-    conn.execute("UPDATE category SET name = '나', updated_by = 'claude' WHERE id = ?", (cid,))
+    conn.execute("UPDATE category SET name = '나', updated_by = 'claude', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (cid,))
 
     after = row(conn, "category", cid)
     assert after["version"] == before["version"] + 1
@@ -43,17 +46,34 @@ def test_update_sets_time_and_version_by_db(conn):
     assert after["created_at"] == before["created_at"]
 
 
-def test_direct_timestamp_update_rejected(conn):
+@pytest.mark.parametrize(
+    "sets",
+    [
+        "updated_at = '2000-01-01'",
+        "name = '나'",  # 버전·시각을 올리지 않은 수정
+        "name = '나', version = version + 1, updated_at = '2000-01-01T00:00:00.000Z'",  # 시각 위조
+        "name = '나', version = version + 2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+        f"created_by = 'claude', {BUMP}",
+    ],
+)
+def test_unmanaged_update_rejected(conn, sets):
     cid = add_cat(conn, "가")
     with pytest.raises(sqlite3.IntegrityError, match="managed_column"):
-        conn.execute("UPDATE category SET updated_at = '2000-01-01' WHERE id = ?", (cid,))
-    with pytest.raises(sqlite3.IntegrityError, match="managed_column"):
-        conn.execute("UPDATE category SET created_by = 'claude' WHERE id = ?", (cid,))
+        conn.execute(f"UPDATE category SET {sets} WHERE id = ?", (cid,))
+
+
+def test_rapid_updates_within_same_millisecond(conn):
+    cid = add_cat(conn, "가")
+    for i in range(300):
+        conn.execute(f"UPDATE category SET name = ?, updated_by = 'user', {BUMP} WHERE id = ?", (f"이름{i}", cid))
+    assert row(conn, "category", cid)["version"] == 301
+    n = conn.execute("SELECT count(*) FROM revision WHERE table_name = 'category' AND row_id = ?", (cid,)).fetchone()[0]
+    assert n == 301
 
 
 def test_revision_records_insert_and_update_with_actor(conn):
     cid = add_cat(conn, "가", actor="claude")
-    conn.execute("UPDATE category SET name = '나', updated_by = 'user', change_note = '오타' WHERE id = ?", (cid,))
+    conn.execute("UPDATE category SET name = '나', updated_by = 'user', change_note = '오타', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (cid,))
 
     revs = conn.execute(
         "SELECT op, actor, before_json, after_json FROM revision WHERE table_name = 'category' AND row_id = ? ORDER BY id",
@@ -70,10 +90,10 @@ def test_archive_and_restore_ops(conn):
     cid = add_cat(conn, "가")
     qid = add_qa(conn, cid)
     conn.execute(
-        "UPDATE qa SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), deleted_by = 'user', updated_by = 'user' WHERE id = ?",
+        "UPDATE qa SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), deleted_by = 'user', updated_by = 'user', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?",
         (qid,),
     )
-    conn.execute("UPDATE qa SET deleted_at = NULL, deleted_by = NULL, updated_by = 'claude' WHERE id = ?", (qid,))
+    conn.execute("UPDATE qa SET deleted_at = NULL, deleted_by = NULL, updated_by = 'claude', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (qid,))
 
     ops = [r["op"] for r in conn.execute("SELECT op FROM revision WHERE table_name = 'qa' ORDER BY id")]
     assert ops == ["insert", "archive", "restore"]
@@ -107,7 +127,7 @@ def test_category_depth_limited_to_two(conn):
         add_cat(conn, "소", parent=mid)
     other = add_cat(conn, "다른 대")
     with pytest.raises(sqlite3.IntegrityError, match="category_depth"):
-        conn.execute("UPDATE category SET parent_id = ?, updated_by = 'user' WHERE id = ?", (other, top))
+        conn.execute("UPDATE category SET parent_id = ?, updated_by = 'user', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (other, top))
 
 
 def test_category_name_unique_under_same_parent(conn):
@@ -136,7 +156,7 @@ def test_qa_constraints(conn, question, answer, name):
 def test_fts_follows_question_update(conn):
     cid = add_cat(conn, "가")
     qid = add_qa(conn, cid, q="원래 질문 내용", a="답변 내용")
-    conn.execute("UPDATE qa SET question = '바뀐 질문 내용', updated_by = 'user' WHERE id = ?", (qid,))
+    conn.execute("UPDATE qa SET question = '바뀐 질문 내용', updated_by = 'user', version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?", (qid,))
 
     hit = lambda t: [r[0] for r in conn.execute("SELECT rowid FROM qa_fts WHERE qa_fts MATCH ?", (f'"{t}"',))]
     assert hit("바뀐 질") == [qid]
