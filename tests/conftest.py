@@ -30,3 +30,19 @@ def conn(tmp_path):
     c = connect(tmp_path / "kb.sqlite3")
     yield c
     c.close()
+
+
+def load_sample(store, synonyms=True):
+    """spec 부록 A 데이터를 넣는다. 질문끼리 비슷해도 넣도록 force 를 쓴다."""
+    for path in dict.fromkeys(p for p, _, _ in SAMPLE_QA):
+        top, mid = [s.strip() for s in path.split(">")]
+        tops = {c["name"]: c for c in store.categories()}
+        if top not in tops:
+            store.add_category(top)
+        store.add_category(mid, parent=top)
+    ids = [store.add_qa(p, q, a, force=True)["item"]["id"] for p, q, a in SAMPLE_QA]
+    assert ids == list(range(1, 12))
+    if synonyms:
+        for group in SYNONYM_GROUPS:
+            store.dict_action("synonym_add", terms=group)
+    return ids
