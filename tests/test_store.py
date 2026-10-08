@@ -43,7 +43,7 @@ def test_third_level_category_rejected_in_korean(user):
         user.add_category("소", parent="대 > 중")
 
 
-def test_add_qa_records_actor_and_review_state(user, claude):
+def test_add_qa_records_actor(user, claude):
     user.add_category("이관")
     res = claude.add_qa("이관", "  .part 를 쓰는 이유 ", "다 쓴 뒤 rename 으로 확정한다.")
 
@@ -51,24 +51,20 @@ def test_add_qa_records_actor_and_review_state(user, claude):
     assert res["status"] == "created"
     assert item["question"] == ".part 를 쓰는 이유"
     assert item["created_by"] == "claude"
-    assert item["reviewed"] is False
     assert item["evidence_state"] == "none"
 
-    reviewed = user.review_qa(item["id"])
-    assert reviewed["reviewed"] is True
-    assert reviewed["reviewed_by"] == "user"
 
-
-def test_user_writes_count_as_reviewed_and_claude_edits_reset_review(user, claude):
+def test_review_columns_are_not_used(user, claude, conn):
+    """사람 검토 기능은 없다(spec §2 D10). reviewed_at·reviewed_by 열은 남아 있지만 어느 쓰기도 채우지 않는다."""
     user.add_category("이관")
     mine = user.add_qa("이관", "사용자가 쓴 질문", "사용자가 쓴 답변")["item"]
-    assert mine["reviewed"] is True and mine["reviewed_by"] == "user"
-
     edited = claude.update_qa(mine["id"], mine["version"], answer="Claude 가 고친 답변")
-    assert edited["reviewed"] is False
+    user.update_qa(edited["id"], edited["version"], answer="사용자가 다시 고친 답변")
+    claude.add_qa("이관", "Claude 가 쓴 질문", "Claude 가 쓴 답변")
 
-    again = user.update_qa(edited["id"], edited["version"], answer="사용자가 다시 고친 답변")
-    assert again["reviewed"] is True
+    assert conn.execute("SELECT count(*) FROM qa WHERE reviewed_at IS NOT NULL OR reviewed_by IS NOT NULL").fetchone()[0] == 0
+    assert not {"reviewed", "reviewed_at", "reviewed_by"} & set(user.get_qa(mine["id"]))
+    assert not hasattr(user, "review_qa") and not hasattr(user, "oversight")
 
 
 def test_similar_question_blocks_until_forced(user):

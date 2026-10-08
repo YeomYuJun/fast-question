@@ -23,8 +23,8 @@ fast-question 은 사용자의 질문·답변 지식 DB 다.
 - kb_search 가 0건이면 표현을 바꿔 두 번까지 다시 검색한다(형태소·동의어로도 못 찾는 표현이 있다).
 """
 
-HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "evidence_state", "reviewed",
-            "archived", "updated_at", "version")
+HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "evidence_state", "archived",
+            "created_by", "updated_at", "version")
 
 
 def _hit(h: dict) -> dict:
@@ -105,8 +105,7 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
     @server.tool()
     def kb_update(id: int, version: int, question: str | None = None, answer: str | None = None,
                   category: str | None = None, reason: str | None = None) -> dict:
-        """Q&A 를 고친다. version 은 kb_get 으로 읽은 값이다. 다르면 현재 값과 함께 거부된다.
-        Claude 가 고친 항목은 사용자 검토 전까지 미검토로 표시된다."""
+        """Q&A 를 고친다. version 은 kb_get 으로 읽은 값이다. 다르면 현재 값과 함께 거부된다."""
         return run(lambda s: _detail(s.update_qa(id, version, question=question, answer=answer,
                                                  category=category, note=reason)))
 

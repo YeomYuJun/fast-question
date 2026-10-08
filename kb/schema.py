@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS qa (
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
     evidence_state TEXT NOT NULL DEFAULT 'none',
-    reviewed_at TEXT,
-    reviewed_by TEXT,{COMMON},
+    reviewed_at TEXT,  -- 쓰지 않음(사람 검토 기능 제거). 테이블을 다시 만들지 않으려고 남겨 둔다
+    reviewed_by TEXT,  -- 쓰지 않음{COMMON},
     CONSTRAINT qa_question_len CHECK (length(trim(question)) BETWEEN 1 AND 150),
     CONSTRAINT qa_question_line CHECK (instr(question, char(10)) = 0 AND instr(question, char(13)) = 0),
     CONSTRAINT qa_answer_len CHECK (length(trim(answer)) BETWEEN 1 AND 400),

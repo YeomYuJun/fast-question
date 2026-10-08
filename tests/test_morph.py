@@ -110,7 +110,6 @@ def test_empty_query_does_not_load_kiwi(conn):
     s = Store(conn, "user", analyzer=Analyzer(loader=counting))
     s.add_category("이관")
     s.search("")
-    s.search("", only="unreviewed")
     assert calls == []
 
 

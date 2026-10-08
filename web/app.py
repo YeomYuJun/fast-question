@@ -107,7 +107,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         qp = r.query_params
         return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
                         include_archived=_flag(r, "archived"), case_sensitive=_flag(r, "case"),
-                        regex=_flag(r, "regex"), only=qp.get("only") or None, limit=int(qp.get("limit", 200)))
+                        regex=_flag(r, "regex"), limit=int(qp.get("limit", 200)))
 
     def dict_post(s: Store, _, b: dict):
         b = dict(b)
@@ -154,7 +154,6 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             pid(r), b["version"], note=b.get("note"))), methods=["POST"]),
         Route("/api/qa/{id:int}/restore", api(lambda s, r, b: s.restore_qa(
             pid(r), b["version"], note=b.get("note"))), methods=["POST"]),
-        Route("/api/qa/{id:int}/review", api(lambda s, r, b: s.review_qa(pid(r))), methods=["POST"]),
         Route("/api/qa/{id:int}/links", api(lambda s, r, b: (
             s.unlink(pid(r), int(b["other"])) if b.get("remove") else s.link(pid(r), int(b["other"])))),
             methods=["POST"]),
@@ -166,7 +165,6 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/dict", api(lambda s, r, b: s.dictionary())),
         Route("/api/dict", api(dict_post), methods=["POST"]),
         Route("/api/reindex", api(lambda s, r, b: {"reindexed": reindex(s.conn, analyzer)}), methods=["POST"]),
-        Route("/api/oversight", api(lambda s, r, b: s.oversight())),
         Route("/api/status", api(status)),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]

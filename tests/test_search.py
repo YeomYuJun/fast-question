@@ -125,12 +125,17 @@ def test_category_filter_includes_children(store):
     assert {h["id"] for h in store.search("이유", category_id=top)["hits"]} == {1, 2, 3, 10}
 
 
-def test_empty_query_lists_recent_and_filters(store, conn):
+def test_empty_query_lists_recent(store, conn):
     res = store.search("")
     assert len(res["hits"]) == 11 and all(h["tier"] == "recent" for h in res["hits"])
     claude = Store(conn, "claude")
     claude.add_qa("일반 지식 > k8s", "Service 는 무엇인가", "Pod 집합에 고정 주소를 주는 객체다.")
-    assert [h["question"] for h in store.search("", only="unreviewed")["hits"]] == ["Service 는 무엇인가"]
+    assert store.search("")["hits"][0]["question"] == "Service 는 무엇인가"
+
+
+def test_state_filter_is_gone(store):
+    with pytest.raises(TypeError):
+        store.search("", only="unreviewed")
 
 
 WORDS = ("NAS 볼륨 용량 rename 원자적 경로 암호화 ARIA PETRA 복호화 이관 방화벽 설정 Pod 쓰기 확정 임시 "

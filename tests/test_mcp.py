@@ -44,12 +44,13 @@ def test_add_then_search_as_claude(server):
     err, res = call(server, "kb_add", {"category": "이관", "question": ".part 를 쓰는 이유",
                                        "answer": "다 쓴 뒤 rename 으로 확정한다."})
     assert not err and res["status"] == "created"
-    assert res["item"]["created_by"] == "claude" and res["item"]["reviewed"] is False
+    assert res["item"]["created_by"] == "claude" and "reviewed" not in res["item"]
 
     err, found = call(server, "kb_search", {"query": "rename"})
     assert not err
     assert [h["id"] for h in found["hits"]] == [res["item"]["id"]]
     assert found["hits"][0]["tier"] == "exact"
+    assert "reviewed" not in found["hits"][0]
     assert "spans" not in found["hits"][0]
 
 

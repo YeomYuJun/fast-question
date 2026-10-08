@@ -20,7 +20,7 @@ Actor = Literal["user", "claude", "system"]
 ACTORS = ("user", "claude", "system")
 SIMILAR_MIN = 0.6
 
-QA_COLS = ("id, category_id, question, answer, evidence_state, reviewed_at, reviewed_by, "
+QA_COLS = ("id, category_id, question, answer, evidence_state, "
            "deleted_at, created_at, created_by, updated_at, updated_by, version")
 
 
@@ -65,9 +65,6 @@ class Store:
             "question": row["question"],
             "answer": row["answer"],
             "evidence_state": row["evidence_state"],
-            "reviewed": row["reviewed_at"] is not None,
-            "reviewed_at": row["reviewed_at"],
-            "reviewed_by": row["reviewed_by"],
             "archived": row["deleted_at"] is not None,
             "created_at": row["created_at"],
             "created_by": row["created_by"],
@@ -91,10 +88,9 @@ class Store:
         rows = {r["id"]: r for r in self.conn.execute(f"SELECT {QA_COLS} FROM qa WHERE id IN ({marks})", ids)}
         return [self._item(rows[i], paths) for i in ids if i in rows]
 
-    def _update(self, table: str, id: int, version: int | None, sets: dict, current, raw: str = "",
-                after=None) -> None:
+    def _update(self, table: str, id: int, version: int | None, sets: dict, current, after=None) -> None:
         """version 이 None 이면 버전 검사 없이 고친다. 0행이면 충돌 또는 없음."""
-        cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}{raw}"
+        cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}"
         params = list(sets.values()) + [self.actor, id]
         where = "id = ?"
         if version is not None:
@@ -243,10 +239,9 @@ class Store:
         verdicts = ["external" if e["kind"] in ("url", "note") else "same" for e in captured]
         morph = self._morph(q, a)
         with self._writing() as c:
-            reviewed = f"{NOW}, 'user'" if self.actor == "user" else "NULL, NULL"
             qid = c.execute(
-                "INSERT INTO qa(category_id, question, answer, evidence_state, reviewed_at, reviewed_by, "
-                f"created_by, updated_by) VALUES (?,?,?,?,{reviewed},?,?)",
+                "INSERT INTO qa(category_id, question, answer, evidence_state, created_by, updated_by) "
+                "VALUES (?,?,?,?,?,?)",
                 (cid, q, a, overall_state(verdicts), self.actor, self.actor),
             ).lastrowid
             for e, v in zip(captured, verdicts):
@@ -382,9 +377,6 @@ class Store:
         if not sets:
             raise ValidationError("바꿀 값이 없다.")
         sets["change_note"] = note
-        # 사용자가 고치면 검토된 것으로, Claude 가 고치면 다시 미검토로 둔다
-        raw = {"user": f", reviewed_at = {NOW}, reviewed_by = 'user'",
-               "claude": ", reviewed_at = NULL, reviewed_by = NULL"}.get(self.actor, "")
         after = None
         if "question" in sets or "answer" in sets:
             row = self._qa_row(id)
@@ -393,7 +385,7 @@ class Store:
                 after = lambda c: write_index(c, id, *morph)  # noqa: E731
             else:  # 분석기가 없으면 옛 색인을 지워 재색인 대상으로 둔다
                 after = lambda c: c.execute("DELETE FROM qa_morph_fts WHERE rowid = ?", (id,))  # noqa: E731
-        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), raw, after)
+        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), after=after)
         return self.get_qa(id)
 
     def _set_archived(self, id: int, version: int, archived: bool, note: str | None) -> dict:
@@ -415,14 +407,6 @@ class Store:
 
     def restore_qa(self, id: int, version: int, note: str | None = None) -> dict:
         return self._set_archived(id, version, False, note)
-
-    def review_qa(self, id: int) -> dict:
-        row = self._qa_row(id)
-        if row["reviewed_at"] is None:
-            with self._writing() as c:
-                c.execute(f"UPDATE qa SET reviewed_at = {NOW}, reviewed_by = ?, updated_by = ?, {BUMP} WHERE id = ?",
-                          (self.actor, self.actor, id))
-        return self.get_qa(id)
 
     # ---------- 관련 질문 ----------
 
@@ -449,29 +433,6 @@ class Store:
             c.execute(f"UPDATE qa_link SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                       "WHERE a_id = ? AND b_id = ? AND deleted_at IS NULL", (self.actor, self.actor, a, b))
         return {"a": a, "b": b, "linked": False}
-
-    # ---------- 감독 ----------
-
-    def oversight(self, limit: int = 50) -> dict:
-        """미검토(Claude 등록·수정분), 재확인 필요(근거 바뀜·판정 불가), 최근 변경."""
-        recent = []
-        for r in self.conn.execute(
-                "SELECT id, table_name, row_id, op, actor, at, before_json, after_json FROM revision "
-                "ORDER BY id DESC LIMIT ?", (limit,)):
-            data = json.loads(r["after_json"] or r["before_json"] or "{}")
-            if r["table_name"] == "qa_link":
-                label = f"{data.get('a_id')} ↔ {data.get('b_id')}"
-            elif r["table_name"] == "evidence":
-                label = f"{data.get('kind')} {data.get('path') or ''}".strip()
-            else:
-                label = data.get("question") or data.get("name") or data.get("term") or data.get("word") or ""
-            recent.append({"id": r["id"], "table": r["table_name"], "row_id": r["row_id"], "op": r["op"],
-                           "actor": r["actor"], "at": r["at"], "label": label})
-        return {
-            "unreviewed": self.search("", only="unreviewed", limit=200)["hits"],
-            "stale": self.search("", only="stale", limit=200)["hits"],
-            "recent": recent,
-        }
 
     # ---------- 이력 ----------
 

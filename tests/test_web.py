@@ -42,7 +42,7 @@ def test_index_serves_html(client):
 
 def test_create_and_search_grouped(client):
     item = add_basics(client)
-    assert item["created_by"] == "user" and item["reviewed"] is True
+    assert item["created_by"] == "user" and "reviewed" not in item
     res = client.get("/api/search", params={"q": "rename"}).json()
     assert [h["id"] for h in res["hits"]] == [item["id"]]
     assert res["groups"][0]["category_path"] == "이관 > NAS"
@@ -109,19 +109,10 @@ def test_dictionary_endpoints(client):
     assert client.get("/api/dict").json()["stopwords"]
 
 
-def test_oversight_and_review(client, db, analyzer):
-    add_basics(client)
-    conn = connect(db)
-    claude = Store(conn, "claude", analyzer)
-    mine = claude.add_qa("이관", "Claude 가 등록한 질문", "Claude 가 등록한 답변")["item"]
-    conn.close()
-
-    over = client.get("/api/oversight").json()
-    assert [i["id"] for i in over["unreviewed"]] == [mine["id"]]
-    assert over["recent"][0]["actor"] == "claude"
-
-    assert client.post(f"/api/qa/{mine['id']}/review").json()["reviewed"] is True
-    assert client.get("/api/oversight").json()["unreviewed"] == []
+def test_review_and_oversight_endpoints_are_gone(client):
+    item = add_basics(client)
+    assert client.get("/api/oversight").status_code == 404
+    assert client.post(f"/api/qa/{item['id']}/review").status_code in (404, 405)
 
 
 def test_app_start_warms_up_analyzer(db):
@@ -150,8 +141,6 @@ def test_search_options_and_filters(client):
     add_basics(client)
     r = client.get("/api/search", params={"q": r"\.part", "regex": "1"}).json()
     assert r["total"] == 1
-    assert client.get("/api/search", params={"q": "", "only": "unreviewed"}).json()["hits"] == []
-    assert client.get("/api/search", params={"q": "x", "only": "bad"}).status_code == 400
 
 
 @pytest.mark.parametrize("headers", [

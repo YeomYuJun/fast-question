@@ -30,8 +30,6 @@ class Doc(NamedTuple):
     updated_at: str
     category_id: int
     archived: bool
-    unreviewed: bool
-    evidence_state: str
 
 
 _CACHE: dict[str, tuple[tuple, dict[int, Doc]]] = {}
@@ -51,10 +49,9 @@ def _corpus(conn) -> dict[int, Doc]:
         return cached[1]
     with _LOCK:
         docs = {
-            r[0]: Doc(r[1], r[2], _flat(r[1]) + "\0" + _flat(r[2]), r[3], r[4], bool(r[5]), bool(r[6]), r[7])
+            r[0]: Doc(r[1], r[2], _flat(r[1]) + "\0" + _flat(r[2]), r[3], r[4], bool(r[5]))
             for r in conn.execute(
-                "SELECT id, question, answer, updated_at, category_id, deleted_at IS NOT NULL, "
-                "reviewed_at IS NULL, evidence_state FROM qa")
+                "SELECT id, question, answer, updated_at, category_id, deleted_at IS NOT NULL FROM qa")
         }
         _CACHE[db] = (stamp, docs)
     return docs
@@ -85,9 +82,7 @@ def _all_of(conn, docs, groups: list[list[str]]) -> set[int]:
     return ids or set()
 
 
-def _filter(store: "Store", include_archived: bool, category_id: int | None, only: str | None):
-    if only not in (None, "unreviewed", "stale"):
-        raise ValidationError(f"알 수 없는 필터다: {only}")
+def _filter(store: "Store", include_archived: bool, category_id: int | None):
     cats = None
     if category_id is not None:
         cats = {category_id} | {r[0] for r in store.conn.execute(
@@ -96,13 +91,7 @@ def _filter(store: "Store", include_archived: bool, category_id: int | None, onl
     def ok(d: Doc) -> bool:
         if d.archived and not include_archived:
             return False
-        if cats is not None and d.category_id not in cats:
-            return False
-        if only == "unreviewed":
-            return d.unreviewed
-        if only == "stale":
-            return d.evidence_state in ("stale", "unknown")
-        return True
+        return cats is None or d.category_id in cats
     return ok
 
 
@@ -132,11 +121,11 @@ def _bigrams(text: str) -> set[str]:
 
 def search(store: "Store", query: str, *, analyzer=None, category_id: int | None = None,
            include_archived: bool = False, case_sensitive: bool = False, regex: bool = False,
-           only: str | None = None, limit: int = 200) -> dict:
+           limit: int = 200) -> dict:
     t0 = time.perf_counter()
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
-    ok = _filter(store, include_archived, category_id, only)
+    ok = _filter(store, include_archived, category_id)
     # 빈 검색(최근 목록)에는 형태소가 필요 없으므로 Kiwi 를 띄우지 않는다
     morph_on = bool(q and analyzer is not None and analyzer.ready(conn))
     result = {"query": q, "total": 0, "groups": [], "hits": [], "similar": [],
@@ -149,7 +138,7 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
 
     if not q:
         ids = sorted((i for i, d in docs.items() if ok(d)), key=lambda i: (docs[i].updated_at, i), reverse=True)
-        ids = ids[:limit if only else RECENT_LIMIT]
+        ids = ids[:min(limit, RECENT_LIMIT)]
         result["hits"] = [dict(i, tier="recent", in_question=False, spans={"question": [], "answer": []})
                           for i in store.items(ids)]
         result["total"] = len(ids)
