@@ -11,7 +11,7 @@ def test_demo_db_has_every_screen_state(tmp_path):
     assert cfg["port"] == 8799
     conn = connect(cfg["db_path"])
     states = {r[0] for r in conn.execute("SELECT evidence_state FROM qa")}
-    assert {"none", "external", "stale"} <= states  # 재확인 태그가 보이는 항목이 있다
+    assert {"none", "external", "stale"} <= states  # 근거가 바뀐 항목이 있다
     authors = {r[0] for r in conn.execute("SELECT created_by FROM qa")}
     assert authors == {"user", "claude"}
     assert conn.execute("SELECT count(*) FROM qa_link").fetchone()[0] >= 1

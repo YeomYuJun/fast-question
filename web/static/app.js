@@ -61,7 +61,7 @@ function toast(msg, opt = {}) {
   fill(t, el("span", {}, msg), action);
   t.className = "toast on" + (opt.err ? " err" : "");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.className = "toast"), opt.err ? 6000 : action ? 8000 : 2500);
+  toastTimer = setTimeout(() => (t.className = "toast"), opt.err || action ? 6000 : 2500);
 }
 
 // ---------- 표시 형식 ----------
@@ -104,6 +104,9 @@ const state = {
   details: new Map(), // id -> 상세(근거·연결·이력)
   pin: null, // 주소(#qa/id)로 연 항목. 최근 목록에 없으면 끼워 넣는다
   counts: null, // 검색어가 있을 때 분류별 일치 건수
+  empty: false, // 마지막 검색이 0건이었다
+  shut: new Set(), // 접은 묶음 키
+  histOpen: new Set(), // 이력을 전부 펼친 항목 id
 };
 const rows = new Map(); // id -> 행 요소(row.hit 에 검색 결과 항목)
 const groups = new Map(); // 묶음 키 -> 묶음 요소
@@ -258,11 +261,13 @@ function render(res) {
     box.append(g);
     const container = g.querySelector(".grp-rows");
     for (const h of hits) container.append(rowEl(h));
+    markLast(g);
   }
 
   summarize(res, similar, order.length);
   const empty = !res.hits.length;
-  $("#empty").hidden = !empty;
+  state.empty = empty;
+  $("#empty").hidden = !empty || Boolean($("#new-slot").firstChild);
   if (empty) {
     $("#empty-msg").textContent = res.query
       ? (similar ? "일치하는 질문이 없습니다. 비슷한 결과를 아래에 보입니다." : "일치하는 질문이 없습니다.")
@@ -284,19 +289,43 @@ function summarize(res, similar, nGroups) {
   $("#sum-ms").textContent = `${res.elapsed_ms} ms`;
 }
 
+// 묶음 머리는 접기·펴기 버튼이다. 접은 묶음의 행은 위아래 화살표 이동에서 건너뛴다(visibleIds)
 function groupEl(key, path, n) {
   let g = groups.get(key);
   if (!g) {
-    g = el("section", { class: "grp" }, el("div", { class: "grp-head" }), el("div", { class: "grp-rows" }));
+    const head = el("button", { class: "grp-head", type: "button", onclick: () => fold(key) });
+    g = el("section", { class: "grp" }, head,
+      el("div", { class: "gbody" }, el("div", { class: "gin" }, el("div", { class: "grp-rows" }))));
     groups.set(key, g);
   }
   const i = path.indexOf(" > ");
   fill(g.firstChild,
+    el("span", { class: "chev", "aria-hidden": "true" }, "▼"),
     i >= 0 ? el("span", { class: "top-name" }, path.slice(0, i) + " /") : null,
     el("span", {}, i >= 0 ? path.slice(i + 3) : path),
     el("span", { class: "rule" }),
     el("span", { class: "grp-n" }, n));
+  paintFold(key, g);
   return g;
+}
+
+function fold(key) {
+  if (state.shut.has(key)) state.shut.delete(key);
+  else state.shut.add(key);
+  paintFold(key, groups.get(key));
+}
+
+function paintFold(key, g) {
+  const shut = state.shut.has(key);
+  g.classList.toggle("shut", shut);
+  g.firstChild.setAttribute("aria-expanded", String(!shut));
+  g.firstChild.title = shut ? "펴기" : "접기";
+}
+
+// 묶음 마지막 행에는 구분선을 긋지 않는다(다음 묶음 머리의 줄과 겹친다)
+function markLast(g) {
+  const live = [...g.querySelectorAll(".row")].filter((r) => !r.classList.contains("out"));
+  live.forEach((r, i) => r.classList.toggle("last", i === live.length - 1));
 }
 
 function rowEl(h) {
@@ -317,6 +346,8 @@ function rowEl(h) {
 function collapse(id, r) {
   if (r.classList.contains("out")) return;
   r.classList.add("out");
+  const g = r.closest(".grp");
+  if (g) markLast(g);
   if (state.sel === id) {
     state.sel = null;
     setHash(null);
@@ -341,19 +372,20 @@ function repaint(id) {
   if (r) paint(r);
 }
 
+// 행은 날짜만 오른쪽에 둔다. 작성자·근거 상태·유사도는 데이터에만 있고 행에 내지 않는다
 function viewEl(h) {
-  const by = h.created_by;
   const t = kst(h.updated_at);
-  return el("div", { class: "view" },
-    el("button", { class: "rowbtn", type: "button", "aria-expanded": String(state.sel === h.id), onclick: () => toggle(h.id) },
+  const open = state.sel === h.id;
+  const aSpans = (h.spans && h.spans.answer) || [];
+  // 검색어가 답변 81자 이후에만 있으면 두 줄로 자르면 일치 부분이 가려진다
+  const deepHit = aSpans.length > 0 && aSpans.every(([s]) => s > 80);
+  return el("button", { class: "rowbtn", type: "button", "aria-expanded": String(open), onclick: () => toggle(h.id) },
+    el("span", { class: "qa" },
       el("span", { class: "line" }, el("span", { class: "tag-q" }, "Q"),
         el("span", { class: "qtext" }, marked(h.question, h.spans && h.spans.question))),
       el("span", { class: "line" }, el("span", { class: "tag-a" }, "A"),
-        el("span", { class: "atext" }, marked(h.answer, h.spans && h.spans.answer)))),
-    el("span", { class: "meta", title: `수정 ${t.full} (${h.updated_by})` },
-      h.evidence_state === "stale" ? el("span", { class: "stale-tag", title: "근거 파일이 기록 뒤에 바뀌었다" }, "재확인") : null,
-      h.score != null ? el("span", { class: "score", title: "비슷한 정도" }, `${Math.round(h.score * 100)}%`) : null,
-      el("span", { class: "by-" + by }, by), el("span", {}, "·"), el("span", {}, t.md)));
+        el("span", { class: "atext" + (open || deepHit ? "" : " clamp2") }, marked(h.answer, aSpans)))),
+    el("span", { class: "date", title: t.full }, t.md));
 }
 
 // ---------- 펼침 ----------
@@ -395,24 +427,43 @@ function dline(label, value, extra) {
   return v;
 }
 
+// 파일 경로는 폴더와 파일 이름으로 나눈다. 폴더는 앞쪽을 줄이고 파일 이름은 남긴다
+function splitPath(p) {
+  const i = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
+  return i < 0 ? ["", p] : [p.slice(0, i + 1), p.slice(i + 1)];
+}
+
 function evidenceText(d) {
-  if (!d.evidence.length) return "없음 (일반 지식)";
+  if (!d.evidence.length) return el("span", { class: "none" }, "없음");
   const f = document.createDocumentFragment();
   d.evidence.forEach((e, i) => {
-    if (i) f.append("   |   ");
-    const target = e.kind === "note" ? e.text
-      : e.kind === "githead" ? e.repo
-      : e.path || [e.repo, ...(e.paths || [])].join(" ");
-    f.append(`${KIND[e.kind] || e.kind}  ${target}`);
-    if (e.anchor) f.append(`  #${e.anchor}`);
-    if (e.commit) f.append(`  ·  ${e.commit.slice(0, 7)}`);
-    if (e.verdict === "changed") f.append("  ", el("span", { class: "changed", title: e.verdict_detail || "" }, "바뀜"));
-    if (e.verdict === "unknown") f.append("  ", el("span", { class: "changed", title: e.verdict_detail || "" }, "판정 불가"));
+    if (i) f.append(el("span", { class: "sep" }, "·"));
+    f.append(el("span", { class: "kind" }, KIND[e.kind] || e.kind));
+    if (e.kind === "file" || e.kind === "dir") {
+      const [dir, file] = splitPath(e.path || "");
+      // 폴더 칸은 direction: rtl 로 앞쪽을 줄인다. 끝의 구분자가 앞으로 옮겨 그려지지 않게 LRM 을 붙인다
+      if (dir) f.append(el("span", { class: "dir" }, dir + "‎"));
+      f.append(el("span", { class: "file" }, file));
+    } else {
+      const target = e.kind === "note" ? e.text
+        : e.kind === "githead" ? e.repo
+        : e.path || [e.repo, ...(e.paths || [])].join(" ");
+      f.append(el("span", { class: "target" }, target));
+    }
+    if (e.anchor) f.append(el("span", { class: "anchor" }, `#${e.anchor}`));
+    if (e.verdict === "unknown") f.append(el("span", { class: "changed", title: e.verdict_detail || "" }, "판정 불가"));
   });
   return f;
 }
 
-function histText(d) {
+function evidenceTitle(d) {
+  return d.evidence.map((e) => {
+    const target = e.kind === "note" ? e.text : e.kind === "githead" ? e.repo : e.path || [e.repo, ...(e.paths || [])].join(" ");
+    return [KIND[e.kind] || e.kind, target, e.anchor ? `#${e.anchor}` : "", e.commit ? e.commit.slice(0, 7) : ""].filter(Boolean).join(" ");
+  }).join("\n");
+}
+
+function histItems(d) {
   return d.revisions.map((r) => {
     const t = kst(r.at);
     let op = OP[r.op] || r.op;
@@ -421,21 +472,42 @@ function histText(d) {
       if (changed.length) op += `(${changed.join("·")})`;
     }
     return `${t.md} ${t.hm} ${r.actor} ${op}`;
-  }).join("  ·  ");
+  });
+}
+
+// 이력은 최근 한 건과 +N 버튼. 누르면 전부(최근 순)와 접기
+function histLine(id, d) {
+  const items = histItems(d);
+  const open = state.histOpen.has(id);
+  const more = items.length > 1
+    ? el("button", {
+      class: "more", type: "button", "aria-expanded": String(open),
+      title: open ? "최근 한 건만 보기" : `이력 ${items.length}건 모두 보기`,
+      onclick: () => {
+        if (open) state.histOpen.delete(id);
+        else state.histOpen.add(id);
+        repaint(id);
+      },
+    }, open ? "접기" : `+${items.length - 1}`)
+    : null;
+  return el("span", { class: "val hist" + (open ? " wrap" : "") },
+    el("span", { class: open ? "" : "ell" }, open ? items.join("  ·  ") : items[0] || ""), more);
 }
 
 function detailEl(id) {
   const d = state.details.get(id);
   const label = (s) => el("span", { class: "label" }, s);
   if (!d) return el("div", { class: "detail" }, el("div", { class: "dline" }, label(""), el("span", { class: "val hist" }, "읽는 중...")));
+  const ev = dline("근거", evidenceText(d), "ev");
+  if (d.evidence.length) ev.title = evidenceTitle(d);
   return el("div", { class: "detail" },
-    el("div", { class: "dline" }, label("근거"), dline("근거", evidenceText(d), "ev")),
+    el("div", { class: "dline" }, label("근거"), ev),
     d.links.length
       ? el("div", { class: "dline" }, label("연결"),
-        dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}` }, "→ " + l.question)), "links"))
+        dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell" }, "→ " + l.question)), "links"))
       : null,
-    el("div", { class: "dline" }, label("이력"), dline("이력", histText(d), "hist"),
-      el("button", { class: "btn small", type: "button", title: "E", onclick: () => startEdit(id) }, "편집")));
+    el("div", { class: "dline" }, label("이력"), histLine(id, d),
+      el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
 }
 
 // ---------- 편집 ----------
@@ -455,6 +527,17 @@ function counter(input, max, lines) {
   return c;
 }
 
+// 답변 칸은 글에 맞춰 2~8줄로 자란다. 8줄을 넘을 때만 스크롤이 생긴다
+function grow(ta) {
+  const cs = getComputedStyle(ta);
+  const line = parseFloat(cs.lineHeight) || 22;
+  const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  ta.style.height = "auto";
+  const border = ta.offsetHeight - ta.clientHeight;
+  const h = Math.min(Math.max(ta.scrollHeight, line * 2 + pad), line * 8 + pad);
+  ta.style.height = h + border + "px";
+}
+
 function catSelect(selected) {
   const s = el("select", { class: "fld", "aria-label": "분류" });
   for (const c of state.flat) s.append(el("option", { value: c.id }, c.path));
@@ -467,6 +550,8 @@ function editForm(base, isNew, onSaved, onCancel) {
   const fq = el("input", { class: "fld fq", "aria-label": "질문", value: base.question, autocomplete: "off" });
   const fa = el("textarea", { class: "fld fa", "aria-label": "답변", rows: 2 });
   fa.value = base.answer;
+  fa.addEventListener("input", () => grow(fa));
+  setTimeout(() => grow(fa), 0);
   const fc = catSelect(base.category_id);
   const fe = el("input", {
     class: "fld fe", "aria-label": "근거 (선택)", value: base.evidence_line || "", autocomplete: "off", spellcheck: "false",
@@ -523,13 +608,13 @@ function editForm(base, isNew, onSaved, onCancel) {
     try {
       const it = await api("POST", `/api/qa/${base.id}/archive`, { version: base.version });
       onSaved(it, null);
-      toast("보관했다.", {
+      toast("보관했다. 검색 결과에서 빠졌다.", {
         action: {
           label: "되돌리기",
           fn: async () => {
             try {
               await api("POST", `/api/qa/${it.id}/restore`, { version: it.version });
-              toast("복원했다.");
+              toast("되돌렸다.");
               refreshCats();
               runSearch();
             } catch (e) {
@@ -554,8 +639,9 @@ function editForm(base, isNew, onSaved, onCancel) {
   el("div", { class: "eline" }, el("span", { class: "tag-q" }, "Q"), fq, counter(fq, 150)),
   el("div", { class: "eline top" }, el("span", { class: "tag-a" }, "A"), fa, counter(fa, 400, 2)),
   el("div", { class: "erow" }, fc, fe,
-    el("button", { class: "btn primary", type: "submit", title: "Ctrl+Enter" }, isNew ? "등록" : "저장"),
-    el("button", { class: "btn", type: "button", title: "Esc", onclick: () => onCancel() }, "취소"),
+    el("button", { class: "btn primary", type: "submit", title: `${isNew ? "등록" : "저장"} (Ctrl+Enter)` }, isNew ? "등록" : "저장"),
+    el("button", { class: "btn", type: "button", title: "취소 (Esc)", onclick: () => onCancel() }, "취소"),
+    isNew ? null : el("span", { class: "spacer" }),
     isNew ? null : el("button", { class: "btn quiet", type: "button", title: "검색에서 뺀다(지우지 않는다)", onclick: archive }, "보관")),
   msg, sim);
   setTimeout(() => (isNew && fq.value ? fa : fq).focus(), 0);
@@ -617,9 +703,13 @@ function openNew(question) {
   }
   const firstHit = rows.size ? [...rows.values()].find((r) => !r.classList.contains("out")) : null;
   const cat = state.cat || (firstHit && firstHit.hit.category_id) || state.flat[0].id;
-  const close = () => slot.replaceChildren();
+  const close = () => {
+    slot.replaceChildren();
+    $("#empty").hidden = !state.empty;
+  };
   const base = { question: question || "", answer: "", category_id: cat, evidence_line: "" };
-  slot.append(el("div", { class: "item editing" }, editForm(base, true, (it, msg) => {
+  $("#empty").hidden = true; // 새 질문 폼이 열려 있으면 0건 안내를 숨긴다
+  slot.append(el("div", { class: "newform" }, editForm(base, true, (it, msg) => {
     close();
     toast(msg);
     state.q = "";
@@ -640,9 +730,15 @@ function setHash(id) {
   history.replaceState(null, "", id ? `#qa/${id}` : location.pathname + location.search);
 }
 
+// 화면 밖이면 그 행이 보이게 스크롤한다. 위는 붙는 묶음 머리 높이(44px), 아래는 16px 를 비운다
 function scrollTo(id) {
   const r = rows.get(id);
-  if (r) r.scrollIntoView({ block: "nearest" });
+  if (!r) return;
+  const b = r.getBoundingClientRect();
+  const top = 44;
+  const bottom = window.innerHeight - 16;
+  if (b.top < top) window.scrollBy({ top: b.top - top, behavior: "smooth" });
+  else if (b.bottom > bottom) window.scrollBy({ top: Math.min(b.bottom - bottom, b.top - top), behavior: "smooth" });
 }
 
 async function openFromHash() {
@@ -667,17 +763,29 @@ async function openFromHash() {
 }
 
 function visibleIds() {
-  return [...document.querySelectorAll("#results .grp:not(.out) .row:not(.out)")].map((r) => Number(r.dataset.id));
+  return [...document.querySelectorAll("#results .grp:not(.out):not(.shut) .row:not(.out)")].map((r) => Number(r.dataset.id));
 }
 
+// 이동하면서 바로 펼친다
 function move(dir) {
+  if (state.editing) return;
   const ids = visibleIds();
   if (!ids.length) return;
   const i = ids.indexOf(state.sel);
-  const next = ids[i < 0 ? 0 : Math.min(ids.length - 1, Math.max(0, i + dir))];
-  if (state.editing) return;
+  const next = ids[i < 0 ? (dir > 0 ? 0 : ids.length - 1) : Math.min(ids.length - 1, Math.max(0, i + dir))];
   toggle(next, true);
-  scrollTo(next);
+  // 펼친 내용이 그려진 뒤의 높이로 스크롤 위치를 정한다
+  requestAnimationFrame(() => scrollTo(next));
+}
+
+function clearSearch() {
+  const q = $("#q");
+  q.value = "";
+  state.q = "";
+  state.cat = null;
+  renderTree();
+  renderChip();
+  runSearch();
 }
 
 // ---------- 테마 ----------
@@ -693,9 +801,16 @@ function setTheme(t, save) {
 
 function init() {
   const q = $("#q");
+  // 검색어를 입력하면 펼친 행과 편집을 닫는다
   q.addEventListener("input", () => {
     state.q = q.value.trim();
     if (state.q) state.pin = null;
+    if (state.editing) {
+      const id = state.editing;
+      state.editing = null;
+      repaint(id);
+    }
+    if (state.sel) toggle(state.sel, false);
     scheduleSearch();
   });
 
@@ -714,20 +829,17 @@ function init() {
       e.preventDefault();
       move(e.key === "ArrowDown" ? 1 : -1);
     } else if (e.key === "Enter" && a === q) {
+      // 펼친 행이 없을 때만 첫 결과를 펼친다
       e.preventDefault();
       const ids = visibleIds();
-      if (ids.length) toggle(state.sel && ids.includes(state.sel) ? state.sel : ids[0]);
-    } else if (e.key === "Escape") {
-      if (a === q && (q.value || state.cat)) {
-        q.value = "";
-        state.q = "";
-        state.cat = null;
-        renderTree();
-        renderChip();
-        runSearch();
-      } else if (state.sel) {
-        toggle(state.sel, false);
+      if (ids.length && !ids.includes(state.sel)) {
+        toggle(ids[0], true);
+        requestAnimationFrame(() => scrollTo(ids[0]));
       }
+    } else if (e.key === "Escape") {
+      // 펼친 행이 있으면 먼저 접고, 없으면 검색어와 분류 필터를 지운다
+      if (state.sel && rows.has(state.sel) && !rows.get(state.sel).classList.contains("out")) toggle(state.sel, false);
+      else if (q.value || state.cat) clearSearch();
     } else if ((e.key === "e" || e.key === "E") && !typing && state.sel && !state.editing && state.details.has(state.sel)) {
       e.preventDefault();
       startEdit(state.sel);
