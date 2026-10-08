@@ -15,8 +15,9 @@ from kb.morph import reindex
 from kb.store import Store
 
 INSTRUCTIONS = """\
-fast-question 은 사용자의 질문·답변 지식 DB 다.
-- 질문은 한 줄(150자 이하), 답변은 1~2줄(400자 이하)로 쓴다. 사실만 쓰고 비유를 쓰지 않는다.
+fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분을 검토하지 않으므로 아래 양식을 지킨다.
+- 질문은 한 줄(150자 이하)로, 대상 이름을 넣고 "?" 로 끝낸다. 답변은 1~2문장(400자 이하) 서술형이다. 사실만 쓰고 비유를 쓰지 않는다.
+- 분류는 kb_categories 를 보고 고른다. 맞는 것이 없으면 사용자에게 묻지 않고 kb_add_category 로 만든다(대분류 = 작업 주제, 중분류 = 대상 이름).
 - 로컬 파일에서 확인한 사실은 evidence 에 {"kind": "auto", "path": "<파일 절대경로>", "anchor": "<심볼이나 찾을 문자열>"} 를 단다.
   일반 지식(k8s 개념, 수학 등)은 근거 없이 쓴다. 사람에게 확인한 사실은 {"kind": "note", "text": "누가 어떻게 확인"} 을 단다.
 - 등록 전에 kb_search 로 같은 질문이 있는지 본다. 있으면 kb_get 으로 version 을 읽고 kb_update 로 고친다.
