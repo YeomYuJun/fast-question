@@ -1,0 +1,10 @@
+mcp==2.0.0
+starlette==1.6.0
+uvicorn==0.52.1
+pydantic==2.13.4
+anyio==4.14.2
+numpy==2.5.2
+kiwipiepy==0.24.0
+kiwipiepy_model==0.24.0
+pytest==9.1.1
+httpx==0.28.1

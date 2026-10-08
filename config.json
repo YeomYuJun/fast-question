@@ -1,0 +1,10 @@
+{
+  "db_path": "data/kb.sqlite3",
+  "host": "127.0.0.1",
+  "port": 8765,
+  "backup_dir": "data/backup",
+  "backup_keep": 14,
+  "log_dir": "data/logs",
+  "log_keep_days": 14,
+  "recheck_interval_hours": 24
+}
