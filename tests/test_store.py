@@ -59,6 +59,18 @@ def test_add_qa_records_actor_and_review_state(user, claude):
     assert reviewed["reviewed_by"] == "user"
 
 
+def test_user_writes_count_as_reviewed_and_claude_edits_reset_review(user, claude):
+    user.add_category("이관")
+    mine = user.add_qa("이관", "사용자가 쓴 질문", "사용자가 쓴 답변")["item"]
+    assert mine["reviewed"] is True and mine["reviewed_by"] == "user"
+
+    edited = claude.update_qa(mine["id"], mine["version"], answer="Claude 가 고친 답변")
+    assert edited["reviewed"] is False
+
+    again = user.update_qa(edited["id"], edited["version"], answer="사용자가 다시 고친 답변")
+    assert again["reviewed"] is True
+
+
 def test_similar_question_blocks_until_forced(user):
     user.add_category("이관")
     user.add_qa("이관", ".nas-tmp 가 NAS 안에 있는 이유", "rename 은 같은 볼륨 안에서만 원자적이다.")

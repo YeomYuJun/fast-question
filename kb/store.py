@@ -9,6 +9,8 @@ from typing import Iterator, Literal
 
 from kb.db import BUMP, NOW, tx
 from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
+from kb import dictionary as dict_mod
+from kb import search as search_mod
 from kb.evidence import Checker, capture, overall_state, spec_of
 from kb.schema import AUDITED
 from kb.text import check_answer, check_name, check_question, clean
@@ -88,9 +90,9 @@ class Store:
         rows = {r["id"]: r for r in self.conn.execute(f"SELECT {QA_COLS} FROM qa WHERE id IN ({marks})", ids)}
         return [self._item(rows[i], paths) for i in ids if i in rows]
 
-    def _update(self, table: str, id: int, version: int | None, sets: dict, current) -> None:
+    def _update(self, table: str, id: int, version: int | None, sets: dict, current, raw: str = "") -> None:
         """version 이 None 이면 버전 검사 없이 고친다. 0행이면 충돌 또는 없음."""
-        cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}"
+        cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}{raw}"
         params = list(sets.values()) + [self.actor, id]
         where = "id = ?"
         if version is not None:
@@ -236,9 +238,10 @@ class Store:
                 return {"status": "similar_found", "similar": sim}
         verdicts = ["external" if e["kind"] in ("url", "note") else "same" for e in captured]
         with self._writing() as c:
+            reviewed = f"{NOW}, 'user'" if self.actor == "user" else "NULL, NULL"
             qid = c.execute(
-                "INSERT INTO qa(category_id, question, answer, evidence_state, created_by, updated_by) "
-                "VALUES (?,?,?,?,?,?)",
+                "INSERT INTO qa(category_id, question, answer, evidence_state, reviewed_at, reviewed_by, "
+                f"created_by, updated_by) VALUES (?,?,?,?,{reviewed},?,?)",
                 (cid, q, a, overall_state(verdicts), self.actor, self.actor),
             ).lastrowid
             for e, v in zip(captured, verdicts):
@@ -371,7 +374,10 @@ class Store:
         if not sets:
             raise ValidationError("바꿀 값이 없다.")
         sets["change_note"] = note
-        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)))
+        # 사용자가 고치면 검토된 것으로, Claude 가 고치면 다시 미검토로 둔다
+        raw = {"user": f", reviewed_at = {NOW}, reviewed_by = 'user'",
+               "claude": ", reviewed_at = NULL, reviewed_by = NULL"}.get(self.actor, "")
+        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), raw)
         return self.get_qa(id)
 
     def _set_archived(self, id: int, version: int, archived: bool, note: str | None) -> dict:
@@ -439,3 +445,16 @@ class Store:
         return [{"id": r["id"], "op": r["op"], "actor": r["actor"], "at": r["at"],
                  "before": json.loads(r["before_json"]) if r["before_json"] else None,
                  "after": json.loads(r["after_json"]) if r["after_json"] else None} for r in rows]
+
+    # ---------- 검색·사전 ----------
+
+    def search(self, query: str, **opts) -> dict:
+        return search_mod.search(self, query, analyzer=self.analyzer, **opts)
+
+    def dictionary(self) -> dict:
+        return dict_mod.snapshot(self.conn)
+
+    def dict_action(self, action: str, **kw) -> dict:
+        with self._writing() as c:
+            reindex = dict_mod.apply(c, self.actor, action, **kw)
+        return {"snapshot": dict_mod.snapshot(self.conn), "reindex_needed": reindex}
