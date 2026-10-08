@@ -184,8 +184,56 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
             return res
         return run(go)
 
+    @server.tool()
+    def kb_add_many(items: list[dict]) -> dict:
+        """Q&A 를 한 번에 여러 건(최대 100) 등록한다. 항목은 kb_add 의 인자와 같다:
+        {"category", "question", "answer", "evidence"?, "links"?, "force"?}. 항목마다 따로 처리해 하나가 실패해도
+        나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다."""
+        if len(items) > ADD_MANY_MAX:
+            raise ValueError(f"kb_add_many 는 한 번에 {ADD_MANY_MAX}건까지 받는다. 지금 {len(items)}건이다.")
+
+        def go(s: Store):
+            results = []
+            for n, it in enumerate(items):
+                try:
+                    check_claude_qa(it.get("question"), it.get("answer"), it.get("evidence"))
+                    res = s.add_qa(it["category"], it["question"], it["answer"], evidence=it.get("evidence"),
+                                   links=it.get("links"), force=bool(it.get("force")))
+                except KbError as e:
+                    results.append({"index": n, "status": "error", "error": e.message})
+                    continue
+                except KeyError as e:
+                    results.append({"index": n, "status": "error", "error": f"{e.args[0]} 이(가) 없다."})
+                    continue
+                if res["status"] == "similar_found":
+                    results.append({"index": n, "status": "similar_found",
+                                    "similar": [{k: i[k] for k in ("id", "question", "answer")} for i in res["similar"]]})
+                else:
+                    results.append({"index": n, "status": "created", "id": res["item"]["id"],
+                                    "question": res["item"]["question"]})
+            return {"results": results, "created": sum(r["status"] == "created" for r in results)}
+        return run(go)
+
+    @server.tool()
+    def kb_harvest(action: str, root: str | None = None, state: dict | None = None) -> dict:
+        """qa-harvest Skill 의 수확 기록. action=get(root): 그 대상 경로의 마지막 기록(없으면 null),
+        set(root, state): 기록을 바꾼다(state 예: {"repos": {"<저장소 경로>": "<HEAD sha>"}, "created": 12, "note": "..."}),
+        list: 모든 기록. 경로는 / 구분자·소문자로 맞춰 저장한다."""
+        def go(s: Store):
+            if action == "list":
+                return {"records": s.harvest_list()}
+            if not root:
+                raise KbError(f"{action} 에는 root 가 필요하다.")
+            if action == "get":
+                return {"record": s.harvest_get(root)}
+            if action == "set":
+                return {"record": s.harvest_set(root, state or {})}
+            raise KbError(f"알 수 없는 수확 기록 동작이다: {action}")
+        return run(go)
+
     return server
 
 
+ADD_MANY_MAX = 100
 TOOLS = ("kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update", "kb_archive",
-         "kb_link", "kb_evidence", "kb_recheck", "kb_dict")
+         "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest")

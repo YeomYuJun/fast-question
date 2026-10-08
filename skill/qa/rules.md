@@ -1,7 +1,7 @@
 # Q&A 등록 규칙
 
 이 파일이 fast-question 등록 규칙의 원본이다. qa Skill, qa-harvest Skill, MCP 서버 안내문은 이 파일을 따른다.
-Claude 가 MCP 로 쓸 때 `kb_add`·`kb_update`·`kb_evidence` 는 답변 문장 수와 민감 정보를 검사해 위반이면 거부한다. 거부 메시지를 보고 고쳐서 다시 부른다.
+Claude 가 MCP 로 쓸 때 `kb_add`·`kb_add_many`·`kb_update`·`kb_evidence` 는 답변 문장 수와 민감 정보를 검사해 위반이면 거부한다. 거부 메시지를 보고 고쳐서 다시 부른다.
 
 ## 넣는 것
 

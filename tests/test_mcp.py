@@ -8,7 +8,7 @@ from kb.db import connect
 from mcp_server.server import TOOLS, build_server, store_factory
 
 EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
-                  "kb_archive", "kb_link", "kb_evidence", "kb_recheck", "kb_dict"}
+                  "kb_archive", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest"}
 
 
 @pytest.fixture
@@ -169,3 +169,31 @@ def test_search_syntax_queries_and_regex(server):
     assert not err and [h["question"] for h in res["hits"]] == ["TypeHandler 가 맡는 일"]
     err, text = call(server, "kb_search", {"query": "(a+)+", "regex": True})
     assert err and "중첩" in text
+
+
+def test_add_many_reports_each_item(server):
+    call(server, "kb_add_category", {"name": "이관"})
+    call(server, "kb_add", {"category": "이관", "question": ".nas-tmp 가 NAS 안에 있는 이유", "answer": "같은 볼륨"})
+    err, res = call(server, "kb_add_many", {"items": [
+        {"category": "이관", "question": "PETRA 를 제거하는 이유", "answer": "대상 DB 에서 쓸 수 없다."},
+        {"category": "이관", "question": ".nas-tmp 가 NAS 안에 있는 까닭", "answer": "같은 볼륨이어야 한다."},
+        {"category": "이관", "question": "세 문장 답", "answer": "하나다. 둘이다. 셋이다."},
+        {"category": "없는 분류", "question": "분류 없음", "answer": "실패한다."},
+    ]})
+    assert not err
+    assert [r["status"] for r in res["results"]] == ["created", "similar_found", "error", "error"]
+    assert res["created"] == 1 and res["results"][1]["similar"][0]["question"].startswith(".nas-tmp")
+    assert "3문장" in res["results"][2]["error"]
+    assert call(server, "kb_search", {"query": "PETRA"})[1]["total"] == 1
+
+
+def test_harvest_record_roundtrip(server):
+    err, res = call(server, "kb_harvest", {"action": "get", "root": r"D:\work"})
+    assert not err and res["record"] is None
+    state = {"repos": {"D:/work/app": "abc123"}, "created": 12}
+    err, res = call(server, "kb_harvest", {"action": "set", "root": "D:/work/", "state": state})
+    assert not err and res["record"]["repos"] == state["repos"] and res["record"]["at"]
+    err, res = call(server, "kb_harvest", {"action": "get", "root": r"d:\work"})
+    assert res["record"]["created"] == 12
+    err, res = call(server, "kb_harvest", {"action": "list"})
+    assert [r["root"] for r in res["records"]] == ["d:/work"]

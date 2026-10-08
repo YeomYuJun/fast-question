@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Iterator, Literal
 
-from kb.db import BUMP, NOW, tx
+from kb.db import BUMP, NOW, get_meta, set_meta, tx
 from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
 from kb import dictionary as dict_mod
 from kb import search as search_mod
@@ -476,6 +476,28 @@ class Store:
 
     def search_many(self, queries: list[str], **opts) -> dict:
         return search_mod.search_many(self, queries, analyzer=self.analyzer, **opts)
+
+    # ---------- 수확 기록 (qa-harvest Skill 이 다음 실행에서 바뀐 것만 다루려고 남긴다) ----------
+
+    @staticmethod
+    def _harvest_root(root: str) -> str:
+        return root.replace("\\", "/").rstrip("/").lower()
+
+    def harvest_get(self, root: str) -> dict | None:
+        value = get_meta(self.conn, "harvest:" + self._harvest_root(root))
+        return json.loads(value) if value else None
+
+    def harvest_set(self, root: str, state: dict) -> dict:
+        norm = self._harvest_root(root)
+        at = self.conn.execute("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')").fetchone()[0]
+        record = {**state, "root": norm, "at": at}
+        with self._writing() as c:
+            set_meta(c, "harvest:" + norm, json.dumps(record, ensure_ascii=False))
+        return record
+
+    def harvest_list(self) -> list[dict]:
+        return [json.loads(r[0]) for r in self.conn.execute(
+            "SELECT value FROM meta WHERE key LIKE 'harvest:%' ORDER BY key")]
 
     def dictionary(self) -> dict:
         return dict_mod.snapshot(self.conn)
