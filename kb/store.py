@@ -12,6 +12,7 @@ from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
 from kb import dictionary as dict_mod
 from kb import search as search_mod
 from kb.evidence import Checker, capture, overall_state, spec_of
+from kb.morph import write_index
 from kb.schema import AUDITED
 from kb.text import check_answer, check_name, check_question, clean
 
@@ -90,7 +91,8 @@ class Store:
         rows = {r["id"]: r for r in self.conn.execute(f"SELECT {QA_COLS} FROM qa WHERE id IN ({marks})", ids)}
         return [self._item(rows[i], paths) for i in ids if i in rows]
 
-    def _update(self, table: str, id: int, version: int | None, sets: dict, current, raw: str = "") -> None:
+    def _update(self, table: str, id: int, version: int | None, sets: dict, current, raw: str = "",
+                after=None) -> None:
         """version 이 None 이면 버전 검사 없이 고친다. 0행이면 충돌 또는 없음."""
         cols = ", ".join(f"{k} = ?" for k in sets) + f", updated_by = ?, {BUMP}{raw}"
         params = list(sets.values()) + [self.actor, id]
@@ -100,6 +102,8 @@ class Store:
             params.append(version)
         with self._writing() as c:
             n = c.execute(f"UPDATE {table} SET {cols} WHERE {where}", params).rowcount
+            if n and after:
+                after(c)
         if n == 0:
             cur = current(id)  # 없으면 NotFoundError
             raise ConflictError("다른 곳에서 먼저 고쳤다. 현재 값을 다시 읽고 고친다.", current=cur)
@@ -237,6 +241,7 @@ class Store:
             if sim:
                 return {"status": "similar_found", "similar": sim}
         verdicts = ["external" if e["kind"] in ("url", "note") else "same" for e in captured]
+        morph = self._morph(q, a)
         with self._writing() as c:
             reviewed = f"{NOW}, 'user'" if self.actor == "user" else "NULL, NULL"
             qid = c.execute(
@@ -246,6 +251,8 @@ class Store:
             ).lastrowid
             for e, v in zip(captured, verdicts):
                 self._insert_evidence(qid, e, v)
+            if morph:
+                write_index(c, qid, *morph)
             for other in links or []:
                 self._link(qid, int(other))
         return {"status": "created", "item": self.get_qa(qid)}
@@ -377,7 +384,15 @@ class Store:
         # 사용자가 고치면 검토된 것으로, Claude 가 고치면 다시 미검토로 둔다
         raw = {"user": f", reviewed_at = {NOW}, reviewed_by = 'user'",
                "claude": ", reviewed_at = NULL, reviewed_by = NULL"}.get(self.actor, "")
-        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), raw)
+        after = None
+        if "question" in sets or "answer" in sets:
+            row = self._qa_row(id)
+            morph = self._morph(sets.get("question", row["question"]), sets.get("answer", row["answer"]))
+            if morph:
+                after = lambda c: write_index(c, id, *morph)  # noqa: E731
+            else:  # 분석기가 없으면 옛 색인을 지워 재색인 대상으로 둔다
+                after = lambda c: c.execute("DELETE FROM qa_morph_fts WHERE rowid = ?", (id,))  # noqa: E731
+        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), raw, after)
         return self.get_qa(id)
 
     def _set_archived(self, id: int, version: int, archived: bool, note: str | None) -> dict:
@@ -447,6 +462,12 @@ class Store:
                  "after": json.loads(r["after_json"]) if r["after_json"] else None} for r in rows]
 
     # ---------- 검색·사전 ----------
+
+    def _morph(self, question: str, answer: str) -> tuple[str, str] | None:
+        """형태소 색인 본문과 분석기 버전. 쓰기 트랜잭션을 열기 전에 부른다."""
+        if self.analyzer is None or not self.analyzer.ready(self.conn):
+            return None
+        return self.analyzer.index_text(question + "\n" + answer), self.analyzer.version
 
     def search(self, query: str, **opts) -> dict:
         return search_mod.search(self, query, analyzer=self.analyzer, **opts)

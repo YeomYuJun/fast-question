@@ -83,11 +83,15 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
     if action == "stopword_remove":
         _archive(conn, "stopword", int(kw["id"]), actor)
         return False
-    if action == "user_word_add":
-        conn.execute(ins.format(t="user_word", cols="word, tag", marks="?, ?"),
-                     (_word(kw.get("word"), "사용자 단어"), kw.get("tag") or "NNP", actor, actor))
-        return True
-    if action == "user_word_remove":
-        _archive(conn, "user_word", int(kw["id"]), actor)
+    if action in ("user_word_add", "user_word_remove"):
+        if action == "user_word_add":
+            conn.execute(ins.format(t="user_word", cols="word, tag", marks="?, ?"),
+                         (_word(kw.get("word"), "사용자 단어"), kw.get("tag") or "NNP", actor, actor))
+        else:
+            _archive(conn, "user_word", int(kw["id"]), actor)
+        from kb.morph import compute_version  # morph 가 이 모듈을 불러오므로 함수 안에서 불러온다
+        conn.execute("INSERT INTO meta(key, value) VALUES ('analyzer_version', ?) "
+                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                     (compute_version(load_user_words(conn)),))
         return True
     raise ValidationError(f"알 수 없는 사전 동작이다: {action}")
