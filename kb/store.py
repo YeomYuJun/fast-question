@@ -366,7 +366,9 @@ class Store:
         return results
 
     def update_qa(self, id: int, version: int, *, question: str | None = None, answer: str | None = None,
-                  category: int | str | None = None, note: str | None = None) -> dict:
+                  category: int | str | None = None, evidence: list[dict] | None = None,
+                  note: str | None = None) -> dict:
+        """evidence 를 주면 보관되지 않은 근거를 모두 보관하고 그 목록으로 바꾼다([] 는 근거 없음)."""
         sets = {}
         if question is not None:
             sets["question"] = check_question(question)
@@ -374,19 +376,31 @@ class Store:
             sets["answer"] = check_answer(answer)
         if category not in (None, ""):
             sets["category_id"] = self.resolve_category(category)
-        if not sets:
+        if not sets and evidence is None:
             raise ValidationError("바꿀 값이 없다.")
+        captured = [capture(spec) for spec in evidence] if evidence is not None else None  # 쓰기 전에 모두 캡처
         sets["change_note"] = note
-        after = None
+        steps = []
         if "question" in sets or "answer" in sets:
             row = self._qa_row(id)
             morph = self._morph(sets.get("question", row["question"]), sets.get("answer", row["answer"]))
             if morph:
-                after = lambda c: write_index(c, id, *morph)  # noqa: E731
+                steps.append(lambda c: write_index(c, id, *morph))
             else:  # 분석기가 없으면 옛 색인을 지워 재색인 대상으로 둔다
-                after = lambda c: c.execute("DELETE FROM qa_morph_fts WHERE rowid = ?", (id,))  # noqa: E731
-        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)), after=after)
+                steps.append(lambda c: c.execute("DELETE FROM qa_morph_fts WHERE rowid = ?", (id,)))
+        if captured is not None:
+            # 상태 재계산이 버전을 올리므로 버전을 검사하는 UPDATE 뒤, 같은 트랜잭션에서 바꾼다
+            steps.append(lambda c: self._replace_evidence(c, id, captured))
+        self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)),
+                     after=lambda c: [step(c) for step in steps])
         return self.get_qa(id)
+
+    def _replace_evidence(self, c: sqlite3.Connection, qa_id: int, captured: list[dict]) -> None:
+        c.execute(f"UPDATE evidence SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
+                  "WHERE qa_id = ? AND deleted_at IS NULL", (self.actor, self.actor, qa_id))
+        for e in captured:
+            self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
+        self._recompute_state(qa_id)
 
     def _set_archived(self, id: int, version: int, archived: bool, note: str | None) -> dict:
         current = lambda i: self._item(self._qa_row(i))  # noqa: E731

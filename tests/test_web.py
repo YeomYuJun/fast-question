@@ -1,9 +1,7 @@
 import pytest
 from starlette.testclient import TestClient
 
-from kb.db import connect
 from kb.morph import Analyzer
-from kb.store import Store
 from web.app import create_app
 
 
@@ -37,7 +35,18 @@ def test_index_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
     assert "fast-question" in r.text
-    assert client.get("/static/app.js").status_code == 200
+    assert r.text.index("/static/tokens.css") < r.text.index("/static/app.css")
+    for path in ("/static/app.js", "/static/app.css", "/static/tokens.css",
+                 "/static/fonts/Pretendard-Regular.woff2", "/static/fonts/JetBrainsMono-Regular.woff2"):
+        assert client.get(path).status_code == 200, path
+
+
+def test_app_css_uses_only_tokens():
+    """색은 design 토큰 변수로만 쓴다(CLAUDE.md 화면 디자인 규칙)."""
+    import re
+    from web.app import STATIC
+    css = (STATIC / "app.css").read_text(encoding="utf-8")
+    assert re.findall(r"#[0-9a-fA-F]{3,8}", css) == []
 
 
 def test_create_and_search_grouped(client):
@@ -74,45 +83,76 @@ def test_similar_then_force(client):
     assert client.post("/api/qa", json=dict(body, force=True)).json()["status"] == "created"
 
 
-def test_archive_restore_and_links(client):
-    a = add_basics(client)
-    b = client.post("/api/qa", json={"category": "이관", "question": "PETRA 제거 이유",
-                                     "answer": "대상 DB 에서 쓸 수 없다."}).json()["item"]
-    assert client.post(f"/api/qa/{a['id']}/links", json={"other": b["id"]}).status_code == 200
-    assert [l["id"] for l in client.get(f"/api/qa/{a['id']}").json()["links"]] == [b["id"]]
-    archived = client.post(f"/api/qa/{a['id']}/archive", json={"version": a["version"]}).json()
-    assert archived["archived"] is True
-    restored = client.post(f"/api/qa/{a['id']}/restore", json={"version": archived["version"]}).json()
-    assert restored["archived"] is False
-
-
-def test_evidence_and_recheck(client, tmp_path):
-    item = add_basics(client)
-    f = tmp_path / "근거 파일.txt"
-    f.write_text("v1", encoding="utf-8")
-    after = client.post(f"/api/qa/{item['id']}/evidence", json={"kind": "auto", "path": str(f)}).json()
-    assert after["evidence_state"] == "trusted"
-    f.write_text("v2", encoding="utf-8")
-    assert client.post("/api/recheck", json={}).status_code == 200
-    detail = client.get(f"/api/qa/{item['id']}").json()
-    assert detail["evidence_state"] == "stale"
-    ev = detail["evidence"][0]["id"]
-    assert client.post(f"/api/evidence/{ev}/recapture").json()["evidence_state"] == "trusted"
-
-
-def test_dictionary_endpoints(client):
-    add_basics(client)
-    r = client.post("/api/dict", json={"action": "synonym_add", "terms": ["임시파일", ".part"]})
-    assert r.status_code == 200 and r.json()["snapshot"]["synonyms"]
-    hits = client.get("/api/search", params={"q": "임시파일"}).json()["hits"]
-    assert hits and hits[0]["tier"] == "synonym"
-    assert client.get("/api/dict").json()["stopwords"]
-
-
 def test_review_and_oversight_endpoints_are_gone(client):
     item = add_basics(client)
     assert client.get("/api/oversight").status_code == 404
     assert client.post(f"/api/qa/{item['id']}/review").status_code in (404, 405)
+
+
+@pytest.mark.parametrize("method, path", [
+    ("POST", "/api/qa/1/links"), ("POST", "/api/qa/1/evidence"), ("POST", "/api/evidence/1/recapture"),
+    ("POST", "/api/evidence/1/archive"), ("POST", "/api/recheck"), ("GET", "/api/dict"), ("POST", "/api/dict"),
+    ("POST", "/api/reindex"), ("GET", "/api/status"), ("PATCH", "/api/categories/1"),
+    ("POST", "/api/categories/1/archive"),
+])
+def test_unused_endpoints_are_gone(client, method, path):
+    """화면이 쓰지 않는 관리 기능은 MCP 도구에만 남는다."""
+    add_basics(client)
+    assert client.request(method, path, json={}).status_code in (404, 405)
+
+
+def test_archive_then_restore(client):
+    item = add_basics(client)
+    archived = client.post(f"/api/qa/{item['id']}/archive", json={"version": item["version"]}).json()
+    assert archived["archived"] is True
+    assert client.get("/api/search", params={"q": "rename"}).json()["hits"] == []
+    restored = client.post(f"/api/qa/{item['id']}/restore", json={"version": archived["version"]}).json()
+    assert restored["archived"] is False
+
+
+def test_evidence_line_on_create_and_edit(client, tmp_path):
+    client.post("/api/categories", json={"name": "이관"})
+    f = (tmp_path / "근거 폴더" / "a b.txt")
+    f.parent.mkdir()
+    f.write_text("v1", encoding="utf-8")
+    f = f.resolve()
+    r = client.post("/api/qa", json={"category": "이관", "question": "근거 있는 질문?", "answer": "답변이다.",
+                                     "evidence_line": f"{f} #v1"})
+    item = r.json()["item"]
+    assert item["evidence_state"] == "trusted" and item["evidence_line"] == f"{f} #v1"
+
+    edited = client.patch(f"/api/qa/{item['id']}", json={"version": item["version"],
+                                                          "evidence_line": "메모: 사용자가 확인"}).json()
+    assert edited["evidence_state"] == "external" and edited["evidence_line"] == "메모: 사용자가 확인"
+    assert client.get(f"/api/qa/{item['id']}").json()["evidence_line"] == "메모: 사용자가 확인"
+
+    cleared = client.patch(f"/api/qa/{item['id']}", json={"version": edited["version"], "evidence_line": ""}).json()
+    assert cleared["evidence_state"] == "none" and cleared["evidence_line"] == ""
+
+    bad = client.patch(f"/api/qa/{item['id']}", json={"version": cleared["version"],
+                                                      "evidence_line": str(tmp_path / "없는 파일")})
+    assert bad.status_code == 400 and "근거 경로가 없다" in bad.json()["error"]
+
+
+def test_search_by_category(client):
+    add_basics(client)
+    client.post("/api/categories", json={"name": "일반"})
+    client.post("/api/qa", json={"category": "일반", "question": "rename 은 무엇인가?", "answer": "이름 바꾸기다."})
+    tops = {c["name"]: c for c in client.get("/api/categories").json()["categories"]}
+    nas = tops["이관"]["children"][0]["id"]
+    hits = client.get("/api/search", params={"q": "rename", "category": nas}).json()["hits"]
+    assert [h["category_path"] for h in hits] == ["이관 > NAS"]
+
+
+def test_locked_db_is_503(client, monkeypatch):
+    import sqlite3
+    from kb.store import Store as S
+
+    def locked(*_, **__):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(S, "add_category", locked)
+    r = client.post("/api/categories", json={"name": "잠김"})
+    assert r.status_code == 503 and "잠겨" in r.json()["error"]
 
 
 def test_app_start_warms_up_analyzer(db):
@@ -130,17 +170,6 @@ def test_app_start_warms_up_analyzer(db):
 
     create_app(db_path=db, run_jobs=False, analyzer=Analyzer(loader=FakeKiwi))
     assert loaded.wait(5), "앱을 만들면 형태소 분석기를 백그라운드에서 미리 띄워야 한다"
-
-
-def test_status(client):
-    s = client.get("/api/status").json()
-    assert {"morph", "pending_reindex", "last_recheck", "last_backup", "counts"} <= set(s)
-
-
-def test_search_options_and_filters(client):
-    add_basics(client)
-    r = client.get("/api/search", params={"q": r"\.part", "regex": "1"}).json()
-    assert r["total"] == 1
 
 
 @pytest.mark.parametrize("headers", [

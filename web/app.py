@@ -1,9 +1,12 @@
 """HTTP API 와 화면. 쓰기 주체는 user 다.
 
+화면(web/static)이 쓰는 API 만 둔다. 근거 재기록·관련 질문·사전·재검증 같은 관리 기능은 MCP 도구에만 있다.
 요청마다 SQLite 연결을 새로 열고(스레드 풀에서 실행), 형태소 분석기는 앱에 하나를 둔다.
-오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current) 로 돌려준다.
+오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
+쓰기 잠금 대기 초과 503 으로 돌려준다.
 """
 import json
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Callable
@@ -17,9 +20,10 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from kb.config import Config, load_config
-from kb.db import connect, get_meta
+from kb.db import connect
 from kb.errors import ConflictError, KbError, NotFoundError
-from kb.morph import Analyzer, pending_count, reindex
+from kb.evidence import line_of, parse_line
+from kb.morph import Analyzer
 from kb.store import Store
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -49,8 +53,16 @@ class SameOriginOnly:
         await self.app(scope, receive, send)
 
 
-def _flag(request: Request, name: str) -> bool:
-    return request.query_params.get(name, "") in ("1", "true", "on")
+def _qa_out(item: dict) -> dict:
+    """화면 편집 폼이 그대로 보여 주고 되돌려 받는 근거 한 줄을 붙인다."""
+    if "evidence" in item:
+        item["evidence_line"] = line_of(item["evidence"])
+    return item
+
+
+def _evidence(body: dict) -> list[dict] | None:
+    line = body.get("evidence_line")
+    return None if line is None else parse_line(line)
 
 
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
@@ -95,6 +107,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                 return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
             except KbError as e:
                 return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
+            except sqlite3.OperationalError as e:  # busy_timeout(5초) 안에 쓰기 잠금을 얻지 못했다
+                return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+                                     "code": "busy"}, status_code=503)
             except (KeyError, TypeError, ValueError) as e:
                 return JSONResponse({"error": f"요청 값이 올바르지 않다: {e}"}, status_code=400)
             return JSONResponse(data)
@@ -106,31 +121,13 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     def search(s: Store, r: Request, _):
         qp = r.query_params
         return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
-                        include_archived=_flag(r, "archived"), case_sensitive=_flag(r, "case"),
-                        regex=_flag(r, "regex"), limit=int(qp.get("limit", 200)))
+                        limit=int(qp.get("limit", 200)))
 
-    def dict_post(s: Store, _, b: dict):
-        b = dict(b)
-        res = s.dict_action(b.pop("action"), **b)
-        if res["reindex_needed"]:
-            res["reindexed"] = reindex(s.conn, analyzer)
+    def add_qa(s: Store, _, b: dict):
+        res = s.add_qa(b["category"], b["question"], b["answer"], evidence=_evidence(b), force=bool(b.get("force")))
+        if res["status"] == "created":
+            _qa_out(res["item"])
         return res
-
-    def status(s: Store, _, __):
-        c = s.conn
-        return {
-            "morph": "off" if not analyzer.enabled else ("on" if analyzer.version else "idle"),
-            "analyzer_error": analyzer.error,
-            "pending_reindex": pending_count(c),
-            "last_recheck": get_meta(c, "last_recheck"),
-            "last_backup": get_meta(c, "last_backup"),
-            "counts": {
-                "qa": c.execute("SELECT count(*) FROM qa WHERE deleted_at IS NULL").fetchone()[0],
-                "archived": c.execute("SELECT count(*) FROM qa WHERE deleted_at IS NOT NULL").fetchone()[0],
-                "categories": c.execute("SELECT count(*) FROM category WHERE deleted_at IS NULL").fetchone()[0],
-            },
-            "db_path": str(path),
-        }
 
     routes = [
         Route("/", lambda r: FileResponse(STATIC / "index.html")),
@@ -138,34 +135,15 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/categories", api(lambda s, r, b: s.add_category(
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
-        Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
-            pid(r), b["version"], name=b.get("name"), description=b.get("description"), note=b.get("note"))),
-            methods=["PATCH"]),
-        Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
-            pid(r), b["version"], note=b.get("note"))), methods=["POST"]),
-        Route("/api/qa", api(lambda s, r, b: s.add_qa(
-            b["category"], b["question"], b["answer"], evidence=b.get("evidence"), links=b.get("links"),
-            force=bool(b.get("force")))), methods=["POST"]),
-        Route("/api/qa/{id:int}", api(lambda s, r, b: s.get_qa(pid(r)))),
-        Route("/api/qa/{id:int}", api(lambda s, r, b: s.update_qa(
+        Route("/api/qa", api(add_qa), methods=["POST"]),
+        Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.get_qa(pid(r))))),
+        Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.update_qa(
             pid(r), b["version"], question=b.get("question"), answer=b.get("answer"),
-            category=b.get("category"), note=b.get("note"))), methods=["PATCH"]),
-        Route("/api/qa/{id:int}/archive", api(lambda s, r, b: s.archive_qa(
-            pid(r), b["version"], note=b.get("note"))), methods=["POST"]),
-        Route("/api/qa/{id:int}/restore", api(lambda s, r, b: s.restore_qa(
-            pid(r), b["version"], note=b.get("note"))), methods=["POST"]),
-        Route("/api/qa/{id:int}/links", api(lambda s, r, b: (
-            s.unlink(pid(r), int(b["other"])) if b.get("remove") else s.link(pid(r), int(b["other"])))),
-            methods=["POST"]),
-        Route("/api/qa/{id:int}/evidence", api(lambda s, r, b: s.add_evidence(pid(r), b)), methods=["POST"]),
-        Route("/api/evidence/{id:int}/recapture", api(lambda s, r, b: s.recapture_evidence(pid(r))),
-              methods=["POST"]),
-        Route("/api/evidence/{id:int}/archive", api(lambda s, r, b: s.archive_evidence(pid(r))), methods=["POST"]),
-        Route("/api/recheck", api(lambda s, r, b: {"results": s.recheck(b.get("qa_id"))}), methods=["POST"]),
-        Route("/api/dict", api(lambda s, r, b: s.dictionary())),
-        Route("/api/dict", api(dict_post), methods=["POST"]),
-        Route("/api/reindex", api(lambda s, r, b: {"reindexed": reindex(s.conn, analyzer)}), methods=["POST"]),
-        Route("/api/status", api(status)),
+            category=b.get("category"), evidence=_evidence(b), note=b.get("note")))), methods=["PATCH"]),
+        Route("/api/qa/{id:int}/archive", api(lambda s, r, b: _qa_out(s.archive_qa(
+            pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
+        Route("/api/qa/{id:int}/restore", api(lambda s, r, b: _qa_out(s.restore_qa(
+            pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]
     hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}

@@ -192,6 +192,43 @@ def capture(spec: Mapping) -> dict:
     return _row("note", anchor=anchor, captured={"text": text})
 
 
+LINE_SEP = " ; "
+NOTE_PREFIX = "메모:"
+
+
+def parse_line(line: str) -> list[dict]:
+    """화면 편집 폼의 근거 한 줄을 근거 spec 목록으로 바꾼다. 여러 근거는 " ; " 로 나눈다.
+    http(s):// 로 시작하면 url, "메모:" 로 시작하면 note, 나머지는 경로(auto)다.
+    경로 뒤 첫 " #" 다음은 anchor 다(경로에는 공백이, anchor 에는 # 이 들어갈 수 있다)."""
+    specs = []
+    for part in (p.strip() for p in (line or "").split(LINE_SEP)):
+        if not part:
+            continue
+        if re.match(r"https?://", part, re.IGNORECASE):
+            specs.append({"kind": "url", "url": part})
+        elif part.startswith(NOTE_PREFIX):
+            specs.append({"kind": "note", "text": part[len(NOTE_PREFIX):].strip()})
+        else:
+            path, _, anchor = part.partition(" #")
+            specs.append({"kind": "auto", "path": path.strip(), "anchor": anchor.strip() or None})
+    return specs
+
+
+def line_of(evidence: list[Mapping]) -> str:
+    """Store 가 돌려준 근거 목록을 parse_line 이 다시 읽을 수 있는 한 줄로 만든다."""
+    parts = []
+    for e in evidence:
+        if e["kind"] == "url":
+            parts.append(e["path"])
+            continue
+        if e["kind"] == "note":
+            parts.append(f"{NOTE_PREFIX} {e['text']}")
+            continue
+        path = e["path"] or e["repo"]  # 경로가 여럿인 git 근거와 githead 는 저장소 경로로 보인다
+        parts.append(f"{path} #{e['anchor']}" if e.get("anchor") else path)
+    return LINE_SEP.join(parts)
+
+
 def spec_of(row: Mapping) -> dict:
     """저장된 근거 행에서 다시 캡처할 spec 을 만든다(재기록용, git 은 현재 HEAD 기준)."""
     kind = row["kind"]

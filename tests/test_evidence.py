@@ -203,3 +203,74 @@ def test_store_rejects_bad_evidence_before_writing(conn, base):
     with pytest.raises(ValidationError):
         user.add_qa("이관", "질문", "답변", evidence=[{"kind": "file", "path": str(base / "없음")}])
     assert conn.execute("SELECT count(*) FROM qa").fetchone()[0] == 0
+
+
+# ---------- 화면 편집 폼의 근거 한 줄 ----------
+
+@pytest.mark.parametrize("line, specs", [
+    ("", []),
+    ("   ", []),
+    ("D:/0. work/한글 폴더/a.py", [{"kind": "auto", "path": "D:/0. work/한글 폴더/a.py", "anchor": None}]),
+    ("D:/0. work/a.py #def foo", [{"kind": "auto", "path": "D:/0. work/a.py", "anchor": "def foo"}]),
+    ("D:/a.py #C# 코드 #2", [{"kind": "auto", "path": "D:/a.py", "anchor": "C# 코드 #2"}]),
+    ("https://kubernetes.io/docs #x", [{"kind": "url", "url": "https://kubernetes.io/docs #x"}]),
+    ("메모: 사용자가 콘솔에서 확인", [{"kind": "note", "text": "사용자가 콘솔에서 확인"}]),
+    ("D:/a.py #f ; https://e.example ; 메모:구두 확인",
+     [{"kind": "auto", "path": "D:/a.py", "anchor": "f"}, {"kind": "url", "url": "https://e.example"},
+      {"kind": "note", "text": "구두 확인"}]),
+])
+def test_parse_line(line, specs):
+    from kb.evidence import parse_line
+    assert parse_line(line) == specs
+
+
+def test_line_of_round_trips(conn, base):
+    from kb.evidence import line_of, parse_line
+    f = base / "근거 파일.txt"
+    f.write_text("v1", encoding="utf-8")
+    f = f.resolve()  # 저장되는 경로는 resolve 한 값이다(윈도우 임시 폴더는 8.3 짧은 이름일 수 있다)
+    s = Store(conn, "user")
+    s.add_category("이관")
+    line = f"{f} #anchor 1 ; https://e.example ; 메모: 사용자 확인"
+    item = s.add_qa("이관", "질문", "답변", evidence=parse_line(line))["item"]
+    shown = line_of(item["evidence"])
+    assert parse_line(shown) == parse_line(line)
+    assert line_of([]) == ""
+
+
+def test_update_replaces_evidence_without_false_conflict(conn, base):
+    f1, f2 = base / "첫째.txt", base / "둘째.txt"
+    f1.write_text("1", encoding="utf-8")
+    f2.write_text("2", encoding="utf-8")
+    s = Store(conn, "user")
+    s.add_category("이관")
+    item = s.add_qa("이관", "질문", "답변")["item"]
+    assert item["evidence_state"] == "none"
+
+    # 근거만 바꿔도 된다. 상태 재계산이 버전을 올려도 같은 요청 안이라 충돌로 보지 않는다
+    after = s.update_qa(item["id"], item["version"], evidence=[{"kind": "auto", "path": str(f1)}])
+    assert [e["path"] for e in after["evidence"]] == [str(f1.resolve())]
+    assert after["evidence_state"] == "trusted"
+
+    after2 = s.update_qa(after["id"], after["version"], answer="고친 답변",
+                         evidence=[{"kind": "auto", "path": str(f2)}])
+    assert [e["path"] for e in after2["evidence"]] == [str(f2.resolve())]
+    assert after2["answer"] == "고친 답변"
+
+    cleared = s.update_qa(after2["id"], after2["version"], evidence=[])
+    assert cleared["evidence"] == [] and cleared["evidence_state"] == "none"
+    assert conn.execute("SELECT count(*) FROM evidence WHERE deleted_at IS NOT NULL").fetchone()[0] == 2
+
+    from kb.errors import ConflictError
+    with pytest.raises(ConflictError):
+        s.update_qa(item["id"], item["version"], evidence=[])
+
+
+def test_update_with_bad_evidence_changes_nothing(conn, base):
+    s = Store(conn, "user")
+    s.add_category("이관")
+    item = s.add_qa("이관", "질문", "답변")["item"]
+    with pytest.raises(ValidationError, match="근거 경로가 없다"):
+        s.update_qa(item["id"], item["version"], answer="바꾼 답변",
+                    evidence=[{"kind": "auto", "path": str(base / "없는 파일")}])
+    assert s.get_qa(item["id"])["answer"] == "답변"

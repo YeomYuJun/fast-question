@@ -1,0 +1,76 @@
+/* fast-question — generated from tokens.json. 직접 고치지 말고 tokens.json 을 고친 뒤 다시 만든다. */
+
+@font-face{font-family:"Pretendard";src:url("fonts/Pretendard-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"Pretendard";src:url("fonts/Pretendard-SemiBold.woff2") format("woff2");font-weight:600;font-style:normal;font-display:swap}
+@font-face{font-family:"Pretendard";src:url("fonts/Pretendard-Bold.woff2") format("woff2");font-weight:700;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("fonts/JetBrainsMono-Regular.woff2") format("woff2");font-weight:400;font-style:normal;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("fonts/JetBrainsMono-Medium.woff2") format("woff2");font-weight:500;font-style:normal;font-display:swap}
+
+:root, [data-theme="light"] {
+  --bg: #f7f6f2;
+  --surface: #ffffff;
+  --surface-2: #f0eee8;
+  --line: #e3e0d8;
+  --line-strong: #948d7f;
+  --ink: #1f2633;
+  --muted: #4f5a68;
+  --faint: #656e7a;
+  --accent: #2357d6;
+  --accent-ink: #ffffff;
+  --accent-soft: #e7eefc;
+  --accent-line: #b9cbf5;
+  --match-bg: #ffe58a;
+  --match-ink: #1f2633;
+  --stale: #a53a0a;
+  --stale-soft: #fdeee5;
+  --claude: #5b3fc4;
+  --claude-soft: #efebfc;
+  --user: #1a6b4f;
+  --user-soft: #e5f3ed;
+  --font-sans: Pretendard, -apple-system, "Malgun Gothic", sans-serif;
+  --font-mono: "JetBrains Mono", D2Coding, Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-12: 48px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(31,38,51,.06), 0 4px 16px rgba(31,38,51,.06);
+  --text-question: 600 15px/22px var(--font-sans);
+  --text-answer: 400 14px/22px var(--font-sans);
+  --text-question-lg: 700 18px/26px var(--font-sans);
+  --text-answer-lg: 400 15px/25px var(--font-sans);
+  --text-search: 400 16px/24px var(--font-sans);
+  --text-label: 600 12px/18px var(--font-sans);
+  --text-chip: 400 12px/18px var(--font-sans);
+  --text-meta: 400 11.5px/16px var(--font-mono);
+  --text-evidence: 400 12px/18px var(--font-mono);
+}
+
+/* Teal Dark: 색상만 바뀐다 */
+[data-theme="dark"] {
+  --bg: #1b1d21;
+  --surface: #23262b;
+  --surface-2: #2a2e34;
+  --line: #34383f;
+  --line-strong: #6c727c;
+  --ink: #e6e8eb;
+  --muted: #a3aab4;
+  --faint: #8a919b;
+  --accent: #2bb3a3;
+  --accent-ink: #0f1a19;
+  --accent-soft: #1f3a37;
+  --accent-line: #2a6b63;
+  --match-bg: #5c4a24;
+  --match-ink: #fff3dc;
+  --stale: #f08a5d;
+  --stale-soft: #2a2420;
+  --claude: #a9b2ff;
+  --claude-soft: #262838;
+  --user: #5cc8a0;
+  --user-soft: #1f2b27;
+}
