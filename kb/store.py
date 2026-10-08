@@ -9,6 +9,7 @@ from typing import Iterator, Literal
 
 from kb.db import BUMP, NOW, tx
 from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
+from kb.evidence import Checker, capture, overall_state, spec_of
 from kb.schema import AUDITED
 from kb.text import check_answer, check_name, check_question, clean
 
@@ -223,19 +224,25 @@ class Store:
             item["score"] = round(s, 2)
         return items
 
-    def add_qa(self, category: int | str, question: str, answer: str, *,
+    def add_qa(self, category: int | str, question: str, answer: str, *, evidence: list[dict] | None = None,
                links: list[int] | None = None, force: bool = False) -> dict:
         q, a = check_question(question), check_answer(answer)
         cid = self.resolve_category(category)
+        # 근거는 쓰기 전에 모두 캡처한다. 하나라도 틀리면 아무것도 쓰지 않는다
+        captured = [capture(spec) for spec in evidence or []]
         if not force:
             sim = self.similar(q)
             if sim:
                 return {"status": "similar_found", "similar": sim}
+        verdicts = ["external" if e["kind"] in ("url", "note") else "same" for e in captured]
         with self._writing() as c:
             qid = c.execute(
-                "INSERT INTO qa(category_id, question, answer, created_by, updated_by) VALUES (?,?,?,?,?)",
-                (cid, q, a, self.actor, self.actor),
+                "INSERT INTO qa(category_id, question, answer, evidence_state, created_by, updated_by) "
+                "VALUES (?,?,?,?,?,?)",
+                (cid, q, a, overall_state(verdicts), self.actor, self.actor),
             ).lastrowid
+            for e, v in zip(captured, verdicts):
+                self._insert_evidence(qid, e, v)
             for other in links or []:
                 self._link(qid, int(other))
         return {"status": "created", "item": self.get_qa(qid)}
@@ -251,8 +258,106 @@ class Store:
         item["revisions"] = self.history("qa", id)
         return item
 
+    # ---------- 근거 ----------
+
+    EV_COLS = ("id, qa_id, kind, path, anchor, repo, commit_sha, paths_json, captured_json, verdict, "
+               "verdict_detail, checked_at, created_at, created_by, deleted_at, version")
+
+    def _insert_evidence(self, qa_id: int, e: dict, verdict: str) -> int:
+        return self.conn.execute(
+            "INSERT INTO evidence(qa_id, kind, path, anchor, repo, commit_sha, paths_json, captured_json, "
+            f"verdict, checked_at, created_by, updated_by) VALUES (?,?,?,?,?,?,?,?,?,{NOW},?,?)",
+            (qa_id, e["kind"], e["path"], e["anchor"], e["repo"], e["commit_sha"], e["paths_json"],
+             e["captured_json"], verdict, self.actor, self.actor),
+        ).lastrowid
+
+    def _evidence_row(self, evidence_id: int) -> sqlite3.Row:
+        row = self.conn.execute(f"SELECT {self.EV_COLS} FROM evidence WHERE id = ?", (evidence_id,)).fetchone()
+        if row is None:
+            raise NotFoundError(f"근거를 찾지 못했다: {evidence_id}")
+        return row
+
+    @staticmethod
+    def _evidence_dict(r: sqlite3.Row) -> dict:
+        cap = json.loads(r["captured_json"]) if r["captured_json"] else {}
+        return {
+            "id": r["id"], "qa_id": r["qa_id"], "kind": r["kind"], "path": r["path"], "anchor": r["anchor"],
+            "repo": r["repo"], "commit": r["commit_sha"],
+            "paths": json.loads(r["paths_json"]) if r["paths_json"] else None,
+            "text": cap.get("text") if r["kind"] == "note" else None,
+            "verdict": r["verdict"], "verdict_detail": r["verdict_detail"], "checked_at": r["checked_at"],
+            "created_at": r["created_at"], "created_by": r["created_by"], "version": r["version"],
+        }
+
     def _evidence_list(self, qa_id: int) -> list[dict]:
-        return []
+        rows = self.conn.execute(
+            f"SELECT {self.EV_COLS} FROM evidence WHERE qa_id = ? AND deleted_at IS NULL ORDER BY id", (qa_id,))
+        return [self._evidence_dict(r) for r in rows]
+
+    def _recompute_state(self, qa_id: int) -> None:
+        verdicts = [r[0] or "unknown" for r in self.conn.execute(
+            "SELECT verdict FROM evidence WHERE qa_id = ? AND deleted_at IS NULL", (qa_id,))]
+        state = overall_state(verdicts)
+        self.conn.execute(
+            f"UPDATE qa SET evidence_state = ?, updated_by = ?, {BUMP} WHERE id = ? AND evidence_state IS NOT ?",
+            (state, self.actor, qa_id, state))
+
+    def add_evidence(self, qa_id: int, spec: dict) -> dict:
+        self._qa_row(qa_id)
+        e = capture(spec)
+        with self._writing():
+            self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
+            self._recompute_state(qa_id)
+        return self.get_qa(qa_id)
+
+    def recapture_evidence(self, evidence_id: int) -> dict:
+        """근거를 지금 상태로 다시 기록한다. git 근거는 현재 HEAD 기준이 된다."""
+        row = self._evidence_row(evidence_id)
+        e = capture(spec_of(row))
+        verdict = "external" if e["kind"] in ("url", "note") else "same"
+        with self._writing() as c:
+            c.execute(
+                "UPDATE evidence SET path = ?, repo = ?, commit_sha = ?, paths_json = ?, captured_json = ?, "
+                f"verdict = ?, verdict_detail = NULL, checked_at = {NOW}, updated_by = ?, {BUMP} WHERE id = ?",
+                (e["path"], e["repo"], e["commit_sha"], e["paths_json"], e["captured_json"], verdict,
+                 self.actor, evidence_id))
+            self._recompute_state(row["qa_id"])
+        return self.get_qa(row["qa_id"])
+
+    def archive_evidence(self, evidence_id: int) -> dict:
+        row = self._evidence_row(evidence_id)
+        with self._writing() as c:
+            c.execute(f"UPDATE evidence SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
+                      "WHERE id = ? AND deleted_at IS NULL", (self.actor, self.actor, evidence_id))
+            self._recompute_state(row["qa_id"])
+        return self.get_qa(row["qa_id"])
+
+    def recheck(self, qa_id: int | None = None) -> list[dict]:
+        """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다."""
+        sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
+               "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL")
+        params: tuple = ()
+        if qa_id is not None:
+            sql += " AND e.qa_id = ?"
+            params = (qa_id,)
+        rows = self.conn.execute(sql, params).fetchall()
+        checker = Checker()
+        judged = [(r, *checker.check(dict(r))) for r in rows]  # git·파일 판정은 트랜잭션 밖에서
+        results = []
+        with self._writing() as c:
+            for r, verdict, detail in judged:
+                changed = verdict != r["verdict"] or (detail or None) != r["verdict_detail"]
+                if changed:
+                    c.execute(f"UPDATE evidence SET verdict = ?, verdict_detail = ?, checked_at = {NOW}, "
+                              f"updated_by = ?, {BUMP} WHERE id = ?", (verdict, detail or None, self.actor, r["id"]))
+                results.append({"evidence_id": r["id"], "qa_id": r["qa_id"], "verdict": verdict,
+                                "detail": detail, "changed": changed})
+            for q in {r["qa_id"] for r, _, _ in judged}:
+                self._recompute_state(q)
+            if qa_id is None:
+                c.execute(f"INSERT INTO meta(key, value) VALUES ('last_recheck', {NOW}) "
+                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        return results
 
     def update_qa(self, id: int, version: int, *, question: str | None = None, answer: str | None = None,
                   category: int | str | None = None, note: str | None = None) -> dict:
