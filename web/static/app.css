@@ -172,7 +172,6 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .ev .file { flex: none; color: var(--muted); }
 .ev .target, .ev .anchor { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ev.wrap .target, .ev.wrap .anchor { white-space: normal; }
-.ev .changed { flex: none; color: var(--stale); font-weight: 600; }
 .hist { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); }
 .hist > span { min-width: 0; }
 .more {

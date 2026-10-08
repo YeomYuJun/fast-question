@@ -451,7 +451,6 @@ function evidenceText(d) {
       f.append(el("span", { class: "target" }, target));
     }
     if (e.anchor) f.append(el("span", { class: "anchor" }, `#${e.anchor}`));
-    if (e.verdict === "unknown") f.append(el("span", { class: "changed", title: e.verdict_detail || "" }, "판정 불가"));
   });
   return f;
 }
