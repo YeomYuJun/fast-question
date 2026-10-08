@@ -474,6 +474,9 @@ class Store:
     def search(self, query: str, **opts) -> dict:
         return search_mod.search(self, query, analyzer=self.analyzer, **opts)
 
+    def search_many(self, queries: list[str], **opts) -> dict:
+        return search_mod.search_many(self, queries, analyzer=self.analyzer, **opts)
+
     def dictionary(self) -> dict:
         return dict_mod.snapshot(self.conn)
 

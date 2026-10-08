@@ -159,10 +159,69 @@ def test_search_10k_under_100ms(conn):
     synthetic(conn)
     s = Store(conn, "user")
     s.dict_action("synonym_add", terms=["임시파일", "임시"])
-    for q in ["용량", "원자적", "여유공간", "PETRA 복호화", "임시파일", "IV DB"]:
+    for q in ["용량", "원자적", "여유공간", "PETRA 복호화", "임시파일", "IV DB",
+              "용량 | 원자적 마운트", "PETRA -복호화", "q:볼륨 a:Kafka", "\"이관 방화벽\""]:
         s.search(q)
         t0 = time.perf_counter()
         for _ in range(3):
             res = s.search(q)
         ms = (time.perf_counter() - t0) / 3 * 1000
         assert ms < 100, f"{q}: {ms:.1f} ms, {res['total']}건"
+
+
+# ---------- 질의 문법 (kb/query.py) ----------
+
+def ids(res):
+    return {h["id"] for h in res["hits"]}
+
+
+def test_or_alternatives(store):
+    assert ids(store.search("PETRA | TypeHandler")) == {5, 7, 8}
+
+
+def test_minus_excludes_items(store):
+    assert ids(store.search("PETRA -제거")) == {8}
+
+
+def test_quoted_phrase_matches_with_space(store):
+    assert ids(store.search('"쓸 수"')) == {5}
+
+
+def test_field_scope(store):
+    assert ids(store.search("q:NAS")) == {1, 4}
+    assert ids(store.search("a:NAS")) == {3, 4}
+    hit = next(h for h in store.search("q:NAS")["hits"] if h["id"] == 4)
+    assert hit["spans"]["answer"] == [] and hit["spans"]["question"]
+
+
+def test_field_scope_short_term(store):
+    assert ids(store.search("q:IV")) == set() and ids(store.search("a:IV")) == {6}
+
+
+def test_path_finds_items_by_evidence_file(store, tmp_path):
+    f = tmp_path / "NasFileStorage.java"
+    f.write_text("class NasFileStorage {}", encoding="utf-8")
+    store.add_evidence(3, {"kind": "file", "path": str(f)})
+    assert ids(store.search("path:nasfilestorage.java")) == {3}
+    assert ids(store.search("path:NasFileStorage 용량")) == {3}
+    assert ids(store.search("path:NasFileStorage 원자적")) == set()
+
+
+def test_regex_guard(store):
+    from kb.errors import ValidationError
+    with pytest.raises(ValidationError, match="200자"):
+        store.search("a" * 201, regex=True)
+    with pytest.raises(ValidationError, match="중첩"):
+        store.search("(a+)+$", regex=True)
+
+
+def test_search_many_ranks_by_matched_queries(store):
+    res = store.search_many(["PETRA", "제거"])
+    assert [h["id"] for h in res["hits"]][:2] == [5, 8]
+    assert res["hits"][0]["matched"] == ["PETRA", "제거"] and res["hits"][1]["matched"] == ["PETRA"]
+    assert res["total"] == 2
+
+
+def test_search_many_similar_when_all_empty(store):
+    res = store.search_many(["볼륨이", "옮긴"])
+    assert res["hits"] == [] and {h["id"] for h in res["similar"]} == {1, 3}

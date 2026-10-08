@@ -27,7 +27,7 @@ fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분
 - kb_search 가 0건이면 표현을 바꿔 두 번까지 다시 검색한다(형태소·동의어로도 못 찾는 표현이 있다).
 """
 
-HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "evidence_state", "archived",
+HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "matched", "evidence_state", "archived",
             "created_by", "updated_at", "version")
 
 
@@ -65,14 +65,24 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
             store.conn.close()
 
     @server.tool()
-    def kb_search(query: str, category: str | None = None, limit: int = 20, include_archived: bool = False) -> dict:
-        """KB 를 검색한다. 공백으로 나눈 단어는 AND 로 찾는다.
+    def kb_search(query: str = "", queries: list[str] | None = None, regex: bool = False,
+                  category: str | None = None, limit: int = 20, include_archived: bool = False) -> dict:
+        """KB 를 검색한다. 공백으로 나눈 단어는 AND 다. 문법: a | b (OR), -a (제외), "a b" (구절),
+        q:a / a:a (질문만 / 답변만), path:파일이름 (그 파일을 근거로 단 항목).
+        queries 에 표현 여러 개를 주면 한 번에 찾고, 항목마다 걸린 질의(matched)와 걸린 질의 수 순으로 돌려준다.
+        regex=true 면 query 를 정규식(200자 이하, 중첩 반복 금지)으로 질문·답변에서 찾는다. 문법·동의어·형태소는 쓰지 않는다.
         hits 의 tier 는 exact(그대로 일치), synonym(동의어), morph(형태소: 활용형·조사 차이)다.
         hits 가 0건이면 similar 에 비슷한 결과가 온다. category 는 "대분류" 또는 "대분류 > 중분류"."""
         def go(s: Store):
             cid = s.resolve_category(category) if category else None
-            res = s.search(query, category_id=cid, include_archived=include_archived, limit=limit)
-            return {"query": res["query"], "total": res["total"], "groups": res["groups"],
+            opts = {"category_id": cid, "include_archived": include_archived, "limit": limit}
+            if queries:
+                res = s.search_many(queries, regex=regex, **opts)
+                head = {"queries": res["queries"]}
+            else:
+                res = s.search(query, regex=regex, **opts)
+                head = {"query": res["query"]}
+            return {**head, "total": res["total"], "groups": res["groups"],
                     "hits": [_hit(h) for h in res["hits"]], "similar": [_hit(h) for h in res["similar"]],
                     "morph": res["morph"]}
         return run(go)

@@ -118,10 +118,18 @@ class Analyzer:
     def _phrase(m: str) -> str:
         return '"' + m.replace('"', '""') + '"'
 
-    def match_all(self, conn: sqlite3.Connection, morphs: list[str]) -> set[int]:
-        if not morphs:
+    def match_expr(self, conn: sqlite3.Connection, groups: list[list[list[str]]],
+                   excludes: list[list[str]] | None = None) -> set[int]:
+        """그룹끼리 AND, 그룹 안 대안끼리 OR, 대안 안 형태소끼리 AND. excludes 의 대안은 NOT 으로 뺀다."""
+        groups = [g for g in ([ms for ms in g if ms] for g in groups) if g]
+        if not groups:
             return set()
-        expr = " AND ".join(self._phrase(m) for m in morphs)
+
+        def alt(ms: list[str]) -> str:
+            return "(" + " AND ".join(self._phrase(m) for m in ms) + ")"
+        expr = " AND ".join("(" + " OR ".join(alt(ms) for ms in g) + ")" for g in groups)
+        if excludes := [ms for ms in excludes or [] if ms]:
+            expr = f"({expr}) NOT (" + " OR ".join(alt(ms) for ms in excludes) + ")"
         return {r[0] for r in conn.execute("SELECT rowid FROM qa_morph_fts WHERE qa_morph_fts MATCH ?", (expr,))}
 
     def match_ratio(self, conn: sqlite3.Connection, query: str) -> dict[int, float]:

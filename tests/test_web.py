@@ -191,3 +191,12 @@ def test_rejects_foreign_host_on_read(client):
 def test_accepts_same_origin(client, origin):
     r = client.post("/api/categories", json={"name": "정상 분류"}, headers={"origin": origin})
     assert r.status_code == 200
+
+
+def test_search_box_syntax_without_regex(client):
+    item = add_basics(client)
+    assert [h["id"] for h in client.get("/api/search", params={"q": "rename | 없는말"}).json()["hits"]] == [item["id"]]
+    assert client.get("/api/search", params={"q": "rename -확정"}).json()["hits"] == []
+    assert client.get("/api/search", params={"q": "q:rename"}).json()["hits"] == []
+    # 정규식은 MCP 에서만 쓴다. 화면 요청의 regex 인자는 무시되어 글자 그대로 찾는다
+    assert client.get("/api/search", params={"q": "ren.*", "regex": "1"}).json()["hits"] == []

@@ -154,3 +154,18 @@ def test_parallel_tool_calls_use_separate_connections(server, db):
     c = connect(db)
     assert c.execute("SELECT count(*) FROM qa").fetchone()[0] == 30
     c.close()
+
+
+def test_search_syntax_queries_and_regex(server):
+    call(server, "kb_add_category", {"name": "이관"})
+    for q, a in [("PETRA 를 제거하는 이유", "대상 DB 에서 쓸 수 없다."), ("PETRA 데이터 이관 순서", "복호화 후 옮긴다."),
+                 ("TypeHandler 가 맡는 일", "PLS_ 호출(507)을 대신한다.")]:
+        call(server, "kb_add", {"category": "이관", "question": q, "answer": a, "force": True})
+    err, res = call(server, "kb_search", {"query": "PETRA -제거"})
+    assert not err and [h["question"] for h in res["hits"]] == ["PETRA 데이터 이관 순서"]
+    err, res = call(server, "kb_search", {"queries": ["PETRA", "제거"]})
+    assert not err and res["hits"][0]["matched"] == ["PETRA", "제거"] and res["total"] == 2
+    err, res = call(server, "kb_search", {"query": r"\(\d{3}\)", "regex": True})
+    assert not err and [h["question"] for h in res["hits"]] == ["TypeHandler 가 맡는 일"]
+    err, text = call(server, "kb_search", {"query": "(a+)+", "regex": True})
+    assert err and "중첩" in text

@@ -125,10 +125,20 @@ def test_search_10k_with_morph_under_100ms(conn, shared_analyzer):
     synthetic(conn)
     s = Store(conn, "user", analyzer=shared_analyzer)
     reindex(conn, shared_analyzer)
-    for q in ["용량", "원자적", "정해진 용량", "옮긴 파일", "없는단어"]:
+    for q in ["용량", "원자적", "정해진 용량", "옮긴 파일", "없는단어", "옮긴 | 정해진 -방화벽", "a:옮긴 볼륨"]:
         s.search(q)
         t0 = time.perf_counter()
         for _ in range(3):
             res = s.search(q)
         ms = (time.perf_counter() - t0) / 3 * 1000
         assert ms < 100, f"{q}: {ms:.1f} ms, {res['total']}건"
+
+
+def test_morph_or_and_exclude(store):
+    assert tiers(store.search("읽혀 | 붙어"), "morph") == {2, 10}
+    assert tiers(store.search("옮긴 -PETRA"), "morph") == {1}
+
+
+def test_morph_respects_field_scope(store):
+    assert tiers(store.search("a:옮긴"), "morph") == {1, 8}
+    assert tiers(store.search("q:옮긴"), "morph") == set()
