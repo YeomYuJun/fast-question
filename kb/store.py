@@ -304,13 +304,13 @@ class Store:
             f"SELECT {self.EV_COLS} FROM evidence WHERE qa_id = ? AND deleted_at IS NULL ORDER BY id", (qa_id,))
         return [self._evidence_dict(r) for r in rows]
 
-    def _recompute_state(self, qa_id: int) -> None:
+    def _recompute_state(self, qa_id: int, actor: str | None = None) -> None:
         verdicts = [r[0] or "unknown" for r in self.conn.execute(
             "SELECT verdict FROM evidence WHERE qa_id = ? AND deleted_at IS NULL", (qa_id,))]
         state = overall_state(verdicts)
         self.conn.execute(
             f"UPDATE qa SET evidence_state = ?, updated_by = ?, {BUMP} WHERE id = ? AND evidence_state IS NOT ?",
-            (state, self.actor, qa_id, state))
+            (state, actor or self.actor, qa_id, state))
 
     def add_evidence(self, qa_id: int, spec: dict) -> dict:
         self._qa_row(qa_id)
@@ -343,7 +343,8 @@ class Store:
         return self.get_qa(row["qa_id"])
 
     def recheck(self, qa_id: int | None = None) -> list[dict]:
-        """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다."""
+        """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다.
+        판정 변화는 근거 파일이 바뀌어 생긴 것이므로 누가 재검증을 눌렀든 system 주체로 기록한다."""
         sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
                "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL")
         params: tuple = ()
@@ -359,11 +360,11 @@ class Store:
                 changed = verdict != r["verdict"] or (detail or None) != r["verdict_detail"]
                 if changed:
                     c.execute(f"UPDATE evidence SET verdict = ?, verdict_detail = ?, checked_at = {NOW}, "
-                              f"updated_by = ?, {BUMP} WHERE id = ?", (verdict, detail or None, self.actor, r["id"]))
+                              f"updated_by = 'system', {BUMP} WHERE id = ?", (verdict, detail or None, r["id"]))
                 results.append({"evidence_id": r["id"], "qa_id": r["qa_id"], "verdict": verdict,
                                 "detail": detail, "changed": changed})
             for q in {r["qa_id"] for r, _, _ in judged}:
-                self._recompute_state(q)
+                self._recompute_state(q, actor="system")
             if qa_id is None:
                 c.execute(f"INSERT INTO meta(key, value) VALUES ('last_recheck', {NOW}) "
                           "ON CONFLICT(key) DO UPDATE SET value = excluded.value")

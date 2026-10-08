@@ -183,6 +183,20 @@ def test_store_evidence_lifecycle(conn, base):
     assert user.get_qa(item["id"])["evidence_state"] == "external"
 
 
+def test_recheck_state_changes_are_recorded_as_system(conn, base):
+    f = base / "근거.txt"
+    f.write_text("v1", encoding="utf-8")
+    user = Store(conn, "user")
+    user.add_category("이관")
+    item = user.add_qa("이관", "근거 질문", "근거 답변", evidence=[{"kind": "auto", "path": str(f)}])["item"]
+    f.write_text("v2", encoding="utf-8")
+
+    user.recheck()  # 사용자가 화면에서 재검증을 눌러도 판정 변화는 system 이 기록한다
+    revs = conn.execute("SELECT table_name, actor FROM revision WHERE id > (SELECT max(id) - 2 FROM revision)").fetchall()
+    assert {(r[0], r[1]) for r in revs} == {("evidence", "system"), ("qa", "system")}
+    assert user.get_qa(item["id"])["evidence_state"] == "stale"
+
+
 def test_store_rejects_bad_evidence_before_writing(conn, base):
     user = Store(conn, "user")
     user.add_category("이관")
