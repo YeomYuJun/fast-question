@@ -30,6 +30,10 @@
 
 <div class="layout">
   <aside id="side" class="side" hidden>
+    <div class="side-head">
+      <span class="label">분류</span>
+      <button id="cat-edit" class="navbtn small" type="button" aria-pressed="false">분류 편집</button>
+    </div>
     <nav id="cat-tree" class="tree" aria-label="분류"></nav>
     <form id="cat-form" class="cat-form" hidden>
       <input id="cat-name" class="fld" aria-label="새 분류 이름" placeholder="이름 (중분류는 대분류 > 이름)" autocomplete="off">
@@ -39,7 +43,6 @@
       </div>
     </form>
     <button id="cat-add" class="dashed" type="button">+ 분류 추가</button>
-    <button id="cat-edit" class="btn quiet small" type="button" aria-pressed="false">분류 편집</button>
   </aside>
 
   <main class="main">

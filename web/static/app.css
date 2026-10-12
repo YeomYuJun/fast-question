@@ -90,16 +90,30 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .dashed:hover { color: var(--accent); border-color: var(--accent); }
 .cat-form { display: flex; flex-direction: column; gap: 6px; }
 .cat-form-btns { display: flex; gap: 6px; }
+.side-head { display: flex; align-items: center; gap: var(--space-2); padding: 0 0 8px 8px; border-bottom: 1px solid var(--line); }
+.side-head .label { flex-grow: 1; font-size: 12px; line-height: 18px; font-weight: 600; color: var(--muted); }
+.navbtn.small { flex: none; padding: 1px 8px; font-size: 12px; line-height: 18px; }
+/* 편집 상태: 패널 폭(약 200px)을 넘지 않게 버튼은 26px 아이콘이고, 이름이 길면 이름만 줄바꿈한다 */
 .facet-edit {
-  display: flex; align-items: center; gap: var(--space-1); border: 1px solid transparent;
-  border-radius: var(--radius-md); padding: 3px 4px 3px 8px; font-size: 13px; color: var(--ink);
+  display: flex; align-items: flex-start; gap: 2px; border: 1px solid transparent;
+  border-radius: var(--radius-md); padding: 2px 2px 2px 8px; font-size: 13px; color: var(--ink);
 }
+.facet-edit:not(.rename):hover, .facet-edit:not(.rename):focus-within { background: var(--surface-2); }
 .facet-edit.top { font-weight: 600; }
 .facet-edit.child { padding-left: 22px; }
-.facet-edit .name { flex-grow: 1; min-width: 0; overflow-wrap: anywhere; }
-.facet-edit .btn { font-weight: 400; }
-.facet-edit.rename .fld { flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 13px; }
-#cat-edit { align-self: flex-start; }
+.facet-edit .name { flex-grow: 1; min-width: 0; padding-top: 3px; overflow-wrap: anywhere; }
+.facet-edit.rename { align-items: center; }
+.facet-edit.rename .fld { flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 13px; font-weight: inherit; }
+.ibtn {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 1px solid transparent; background: transparent; border-radius: var(--radius-md); color: var(--muted); cursor: pointer;
+}
+.ibtn.rn:hover { color: var(--accent); }
+.ibtn.del:hover { color: var(--stale); }
+.ibtn.ok { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.ibtn.ok:hover { color: var(--accent-ink); filter: brightness(1.08); }
+.ibtn.no:hover { color: var(--ink); border-color: var(--line-strong); }
+.ibtn:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* ---------- 검색창·요약 ---------- */
 .search {

@@ -18,6 +18,32 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 
+// 14px 선 아이콘(design/screens/Main.dc.html 의 SVG 그대로). el() 은 HTML 이름공간이라 SVG 는 따로 만든다
+const ICONS = {
+  pen: ["M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z", "M13.5 6.5l4 4"],
+  trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5M14 11v5"],
+  check: ["M5 12.5l4.5 4.5L19 7.5"],
+  cross: ["M6 6l12 12M18 6L6 18"],
+};
+function icon(name) {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  const attrs = { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+    "stroke-width": name === "check" ? 2.4 : 2, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" };
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+  for (const d of ICONS[name]) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d);
+    svg.append(p);
+  }
+  return svg;
+}
+
+// 아이콘만 있는 버튼. 보이는 글자가 없어서 aria-label 이 필수다
+function ibtn(kind, name, label, title, onclick, type = "button") {
+  return el("button", { class: `ibtn ${kind}`, type, "aria-label": label, title, onclick }, icon(name));
+}
+
 // replaceChildren 은 null 과 배열을 글자로 넣는다. el() 과 같은 규칙으로 걸러서 넣는다
 function fill(node, ...kids) {
   node.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
@@ -153,8 +179,8 @@ function renderTreeEdit() {
     if (state.catRenaming === c.id) return renameForm(c, cls);
     return el("div", { class: `facet-edit ${cls}` },
       el("span", { class: "name" }, c.name),
-      el("button", { class: "btn quiet small", type: "button", onclick: () => { state.catRenaming = c.id; renderTree(); } }, "이름 변경"),
-      el("button", { class: "btn quiet small", type: "button", onclick: () => deleteCategory(c) }, "삭제"));
+      ibtn("rn", "pen", `${c.path} 이름 변경`, "이름 변경", () => { state.catRenaming = c.id; renderTree(); }),
+      ibtn("del", "trash", `${c.path} 삭제`, "삭제", () => deleteCategory(c)));
   };
   fill($("#cat-tree"), state.cats.flatMap((t) => [line(t, "top"), ...t.children.map((c) => line(c, "child"))]));
 }
@@ -180,8 +206,8 @@ function renameForm(c, cls) {
     },
     onkeydown: (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } },
   }, input,
-  el("button", { class: "btn small primary", type: "submit" }, "저장"),
-  el("button", { class: "btn small", type: "button", onclick: cancel }, "취소"));
+  ibtn("ok", "check", "저장", "저장 (Enter)", null, "submit"),
+  ibtn("no", "cross", "취소", "취소 (Esc)", cancel));
   setTimeout(() => { input.focus(); input.select(); }, 0);
   return form;
 }
@@ -216,7 +242,8 @@ function setCatEdit(on) {
   state.catEdit = on;
   state.catRenaming = null;
   const b = $("#cat-edit");
-  b.textContent = on ? "편집 마치기" : "분류 편집";
+  b.textContent = on ? "편집 종료" : "분류 편집";
+  b.classList.toggle("on", on);
   b.setAttribute("aria-pressed", String(on));
   renderTree();
 }
@@ -719,7 +746,7 @@ function editForm(base, isNew, onSaved, onCancel) {
     el("button", { class: "btn primary", type: "submit", title: `${isNew ? "등록" : "저장"} (Ctrl+Enter)` }, isNew ? "등록" : "저장"),
     el("button", { class: "btn", type: "button", title: "취소 (Esc)", onclick: () => onCancel() }, "취소"),
     isNew ? null : el("span", { class: "spacer" }),
-    isNew ? null : el("button", { class: "btn quiet", type: "button", onclick: remove }, "삭제")),
+    isNew ? null : ibtn("del", "trash", "이 질문 삭제", "삭제", remove)),
   msg, sim);
   setTimeout(() => (isNew && fq.value ? fa : fq).focus(), 0);
   return form;
