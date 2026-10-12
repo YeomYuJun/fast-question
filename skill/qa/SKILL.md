@@ -62,6 +62,12 @@ fast-question 은 사용자가 작업 중 생긴 질문과 답을 1~2줄로 쌓�
 1. `kb_recheck` 로 판정한다. 근거 재검증은 web 서버가 하루 한 번 자동으로도 돈다.
 2. `stale` 항목은 조회 4번과 같이 처리한다. `unknown`(판정 불가)은 근거 경로가 없어진 경우가 많다. 경로를 찾아 `kb_evidence` 로 새 근거를 달고 옛 근거는 archive 한다.
 
+## 삭제·복원·분류 편집 (사용자가 요청한 경우만)
+
+- Q&A 삭제는 `kb_archive` 다(화면의 삭제와 같다. 행은 남고 검색에서 빠진다). 되살릴 때는 `kb_search` 를 `include_archived=true` 로 불러 찾고 `kb_restore` 한다. 분류가 삭제된 항목은 `category` 에 옮길 분류를 준다.
+- 분류 이름은 `kb_categories` 의 version 으로 `kb_rename_category` 해서 바꾼다.
+- 분류 삭제는 하위 분류와 그 안의 Q&A 를 모두 함께 삭제한다. `kb_delete_category` 를 confirm 없이 불러 받은 `warning` 을 사용자에게 그대로 보여 주고, 사용자가 승인한 뒤에만 `confirm=true` 로 다시 부른다. 이 경우는 위 "묻지 않는다" 의 예외다.
+
 ## 사전
 
 - 같은 뜻의 다른 표기(규칙/룰, NAS/스토리지)를 찾게 하려면 `kb_dict` action=synonym_add.

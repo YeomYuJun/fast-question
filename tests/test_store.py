@@ -126,18 +126,81 @@ def test_archive_and_restore(user):
     assert restored["archived"] is False
 
 
-def test_archive_category_with_items_rejected(user):
-    cat = user.add_category("이관")
-    user.add_qa("이관", "질문 하나", "답변 하나")
-    with pytest.raises(ValidationError, match="보관되지 않은 Q&A"):
-        user.archive_category(cat["id"], cat["version"])
-
-
 def test_archive_empty_category(user):
     cat = user.add_category("이관")
-    archived = user.archive_category(cat["id"], cat["version"])
-    assert archived["archived"] is True
+    res = user.archive_category(cat["id"], cat["version"])
+    assert res["category"]["archived"] is True
+    assert (res["archived_children"], res["archived_qa"]) == (0, 0)
     assert user.categories() == []
+
+
+def test_archive_category_takes_children_and_items(user):
+    top = user.add_category("이관")
+    nas = user.add_category("NAS", parent="이관")
+    other = user.add_category("기타")
+    a = user.add_qa("이관", "rename 을 쓰는 이유", "답변 하나")["item"]
+    b = user.add_qa("이관 > NAS", "마운트 경로 확인 방법", "답변 둘")["item"]
+    gone = user.add_qa("이관 > NAS", "백업 보관 개수", "답변 셋")["item"]
+    user.archive_qa(gone["id"], gone["version"])
+    keep = user.add_qa("기타", "포트 번호 설정 위치", "답변 넷")["item"]
+
+    impact = user.category_impact(top["id"])
+    assert (impact["children"], impact["qa"]) == (1, 2)
+    assert impact["category"]["version"] == top["version"]
+
+    res = user.archive_category(top["id"], top["version"], note="정리")
+    assert (res["archived_children"], res["archived_qa"]) == (1, 2)
+    assert [c["id"] for c in user.categories()] == [other["id"]]
+    assert user.get_qa(a["id"])["archived"] and user.get_qa(b["id"])["archived"]
+    assert not user.get_qa(keep["id"])["archived"]
+    assert user._category(nas["id"])["archived"]
+    # 함께 보관된 행의 이력에 어느 분류 때문인지 남는다
+    assert "이관" in user.history("qa", b["id"])[0]["after"]["change_note"]
+    assert user.history("qa", b["id"])[0]["op"] == "archive"
+    # 이미 보관돼 있던 항목은 다시 쓰지 않는다
+    assert user.get_qa(gone["id"])["version"] == gone["version"] + 1
+
+
+def test_archive_category_version_conflict_changes_nothing(user):
+    top = user.add_category("이관")
+    item = user.add_qa("이관", "질문 하나", "답변 하나")["item"]
+    user.update_category(top["id"], top["version"], name="이관2")
+    with pytest.raises(ConflictError):
+        user.archive_category(top["id"], top["version"])
+    assert not user.get_qa(item["id"])["archived"]
+    assert [c["name"] for c in user.categories()] == ["이관2"]
+
+
+def test_archived_category_cannot_be_archived_or_measured_again(user):
+    cat = user.add_category("이관")
+    res = user.archive_category(cat["id"], cat["version"])
+    with pytest.raises(NotFoundError):
+        user.category_impact(cat["id"])
+    with pytest.raises(NotFoundError):
+        user.archive_category(cat["id"], res["category"]["version"])
+
+
+def test_rename_category(user):
+    top = user.add_category("이관")
+    user.add_category("NAS", parent="이관")
+    user.add_category("기타")
+    renamed = user.update_category(top["id"], top["version"], name="이관 사업")
+    assert renamed["path"] == "이관 사업"
+    assert user.resolve_category("이관 사업 > NAS")
+    with pytest.raises(ValidationError, match="같은 이름"):
+        user.update_category(top["id"], renamed["version"], name="기타")
+
+
+def test_restore_into_archived_category_needs_target(user):
+    top = user.add_category("이관")
+    user.add_category("기타")
+    item = user.add_qa("이관", "질문 하나", "답변 하나")["item"]
+    user.archive_category(top["id"], top["version"])
+    archived = user.get_qa(item["id"])
+    with pytest.raises(ValidationError, match="분류가 삭제"):
+        user.restore_qa(item["id"], archived["version"])
+    restored = user.restore_qa(item["id"], archived["version"], category="기타")
+    assert restored["archived"] is False and restored["category_path"] == "기타"
 
 
 def test_links_are_symmetric(user):

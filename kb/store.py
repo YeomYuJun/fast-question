@@ -189,24 +189,43 @@ class Store:
         self._update("category", id, version, sets, self._category)
         return self._category(id)
 
+    def _live_category(self, id: int) -> dict:
+        cat = self._category(id)
+        if cat["archived"]:
+            raise NotFoundError(f"분류를 찾지 못했다(이미 삭제했다): {id}")
+        return cat
+
+    def category_impact(self, id: int) -> dict:
+        """분류를 보관하면 함께 보관될 하위 분류 수와 Q&A 수."""
+        cat = self._live_category(id)
+        n_child, n_qa = self.conn.execute(
+            "SELECT (SELECT count(*) FROM category WHERE parent_id = :id AND deleted_at IS NULL), "
+            "(SELECT count(*) FROM qa WHERE deleted_at IS NULL AND category_id IN "
+            " (SELECT :id UNION SELECT id FROM category WHERE parent_id = :id AND deleted_at IS NULL))",
+            {"id": id}).fetchone()
+        return {"category": cat, "children": n_child, "qa": n_qa}
+
     def archive_category(self, id: int, version: int, note: str | None = None) -> dict:
-        self._category(id)
-        n_qa = self.conn.execute(
-            "SELECT count(*) FROM qa WHERE category_id = ? AND deleted_at IS NULL", (id,)).fetchone()[0]
-        n_child = self.conn.execute(
-            "SELECT count(*) FROM category WHERE parent_id = ? AND deleted_at IS NULL", (id,)).fetchone()[0]
-        if n_qa or n_child:
-            raise ValidationError(
-                f"분류에 보관되지 않은 Q&A {n_qa}건, 하위 분류 {n_child}개가 있다. 먼저 옮기거나 보관한다.")
+        """분류를 보관한다. 하위 분류와 그 안의 보관되지 않은 Q&A 도 같은 트랜잭션에서 함께 보관한다.
+        함께 보관된 행의 change_note 에는 어느 분류 때문인지 남긴다."""
+        cat = self._live_category(id)
+        follow = f"분류 '{cat['path']}' 삭제로 함께 삭제" + (f": {note}" if note else "")
+        archive = f"deleted_at = {NOW}, deleted_by = ?, updated_by = ?, change_note = ?, {BUMP}"
+        n_child = n_qa = 0
         with self._writing() as c:
-            n = c.execute(
-                f"UPDATE category SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, change_note = ?, {BUMP} "
-                "WHERE id = ? AND version = ? AND deleted_at IS NULL",
-                (self.actor, self.actor, note, id, version),
-            ).rowcount
+            n = c.execute(f"UPDATE category SET {archive} WHERE id = ? AND version = ? AND deleted_at IS NULL",
+                          (self.actor, self.actor, note, id, version)).rowcount
+            if n:
+                ids = [id] + [r[0] for r in c.execute(
+                    "SELECT id FROM category WHERE parent_id = ? AND deleted_at IS NULL", (id,))]
+                marks = ",".join("?" * len(ids))
+                n_qa = c.execute(f"UPDATE qa SET {archive} WHERE category_id IN ({marks}) AND deleted_at IS NULL",
+                                 [self.actor, self.actor, follow, *ids]).rowcount
+                n_child = c.execute(f"UPDATE category SET {archive} WHERE parent_id = ? AND deleted_at IS NULL",
+                                    (self.actor, self.actor, follow, id)).rowcount
         if n == 0:
             raise ConflictError("다른 곳에서 먼저 고쳤다. 현재 값을 다시 읽고 고친다.", current=self._category(id))
-        return self._category(id)
+        return {"category": self._category(id), "archived_children": n_child, "archived_qa": n_qa}
 
     # ---------- Q&A ----------
 
@@ -405,11 +424,15 @@ class Store:
             self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
         self._recompute_state(qa_id)
 
-    def _set_archived(self, id: int, version: int, archived: bool, note: str | None) -> dict:
+    def _set_archived(self, id: int, version: int, archived: bool, note: str | None,
+                      category_id: int | None = None) -> dict:
         current = lambda i: self._item(self._qa_row(i))  # noqa: E731
         self._qa_row(id)
         deleted = f"deleted_at = {NOW}, deleted_by = ?" if archived else "deleted_at = NULL, deleted_by = NULL"
         params = [self.actor] if archived else []
+        if category_id is not None:
+            deleted += ", category_id = ?"
+            params.append(category_id)
         with self._writing() as c:
             n = c.execute(
                 f"UPDATE qa SET {deleted}, updated_by = ?, change_note = ?, {BUMP} WHERE id = ? AND version = ?",
@@ -422,8 +445,17 @@ class Store:
     def archive_qa(self, id: int, version: int, note: str | None = None) -> dict:
         return self._set_archived(id, version, True, note)
 
-    def restore_qa(self, id: int, version: int, note: str | None = None) -> dict:
-        return self._set_archived(id, version, False, note)
+    def restore_qa(self, id: int, version: int, note: str | None = None,
+                   category: int | str | None = None) -> dict:
+        """분류가 삭제된 항목은 category(옮길 분류)를 주어야 복원된다."""
+        if category not in (None, ""):
+            cid = self.resolve_category(category)
+        else:
+            cid = None
+            current = self._qa_row(id)["category_id"]
+            if self._category(current)["archived"]:
+                raise ValidationError("이 항목의 분류가 삭제되어 있다. 옮길 분류를 함께 주어 복원한다.")
+        return self._set_archived(id, version, False, note, category_id=cid)
 
     # ---------- 관련 질문 ----------
 

@@ -8,7 +8,8 @@ from kb.db import connect
 from mcp_server.server import TOOLS, build_server, store_factory
 
 EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
-                  "kb_archive", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest"}
+                  "kb_archive", "kb_restore", "kb_rename_category", "kb_delete_category",
+                  "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest"}
 
 
 @pytest.fixture
@@ -133,6 +134,45 @@ def test_archive_and_link(server):
     assert [l["id"] for l in call(server, "kb_get", {"id": a["id"]})[1]["links"]] == [b["id"]]
     err, archived = call(server, "kb_archive", {"id": a["id"], "version": a["version"], "reason": "중복"})
     assert not err and archived["archived"] is True
+
+
+def test_restore_after_archive(server):
+    call(server, "kb_add_category", {"name": "이관"})
+    a = call(server, "kb_add", {"category": "이관", "question": "첫째 질문", "answer": "첫째 답변"})[1]["item"]
+    archived = call(server, "kb_archive", {"id": a["id"], "version": a["version"]})[1]
+    err, restored = call(server, "kb_restore", {"id": a["id"], "version": archived["version"], "reason": "실수"})
+    assert not err and restored["archived"] is False
+    assert restored["revisions"][0]["op"] == "restore"
+
+
+def test_rename_category(server):
+    top = call(server, "kb_add_category", {"name": "이관"})[1]
+    call(server, "kb_add_category", {"name": "NAS", "parent": "이관"})
+    err, renamed = call(server, "kb_rename_category", {"category": "이관", "version": top["version"],
+                                                       "name": "이관 사업"})
+    assert not err and renamed["path"] == "이관 사업"
+    tree = call(server, "kb_categories")[1]["categories"]
+    assert tree[0]["children"][0]["path"] == "이관 사업 > NAS"
+    err, msg = call(server, "kb_rename_category", {"category": "이관 사업", "version": top["version"], "name": "x"})
+    assert err and "먼저 고쳤다" in msg
+
+
+def test_delete_category_needs_confirm(server):
+    top = call(server, "kb_add_category", {"name": "이관"})[1]
+    call(server, "kb_add_category", {"name": "NAS", "parent": "이관"})
+    a = call(server, "kb_add", {"category": "이관 > NAS", "question": "첫째 질문", "answer": "첫째 답변"})[1]["item"]
+
+    err, preview = call(server, "kb_delete_category", {"category": "이관", "version": top["version"]})
+    assert not err and preview["deleted"] is False
+    assert (preview["children"], preview["qa"]) == (1, 1)
+    assert "1건" in preview["warning"] and "confirm" in preview["warning"]
+    assert call(server, "kb_categories")[1]["categories"][0]["name"] == "이관"
+
+    err, done = call(server, "kb_delete_category", {"category": "이관", "version": top["version"], "confirm": True})
+    assert not err and done["deleted"] is True
+    assert (done["archived_children"], done["archived_qa"]) == (1, 1)
+    assert call(server, "kb_categories")[1]["categories"] == []
+    assert call(server, "kb_get", {"id": a["id"]})[1]["archived"] is True
 
 
 def test_categories_tree(server):

@@ -25,6 +25,7 @@ fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분
   일반 지식(k8s 개념, 수학 등)은 근거 없이 쓴다. 사람에게 확인한 사실은 {"kind": "note", "text": "누가 어떻게 확인"} 을 단다.
 - 등록 전에 kb_search 로 같은 질문이 있는지 본다. 있으면 kb_get 으로 version 을 읽고 kb_update 로 고친다.
 - kb_search 가 0건이면 표현을 바꿔 두 번까지 다시 검색한다(형태소·동의어로도 못 찾는 표현이 있다).
+- 분류 삭제(kb_delete_category)는 하위 분류와 Q&A 를 모두 함께 삭제한다. 먼저 confirm 없이 불러 받은 경고문을 사용자에게 보여 주고, 승인을 받은 뒤에만 confirm=true 로 부른다.
 """
 
 HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "matched", "evidence_state", "archived",
@@ -129,8 +130,40 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
 
     @server.tool()
     def kb_archive(id: int, version: int, reason: str | None = None) -> dict:
-        """Q&A 를 보관한다(삭제하지 않는다). 검색 기본값에서 빠진다."""
+        """Q&A 를 삭제한다(화면의 삭제와 같다). 행은 남고 검색 기본값에서 빠진다. kb_restore 로 되살린다."""
         return run(lambda s: _detail(s.archive_qa(id, version, note=reason)))
+
+    @server.tool()
+    def kb_restore(id: int, version: int, reason: str | None = None, category: str | None = None) -> dict:
+        """삭제한 Q&A 를 되살린다. 삭제한 항목은 kb_search(include_archived=true) 로 찾는다.
+        그 항목의 분류가 삭제되어 있으면 category 에 옮길 분류를 준다."""
+        return run(lambda s: _detail(s.restore_qa(id, version, note=reason, category=category)))
+
+    @server.tool()
+    def kb_rename_category(category: str, version: int, name: str, reason: str | None = None) -> dict:
+        """분류 이름을 바꾼다. category 는 id, "대분류" 또는 "대분류 > 중분류", version 은 kb_categories 의 값이다.
+        name 은 새 이름 하나다(상위 분류는 바뀌지 않는다)."""
+        def go(s: Store):
+            return s.update_category(s.resolve_category(category), version, name=name, note=reason)
+        return run(go)
+
+    @server.tool()
+    def kb_delete_category(category: str, version: int, confirm: bool = False, reason: str | None = None) -> dict:
+        """분류를 삭제한다. 하위 분류와 그 안의 Q&A 도 모두 함께 삭제된다.
+        confirm 없이 부르면 아무것도 지우지 않고 함께 삭제될 하위 분류 수·Q&A 수와 경고문을 돌려준다.
+        그 경고문을 사용자에게 그대로 보여 주고, 사용자가 승인했을 때만 confirm=true 로 다시 부른다."""
+        def go(s: Store):
+            impact = s.category_impact(s.resolve_category(category))
+            cat = impact["category"]
+            if not confirm:
+                return {"deleted": False, "category": cat["path"], "version": cat["version"],
+                        "children": impact["children"], "qa": impact["qa"],
+                        "warning": (f"분류 '{cat['path']}' 를 삭제하면 하위 분류 {impact['children']}개와 "
+                                    f"Q&A {impact['qa']}건이 모두 함께 삭제된다. 사용자가 승인하면 confirm=true 로 다시 부른다.")}
+            res = s.archive_category(cat["id"], version, note=reason)
+            return {"deleted": True, "category": res["category"]["path"],
+                    "archived_children": res["archived_children"], "archived_qa": res["archived_qa"]}
+        return run(go)
 
     @server.tool()
     def kb_link(a: int, b: int, remove: bool = False) -> dict:
@@ -243,4 +276,4 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
 
 ADD_MANY_MAX = 100
 TOOLS = ("kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update", "kb_archive",
-         "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest")
+         "kb_restore", "kb_rename_category", "kb_delete_category", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest")
