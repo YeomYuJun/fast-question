@@ -32,8 +32,18 @@ from kb.morph import Analyzer
 from kb.store import Store
 
 STATIC = Path(__file__).resolve().parent / "static"
+# 화면 파일은 매번 서버에 확인하게 한다(안 바뀌었으면 304). 헤더가 없으면 브라우저가 옛 app.js 를
+# 캐시에서 꺼내 새 index.html 과 섞어 쓴다
+NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
 log = logging.getLogger("fast-question.web")
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers.update(NO_CACHE)
+        return resp
 
 
 class SameOriginOnly:
@@ -155,7 +165,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         return res
 
     routes = [
-        Route("/", lambda r: FileResponse(STATIC / "index.html")),
+        Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/categories", api(lambda s, r, b: s.add_category(
@@ -174,7 +184,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
         Route("/api/qa/{id:int}/restore", api(lambda s, r, b: _qa_out(s.restore_qa(
             pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
-        Mount("/static", StaticFiles(directory=STATIC), name="static"),
+        Mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static"),
     ]
     hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
     app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)], lifespan=lifespan)

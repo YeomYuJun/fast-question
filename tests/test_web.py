@@ -223,3 +223,9 @@ def test_delete_category_with_impact(client):
     assert client.get("/api/categories").json()["categories"] == []
     assert client.get(f"/api/qa/{item['id']}").json()["archived"] is True
     assert client.get(f"/api/categories/{top['id']}/impact").status_code == 404
+
+
+def test_page_and_static_files_are_revalidated(client):
+    """화면 파일을 고친 뒤 브라우저가 캐시의 옛 app.js 를 쓰지 않게 매번 확인하게 한다."""
+    for path in ("/", "/static/app.js", "/static/app.css", "/static/tokens.css"):
+        assert client.get(path).headers.get("cache-control") == "no-cache", path
