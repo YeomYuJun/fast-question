@@ -160,6 +160,11 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/categories", api(lambda s, r, b: s.add_category(
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
+        Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
+            pid(r), b["version"], name=b["name"])), methods=["PATCH"]),
+        Route("/api/categories/{id:int}/impact", api(lambda s, r, b: s.category_impact(pid(r)))),
+        Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
+            pid(r), b["version"])), methods=["POST"]),
         Route("/api/qa", api(add_qa), methods=["POST"]),
         Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.get_qa(pid(r))))),
         Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.update_qa(

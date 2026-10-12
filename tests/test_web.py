@@ -92,8 +92,7 @@ def test_review_and_oversight_endpoints_are_gone(client):
 @pytest.mark.parametrize("method, path", [
     ("POST", "/api/qa/1/links"), ("POST", "/api/qa/1/evidence"), ("POST", "/api/evidence/1/recapture"),
     ("POST", "/api/evidence/1/archive"), ("POST", "/api/recheck"), ("GET", "/api/dict"), ("POST", "/api/dict"),
-    ("POST", "/api/reindex"), ("GET", "/api/status"), ("PATCH", "/api/categories/1"),
-    ("POST", "/api/categories/1/archive"),
+    ("POST", "/api/reindex"), ("GET", "/api/status"),
 ])
 def test_unused_endpoints_are_gone(client, method, path):
     """화면이 쓰지 않는 관리 기능은 MCP 도구에만 남는다."""
@@ -200,3 +199,27 @@ def test_search_box_syntax_without_regex(client):
     assert client.get("/api/search", params={"q": "q:rename"}).json()["hits"] == []
     # 정규식은 MCP 에서만 쓴다. 화면 요청의 regex 인자는 무시되어 글자 그대로 찾는다
     assert client.get("/api/search", params={"q": "ren.*", "regex": "1"}).json()["hits"] == []
+
+
+def test_rename_category(client):
+    add_basics(client)
+    top = client.get("/api/categories").json()["categories"][0]
+    r = client.patch(f"/api/categories/{top['id']}", json={"version": top["version"], "name": "이관 사업"})
+    assert r.status_code == 200 and r.json()["path"] == "이관 사업"
+    assert client.get("/api/categories").json()["categories"][0]["children"][0]["path"] == "이관 사업 > NAS"
+    stale = client.patch(f"/api/categories/{top['id']}", json={"version": top["version"], "name": "x"})
+    assert stale.status_code == 409
+
+
+def test_delete_category_with_impact(client):
+    item = add_basics(client)
+    top = client.get("/api/categories").json()["categories"][0]
+    impact = client.get(f"/api/categories/{top['id']}/impact").json()
+    assert (impact["children"], impact["qa"]) == (1, 1)
+
+    r = client.post(f"/api/categories/{top['id']}/archive", json={"version": top["version"]})
+    assert r.status_code == 200
+    assert (r.json()["archived_children"], r.json()["archived_qa"]) == (1, 1)
+    assert client.get("/api/categories").json()["categories"] == []
+    assert client.get(f"/api/qa/{item['id']}").json()["archived"] is True
+    assert client.get(f"/api/categories/{top['id']}/impact").status_code == 404

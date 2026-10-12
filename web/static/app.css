@@ -90,6 +90,16 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .dashed:hover { color: var(--accent); border-color: var(--accent); }
 .cat-form { display: flex; flex-direction: column; gap: 6px; }
 .cat-form-btns { display: flex; gap: 6px; }
+.facet-edit {
+  display: flex; align-items: center; gap: var(--space-1); border: 1px solid transparent;
+  border-radius: var(--radius-md); padding: 3px 4px 3px 8px; font-size: 13px; color: var(--ink);
+}
+.facet-edit.top { font-weight: 600; }
+.facet-edit.child { padding-left: 22px; }
+.facet-edit .name { flex-grow: 1; min-width: 0; overflow-wrap: anywhere; }
+.facet-edit .btn { font-weight: 400; }
+.facet-edit.rename .fld { flex: 1 1 auto; min-width: 0; padding: 3px 6px; font-size: 13px; }
+#cat-edit { align-self: flex-start; }
 
 /* ---------- 검색창·요약 ---------- */
 .search {

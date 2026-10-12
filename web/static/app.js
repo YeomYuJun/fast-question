@@ -75,7 +75,7 @@ function kst(s) {
 }
 
 const KIND = { file: "FILE", dir: "DIR", git: "GIT", githead: "HEAD", url: "URL", note: "메모" };
-const OP = { insert: "생성", update: "수정", archive: "보관", restore: "복원" };
+const OP = { insert: "생성", update: "수정", archive: "삭제", restore: "복원" };
 const FIELD = { question: "질문", answer: "답변", category_id: "분류", evidence_state: "근거 상태" };
 
 // 서버의 강조 위치는 코드 포인트 기준이다. UTF-16 으로 자르면 이모지 뒤에서 한 칸씩 밀리므로 코드 포인트로 자른다
@@ -107,6 +107,8 @@ const state = {
   empty: false, // 마지막 검색이 0건이었다
   shut: new Set(), // 접은 묶음 키
   histOpen: new Set(), // 이력을 전부 펼친 항목 id
+  catEdit: false, // 분류 패널이 편집(이름 변경·삭제) 상태다
+  catRenaming: null, // 이름을 고치는 중인 분류 id
 };
 const rows = new Map(); // id -> 행 요소(row.hit 에 검색 결과 항목)
 const groups = new Map(); // 묶음 키 -> 묶음 요소
@@ -132,6 +134,7 @@ function facet(name, n, on, onclick, cls) {
 
 // 검색어가 있으면 분류별 건수는 그 검색의 일치 건수다(state.counts). 없으면 분류 전체 건수다
 function renderTree() {
+  if (state.catEdit) return renderTreeEdit();
   const hits = state.counts;
   const own = (c) => (hits ? hits.byCat.get(c.id) || 0 : null);
   const countOf = (t) => (hits ? own(t) + t.children.reduce((a, c) => a + own(c), 0) : t.count);
@@ -142,6 +145,80 @@ function renderTree() {
       facet(t.name, countOf(t), state.cat === t.id, () => setCat(t.id), "top"),
       ...t.children.map((c) => facet(c.name, hits ? own(c) : c.count, state.cat === c.id, () => setCat(c.id), "child")),
     ]));
+}
+
+// 편집 상태에서는 분류를 눌러도 거르지 않고, 줄마다 이름 변경·삭제를 둔다
+function renderTreeEdit() {
+  const line = (c, cls) => {
+    if (state.catRenaming === c.id) return renameForm(c, cls);
+    return el("div", { class: `facet-edit ${cls}` },
+      el("span", { class: "name" }, c.name),
+      el("button", { class: "btn quiet small", type: "button", onclick: () => { state.catRenaming = c.id; renderTree(); } }, "이름 변경"),
+      el("button", { class: "btn quiet small", type: "button", onclick: () => deleteCategory(c) }, "삭제"));
+  };
+  fill($("#cat-tree"), state.cats.flatMap((t) => [line(t, "top"), ...t.children.map((c) => line(c, "child"))]));
+}
+
+function renameForm(c, cls) {
+  const input = el("input", { class: "fld", value: c.name, "aria-label": `${c.path} 새 이름`, autocomplete: "off" });
+  const cancel = () => { state.catRenaming = null; renderTree(); };
+  const form = el("form", {
+    class: `facet-edit rename ${cls}`,
+    onsubmit: async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name || name === c.name) return cancel();
+      try {
+        const done = await api("PATCH", `/api/categories/${c.id}`, { version: c.version, name });
+        state.catRenaming = null;
+        await refreshCats();
+        runSearch();
+        toast(`분류 이름을 "${done.path}" 로 바꿨다.`);
+      } catch (err) {
+        toast(err.message, { err: true });
+      }
+    },
+    onkeydown: (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } },
+  }, input,
+  el("button", { class: "btn small primary", type: "submit" }, "저장"),
+  el("button", { class: "btn small", type: "button", onclick: cancel }, "취소"));
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+  return form;
+}
+
+async function deleteCategory(c) {
+  let impact;
+  try {
+    impact = await api("GET", `/api/categories/${c.id}/impact`);
+  } catch (err) {
+    toast(err.message, { err: true });
+    return refreshCats();
+  }
+  const parts = [];
+  if (impact.children) parts.push(`하위 분류 ${impact.children}개`);
+  if (impact.qa) parts.push(`지식 ${impact.qa}건`);
+  const warn = parts.length ? `\n${parts.join(", ")}도 모두 함께 삭제됩니다.` : "";
+  if (!window.confirm(`분류 "${c.path}" 를 삭제한다.${warn}\n삭제를 하시겠습니까?`)) return;
+  try {
+    const res = await api("POST", `/api/categories/${c.id}/archive`, { version: impact.category.version });
+    const gone = new Set([c.id, ...(c.children || []).map((x) => x.id)]);
+    if (gone.has(state.cat)) state.cat = null;
+    await refreshCats();
+    runSearch();
+    toast(`분류 "${c.path}" 를 삭제했다.` + (res.archived_qa ? ` 지식 ${res.archived_qa}건도 함께 삭제했다.` : ""));
+  } catch (err) {
+    toast(err.message, { err: true });
+    refreshCats();
+  }
+}
+
+function setCatEdit(on) {
+  state.catEdit = on;
+  state.catRenaming = null;
+  const b = $("#cat-edit");
+  b.textContent = on ? "편집 마치기" : "분류 편집";
+  b.setAttribute("aria-pressed", String(on));
+  renderTree();
 }
 
 async function searchCounts(res) {
@@ -540,7 +617,7 @@ function grow(ta) {
 function catSelect(selected) {
   const s = el("select", { class: "fld", "aria-label": "분류" });
   for (const c of state.flat) s.append(el("option", { value: c.id }, c.path));
-  if (selected != null && !state.flat.some((c) => c.id === selected)) s.append(el("option", { value: selected }, `(보관된 분류 ${selected})`));
+  if (selected != null && !state.flat.some((c) => c.id === selected)) s.append(el("option", { value: selected }, `(삭제된 분류 ${selected})`));
   if (selected != null) s.value = String(selected);
   return s;
 }
@@ -602,12 +679,13 @@ function editForm(base, isNew, onSaved, onCancel) {
       el("div", {}, el("button", { class: "btn", type: "button", onclick: () => submit(true) }, "다른 질문이다. 그래도 등록")));
   }
 
-  async function archive() {
-    if (!window.confirm("이 질문을 보관한다. 검색 결과에서 빠지고, 알림의 되돌리기로 복원할 수 있다.")) return;
+  // 삭제는 행을 지우지 않고 보관 표시만 한다(되돌리기·MCP kb_restore 로 복원된다)
+  async function remove() {
+    if (!window.confirm("삭제를 하시겠습니까?")) return;
     try {
       const it = await api("POST", `/api/qa/${base.id}/archive`, { version: base.version });
       onSaved(it, null);
-      toast("보관했다. 검색 결과에서 빠졌다.", {
+      toast("삭제했다.", {
         action: {
           label: "되돌리기",
           fn: async () => {
@@ -641,7 +719,7 @@ function editForm(base, isNew, onSaved, onCancel) {
     el("button", { class: "btn primary", type: "submit", title: `${isNew ? "등록" : "저장"} (Ctrl+Enter)` }, isNew ? "등록" : "저장"),
     el("button", { class: "btn", type: "button", title: "취소 (Esc)", onclick: () => onCancel() }, "취소"),
     isNew ? null : el("span", { class: "spacer" }),
-    isNew ? null : el("button", { class: "btn quiet", type: "button", title: "검색에서 뺀다(지우지 않는다)", onclick: archive }, "보관")),
+    isNew ? null : el("button", { class: "btn quiet", type: "button", onclick: remove }, "삭제")),
   msg, sim);
   setTimeout(() => (isNew && fq.value ? fa : fq).focus(), 0);
   return form;
@@ -757,7 +835,7 @@ async function openFromHash() {
     toggle(id, true);
     scrollTo(id);
   } else {
-    toast(`#${id} 를 찾지 못했다(보관했거나 없는 번호다).`, { err: true });
+    toast(`#${id} 를 찾지 못했다(삭제했거나 없는 번호다).`, { err: true });
   }
 }
 
@@ -859,6 +937,7 @@ function init() {
     $("#cat-add").hidden = false;
   });
   $("#cat-form").addEventListener("submit", addCategory);
+  $("#cat-edit").addEventListener("click", () => setCatEdit(!state.catEdit));
   $("#theme-btn").addEventListener("click", () => {
     setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
   });
@@ -868,7 +947,7 @@ function init() {
   window.addEventListener("hashchange", openFromHash);
   // 다른 창(Claude 등록 등)에서 바뀐 내용을 화면으로 돌아올 때 다시 읽는다
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && !state.editing && !$("#new-slot").firstChild) {
+    if (document.visibilityState === "visible" && !state.editing && !state.catRenaming && !$("#new-slot").firstChild) {
       refreshCats();
       runSearch();
     }
