@@ -1,5 +1,5 @@
 "use strict";
-// fast-question 화면. 검색 중심 단일 화면이다(design/screens/Main.dc.html 을 순수 JS 로 옮겼다).
+// fast-question 화면. 검색 중심 단일 화면이다.
 // DOM 은 el() 로만 만든다(사용자 문자열을 HTML 로 해석하지 않는다).
 // 결과 행은 id 로 재사용한다. 새 검색 결과에 없는 행은 .out 으로 높이를 접은 뒤 지운다.
 
@@ -18,7 +18,7 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 
-// 14px 선 아이콘(design/screens/Main.dc.html 의 SVG 그대로). el() 은 HTML 이름공간이라 SVG 는 따로 만든다
+// 14px 선 아이콘. el() 은 HTML 이름공간이라 SVG 는 따로 만든다
 const ICONS = {
   pen: ["M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z", "M13.5 6.5l4 4"],
   trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5M14 11v5"],

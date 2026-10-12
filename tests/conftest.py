@@ -2,7 +2,7 @@ import pytest
 
 from kb.db import connect
 
-# 설계 문서(docs/specs/2026-10-08-qa-kb-design.md) 부록 A.1 의 데이터 11건. id 는 넣는 순서대로 1~11 이 된다.
+# 테스트 표본 데이터 11건. id 는 넣는 순서대로 1~11 이 된다.
 SAMPLE_QA = [
     ("이관 > NAS", ".nas-tmp 가 NAS 안에 있는 이유", "rename 은 같은 볼륨 안에서만 원자적이다. /tmp 같은 로컬 디스크에 쓰고 옮기면 복사 후 삭제가 되어 원자성이 깨진다."),
     ("이관 > NAS", ".part 에 먼저 쓰는 이유", "파일시스템은 쓰는 도중의 파일도 다른 Pod 에서 읽힌다. 다 쓴 뒤 ATOMIC_MOVE 로 rename 해서 확정한다."),
@@ -33,7 +33,7 @@ def conn(tmp_path):
 
 
 def load_sample(store, synonyms=True):
-    """설계 문서(docs/specs/2026-10-08-qa-kb-design.md) 부록 A 데이터를 넣는다. 질문끼리 비슷해도 넣도록 force 를 쓴다."""
+    """표본 데이터(SAMPLE_QA)를 넣는다. 질문끼리 비슷해도 넣도록 force 를 쓴다."""
     for path in dict.fromkeys(p for p, _, _ in SAMPLE_QA):
         top, mid = [s.strip() for s in path.split(">")]
         tops = {c["name"]: c for c in store.categories()}

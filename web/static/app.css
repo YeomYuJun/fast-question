@@ -1,4 +1,4 @@
-/* 색·글꼴·간격은 tokens.css 의 변수만 쓴다. 원본은 design/ (design/HANDOFF.md) */
+/* 색·글꼴·간격은 tokens.css 의 변수만 쓴다. */
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -150,7 +150,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .gin { overflow: hidden; min-height: 0; padding: 0 4px; margin: 0 -4px; }
 .grp-rows { display: flex; flex-direction: column; }
 
-/* 걸러진 항목은 높이를 접으며 사라진다(design/HANDOFF.md 적용 방법 7) */
+/* 걸러진 항목은 높이를 접으며 사라진다 */
 .row { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows .2s ease, opacity .16s ease; }
 .row.out { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .row > .in { overflow: hidden; min-height: 0; }

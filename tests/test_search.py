@@ -7,7 +7,7 @@ import pytest
 from kb.store import Store
 from tests.conftest import load_sample
 
-# 설계 문서(docs/specs/2026-10-08-qa-kb-design.md) 부록 A.2 의 질의. 형태소 계층이 없을 때(analyzer=None)의 기대값.
+# 표본 데이터 질의. 형태소 계층이 없을 때(analyzer=None)의 기대값.
 # E 정확히 일치, Y 동의어로 추가, F 비슷한 결과(2글자 조각 겹침만. 형태소 OR 은 tests/test_morph.py 에서 본다)
 CASES = [
     ("nas-tmp", {1}, set(), set()),

@@ -1,5 +1,4 @@
-"""근거 캡처와 판정. claim-ledger(lib/verdict.js)의 근거 형식과
-판정 규칙을 옮겼다. 판정 결과는 모든 검사가 명시적으로 통과할 때만 same 이고, git 실패·경로 없음·
+"""근거 캡처와 판정. 판정 결과는 모든 검사가 명시적으로 통과할 때만 same 이고, git 실패·경로 없음·
 읽기 실패는 unknown 이다.
 """
 import hashlib

@@ -9,7 +9,7 @@ from tests.conftest import load_sample
 from tests.test_search import CASES as BASE_CASES
 from tests.test_search import synthetic
 
-# 설계 문서(docs/specs/2026-10-08-qa-kb-design.md) 부록 A.2 의 형태소 계층 기대값. (E·Y 는 형태소 계층이 없을 때와 같아야 한다)
+# 형태소 계층 기대값. (E·Y 는 형태소 계층이 없을 때와 같아야 한다)
 MORPH = {
     "볼륨이": {1, 3},
     "재 암호화": {6},

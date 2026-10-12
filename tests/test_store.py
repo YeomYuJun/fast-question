@@ -55,7 +55,7 @@ def test_add_qa_records_actor(user, claude):
 
 
 def test_review_columns_are_not_used(user, claude, conn):
-    """사람 검토 기능은 없다(spec §2 D10). reviewed_at·reviewed_by 열은 남아 있지만 어느 쓰기도 채우지 않는다."""
+    """사람 검토 기능은 없다. reviewed_at·reviewed_by 열은 남아 있지만 어느 쓰기도 채우지 않는다."""
     user.add_category("이관")
     mine = user.add_qa("이관", "사용자가 쓴 질문", "사용자가 쓴 답변")["item"]
     edited = claude.update_qa(mine["id"], mine["version"], answer="Claude 가 고친 답변")
