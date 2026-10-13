@@ -41,6 +41,14 @@ def test_index_serves_html(client):
         assert client.get(path).status_code == 200, path
 
 
+def test_index_lists_search_syntax(client):
+    """검색창 옆 도움말은 kb/query.py 의 문법을 모두 보인다."""
+    html = client.get("/").text
+    for token in ("<code>a b</code>", "<code>a | b</code>", "<code>-a</code>", '<code>"a b"</code>',
+                  "<code>q:a</code>", "<code>a:a</code>", "<code>path:x</code>"):
+        assert token in html, token
+
+
 def test_app_css_uses_only_tokens():
     """색은 design 토큰 변수로만 쓴다(CLAUDE.md 화면 디자인 규칙)."""
     import re

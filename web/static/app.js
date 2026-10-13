@@ -24,6 +24,7 @@ const ICONS = {
   trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5M14 11v5"],
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   cross: ["M6 6l12 12M18 6L6 18"],
+  help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6", "M12 17h.01"],
 };
 function icon(name) {
   const NS = "http://www.w3.org/2000/svg";
@@ -892,6 +893,12 @@ function clearSearch() {
   runSearch();
 }
 
+// 검색 문법 팝오버. `?` 키 단축은 두지 않는다(검색어에 ? 가 들어갈 수 있다)
+function openHelp(open) {
+  $("#help").hidden = !open;
+  $("#help-btn").setAttribute("aria-expanded", String(open));
+}
+
 // ---------- 테마 ----------
 
 // 저장은 사용자가 상단에서 바꿨을 때만 한다. 저장값이 없으면 계속 OS 설정을 따른다
@@ -941,14 +948,21 @@ function init() {
         requestAnimationFrame(() => scrollTo(ids[0]));
       }
     } else if (e.key === "Escape") {
-      // 펼친 행이 있으면 먼저 접고, 없으면 검색어와 분류 필터를 지운다
-      if (state.sel && rows.has(state.sel) && !rows.get(state.sel).classList.contains("out")) toggle(state.sel, false);
+      // 문법 도움말이 열려 있으면 그것만 닫는다. 아니면 펼친 행을 먼저 접고, 없으면 검색어와 분류 필터를 지운다
+      if (!$("#help").hidden) openHelp(false);
+      else if (state.sel && rows.has(state.sel) && !rows.get(state.sel).classList.contains("out")) toggle(state.sel, false);
       else if (q.value || state.cat) clearSearch();
     } else if ((e.key === "e" || e.key === "E") && !typing && state.sel && !state.editing && state.details.has(state.sel)) {
       e.preventDefault();
       startEdit(state.sel);
     }
   });
+
+  $("#help-btn").append(icon("help"));
+  $("#help-btn").addEventListener("click", () => openHelp($("#help").hidden));
+  // 검색창 빈 곳을 누르면 입력칸에 커서를 둔다(label 대신 div 라 직접 처리한다)
+  $("#search").addEventListener("click", (e) => { if (!e.target.closest("button, input, #help")) q.focus(); });
+  document.addEventListener("click", (e) => { if (!e.target.closest("#help, #help-btn")) openHelp(false); });
 
   $("#new-btn").addEventListener("click", () => openNew(state.q));
   $("#empty-new").addEventListener("click", () => openNew(state.q));

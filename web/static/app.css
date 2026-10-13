@@ -117,16 +117,30 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 
 /* ---------- 검색창·요약 ---------- */
 .search {
+  position: relative; cursor: text;
   display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 var(--space-2) 0 14px;
   background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1); transition: border-color .15s, box-shadow .15s;
 }
 .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.search svg { color: var(--faint); flex: none; }
+.search > svg { color: var(--faint); flex: none; }
 .search input {
   flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font: var(--text-search); color: var(--ink);
 }
 .search input::-webkit-search-cancel-button { display: none; }
+.ibtn.help { cursor: pointer; }
+.ibtn.help:hover, .ibtn.help[aria-expanded="true"] { color: var(--accent); }
+/* 검색 문법 팝오버: 검색창 오른쪽 아래에 붙는다 */
+.help-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 3; cursor: default;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-1);
+  padding: 8px 12px; font-size: 12.5px; color: var(--muted);
+}
+.help-pop table { border-collapse: collapse; }
+.help-pop td { padding: 2px 0; vertical-align: baseline; }
+.help-pop td:first-child { padding-right: var(--space-4); white-space: nowrap; }
+.help-pop code { font-family: var(--font-mono); font-size: 12px; color: var(--ink); }
+.help-pop code + code { margin-left: 6px; }
 .summary { display: flex; align-items: center; gap: var(--space-2); padding: 10px 4px 6px; font-size: 12px; color: var(--muted); min-height: 38px; }
 .summary b { color: var(--ink); font-weight: 600; }
 .summary .note { color: var(--stale); }
