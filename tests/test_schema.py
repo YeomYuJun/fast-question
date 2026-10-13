@@ -143,7 +143,7 @@ def test_category_name_unique_under_same_parent(conn):
     [
         ("한\n줄", "답", "qa_question_line"),
         ("가" * 151, "답", "qa_question_len"),
-        ("질문", "1\n2\n3", "qa_answer_lines"),
+        ("질문", "1\n2\n3\n4\n5\n6\n7", "qa_answer_lines"),
         ("질문", "가" * 401, "qa_answer_len"),
     ],
 )
@@ -173,10 +173,10 @@ def test_fts_ns_columns_drop_spaces(conn):
 def test_from_sqlite_translates_constraint_names(conn):
     cid = add_cat(conn, "가")
     with pytest.raises(sqlite3.IntegrityError) as ei:
-        add_qa(conn, cid, "질문", "1\n2\n3")
+        add_qa(conn, cid, "질문", "1\n2\n3\n4\n5\n6\n7")
     err = from_sqlite(ei.value)
     assert err.code == "qa_answer_lines"
-    assert "2줄" in err.message
+    assert "6줄" in err.message
 
 
 def test_stopwords_seeded_once(tmp_path):
@@ -185,7 +185,7 @@ def test_stopwords_seeded_once(tmp_path):
     c = connect(path)
     words = sorted(r[0] for r in c.execute("SELECT word FROM stopword"))
     assert words == ["경우", "때"]
-    assert get_meta(c, "schema_version") == "2"
+    assert get_meta(c, "schema_version") == "3"
     c.close()
 
 
@@ -196,7 +196,7 @@ def test_connect_existing_db_takes_no_write_lock(tmp_path):
     t0 = time.perf_counter()
     c = connect(path)
     assert time.perf_counter() - t0 < 1.0
-    assert get_meta(c, "schema_version") == "2"
+    assert get_meta(c, "schema_version") == "3"
     holder.execute("ROLLBACK")
     c.close()
     holder.close()
@@ -213,8 +213,8 @@ def test_text_checks():
     nfd = unicodedata.normalize("NFD", "용량")
     assert check_question(f"  {nfd} 질문  ") == "용량 질문"
     assert check_answer("첫 줄\r\n\r\n둘째 줄  ") == "첫 줄\n둘째 줄"
-    with pytest.raises(ValidationError, match="지금 3줄"):
-        check_answer("1\n2\n3")
+    with pytest.raises(ValidationError, match="지금 7줄"):
+        check_answer("1\n2\n3\n4\n5\n6\n7")
     with pytest.raises(ValidationError, match="한 줄"):
         check_question("가\n나")
     with pytest.raises(ValidationError, match="지금 151자"):
@@ -265,6 +265,33 @@ def test_revision_fake_time_rejected(conn):
         conn.execute("INSERT INTO revision(table_name, row_id, op, actor, at) VALUES ('qa', 1, 'update', 'user', '1990-01-01')")
 
 
+def test_old_answer_line_check_relaxed_on_connect(tmp_path):
+    from kb import db
+    path = tmp_path / "kb.sqlite3"
+    c = connect(path)
+    cid = add_cat(c, "가")
+    add_qa(c, cid, a="한 줄\n두 줄")
+    # 스키마 2 의 qa 표: 줄바꿈 1개까지
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'qa'").fetchone()[0]
+    ver = c.execute("PRAGMA schema_version").fetchone()[0]
+    c.execute("PRAGMA writable_schema = ON")
+    c.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'qa'",
+              (sql.replace(db._NEW_ANSWER_LINES, db._OLD_ANSWER_LINES),))
+    c.execute(f"PRAGMA schema_version = {ver + 1}")
+    c.execute("PRAGMA writable_schema = OFF")
+    set_meta(c, "schema_version", "2")
+    with pytest.raises(sqlite3.IntegrityError):
+        add_qa(c, cid, a="1\n2\n3")
+    c.close()
+    c = connect(path)
+    with pytest.raises(sqlite3.IntegrityError):
+        add_qa(c, cid, a="1\n2\n3\n4\n5\n6\n7")
+    add_qa(c, cid, a="1\n2\n3\n4\n5\n6")
+    assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert get_meta(c, "schema_version") == "3"
+    c.close()
+
+
 def test_old_schema_triggers_replaced_on_connect(tmp_path):
     path = tmp_path / "kb.sqlite3"
     c = connect(path)
@@ -272,6 +299,6 @@ def test_old_schema_triggers_replaced_on_connect(tmp_path):
     set_meta(c, "schema_version", "1")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "2"
+    assert get_meta(c, "schema_version") == "3"
     assert c.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'qa_insert_guard'").fetchone()[0] == 1
     c.close()

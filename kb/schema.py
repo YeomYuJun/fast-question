@@ -11,7 +11,7 @@
 
 import re
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 BUMP = f"version = version + 1, updated_at = {NOW}"
 ACTORS = "('user','claude','system')"
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS qa (
     CONSTRAINT qa_question_line CHECK (instr(question, char(10)) = 0 AND instr(question, char(13)) = 0),
     CONSTRAINT qa_answer_len CHECK (length(trim(answer)) BETWEEN 1 AND 400),
     CONSTRAINT qa_answer_lines CHECK (
-        length(answer) - length(replace(answer, char(10), '')) <= 1 AND instr(answer, char(13)) = 0),
+        length(answer) - length(replace(answer, char(10), '')) <= 5 AND instr(answer, char(13)) = 0),
     CONSTRAINT qa_evidence_state CHECK (evidence_state IN ('none','external','trusted','stale','unknown'))
 );
 CREATE INDEX IF NOT EXISTS qa_category ON qa(category_id);

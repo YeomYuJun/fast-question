@@ -5,7 +5,7 @@ from kb.errors import ValidationError
 
 QUESTION_MAX = 150
 ANSWER_MAX = 400
-ANSWER_MAX_LINES = 2
+ANSWER_MAX_LINES = 6  # 첫 줄 = 핵심 답, 나머지 = '- ' 항목 (kb.rules 가 양식을 본다)
 NAME_MAX = 60
 
 

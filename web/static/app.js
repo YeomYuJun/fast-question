@@ -741,7 +741,7 @@ function editForm(base, isNew, onSaved, onCancel) {
     },
   },
   el("div", { class: "eline" }, el("span", { class: "tag-q" }, "Q"), fq, counter(fq, 150)),
-  el("div", { class: "eline multi" }, el("span", { class: "tag-a" }, "A"), fa, counter(fa, 400, 2)),
+  el("div", { class: "eline multi" }, el("span", { class: "tag-a" }, "A"), fa, counter(fa, 400, 6)),
   el("div", { class: "erow" }, fc, fe,
     el("button", { class: "btn primary", type: "submit", title: `${isNew ? "등록" : "저장"} (Ctrl+Enter)` }, isNew ? "등록" : "저장"),
     el("button", { class: "btn", type: "button", title: "취소 (Esc)", onclick: () => onCancel() }, "취소"),

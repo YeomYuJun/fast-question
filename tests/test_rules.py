@@ -19,6 +19,32 @@ def test_three_sentences_rejected():
     assert len(msgs) == 1 and "3문장" in msgs[0]
 
 
+def test_head_line_with_items_passes():
+    answer = "공백은 AND, a | b 는 OR 이다.\n- -a: 제외\n- \"a b\": 구절\n- q:·a: 질문·답변 한정\n- path:x: 근거 파일 경로"
+    assert problems(answer=answer) == []
+
+
+@pytest.mark.parametrize("answer, part", [
+    ("- 첫 줄부터 항목", "첫 줄"),
+    ("핵심 답이다.\n항목 머리 없는 둘째 줄", "'- ' 로 시작"),
+    ("핵심 답이다.\n- 항목에 문장을 둘 쓴다. 이렇게 쓴다.", "한 사실만"),
+    ("핵심 답이다.\n- 마침표로 끝나는 항목이다.", "한 사실만"),
+    ("가" * 121, "121자"),
+])
+def test_answer_form_rejected(answer, part):
+    assert any(part in m for m in problems(answer=answer)), problems(answer=answer)
+
+
+@pytest.mark.parametrize("answer, kind", [
+    ("검토 기능은 2026-10-08 사용자 결정으로 지웠다.", "결정 경위"),
+    ("설계 문서 §2 에 따라 지운다.", "절 번호"),
+    ("캐시 때문인 것으로 보인다.", "추정"),
+    ("재시도는 TODO 로 남아 있다.", "할 일"),
+])
+def test_banned_expressions_rejected(answer, kind):
+    assert any(kind in m for m in problems(answer=answer)), problems(answer=answer)
+
+
 @pytest.mark.parametrize("answer", [
     "Kiwi 로드는 2.54초 걸린다(2026-10-08 실측).",
     "kb.jobs.run_due 가 data/logs/web.log 에 남긴다. 버전은 0.24.0 이다.",

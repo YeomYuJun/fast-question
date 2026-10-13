@@ -54,9 +54,32 @@ def test_context_with_hits_lists_items_and_urls():
     assert "먼저" in text
 
 
-def test_context_without_hits_asks_to_store():
-    text = ask_kb.context("모르는 것", {"hits": [], "similar": [dict(_item(5), score=0.6)]}, "http://127.0.0.1:8765")
-    assert "없다" in text and "rules.md" in text and "묻지 않는다" in text and "#5" in text
+def test_context_without_hits_in_project_gives_store_conditions():
+    text = ask_kb.context("모르는 것", {"hits": [], "similar": [dict(_item(5), score=0.6)]}, "http://127.0.0.1:8765",
+                          "이관")
+    assert "없다" in text and "기본" in text and "이관" in text and "rules.md" in text and "#5" in text
+
+
+def test_context_without_hits_outside_project_never_asks_to_store():
+    res = {"hits": [], "similar": [dict(_item(5), score=0.6)]}
+    text = ask_kb.context("모르는 것", res, "http://127.0.0.1:8765", None)
+    assert "#5" in text and "저장" not in text and "등록" not in text
+    assert ask_kb.context("모르는 것", {"hits": [], "similar": []}, "http://127.0.0.1:8765", None) == ""
+
+
+def test_project_of_matches_top_category_name_or_harvest_root(tmp_path):
+    db = _db_with_item(tmp_path)
+    s = Store(connect(db), "claude")
+    s.add_category("fast-question")
+    s.harvest_set(r"D:\work", {"created": 1})
+    s.conn.close()
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"db_path": str(db)}), encoding="utf-8")
+    cfg = load_config(path)
+    assert ask_kb.project_of(r"D:\fast-question\kb", cfg) == "fast-question"
+    assert ask_kb.project_of(r"d:\work\java", cfg) == "d:/work"
+    assert ask_kb.project_of(r"C:\Users\someone", cfg) is None
+    assert ask_kb.project_of("", cfg) is None
 
 
 def _db_with_item(tmp_path):
@@ -86,7 +109,8 @@ def test_hook_falls_back_to_db_when_web_is_down(tmp_path):
 
 def test_hook_is_silent_for_non_questions_and_bad_input(tmp_path):
     db = _db_with_item(tmp_path)
-    for stdin in [json.dumps({"prompt": "커밋해줘"}), "not json", ""]:
+    for stdin in [json.dumps({"prompt": "커밋해줘"}), "not json", "",
+                  json.dumps({"prompt": "파이썬 GIL 이 뭐야?", "cwd": r"C:\Users\someone"})]:
         r = _run(tmp_path, {"db_path": str(db), "port": 1}, stdin)
         assert r.returncode == 0 and r.stdout == b""
 

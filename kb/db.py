@@ -24,9 +24,36 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.create_function("regexp", 2, _regexp, deterministic=True)
     if _schema_version(conn) != SCHEMA_VERSION:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _relax_answer_lines(conn)
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        conn.execute("COMMIT")
         # 두 프로세스가 동시에 처음 열어도 한쪽만 만들도록 스크립트 전체를 IMMEDIATE 트랜잭션으로 감싼다
         conn.executescript("BEGIN IMMEDIATE;\n" + ddl() + "\nCOMMIT;")
     return conn
+
+
+_OLD_ANSWER_LINES = "length(answer) - length(replace(answer, char(10), '')) <= 1 AND"
+_NEW_ANSWER_LINES = "length(answer) - length(replace(answer, char(10), '')) <= 5 AND"
+
+
+def _relax_answer_lines(conn: sqlite3.Connection) -> None:
+    """스키마 2 이하의 qa 표는 답변 줄바꿈을 1개까지만 받는다. CHECK 는 ALTER TABLE 로 바꿀 수 없어
+    SQLite 문서의 writable_schema 절차로 표 정의 문자열만 고친다. 한도를 넓히기만 해 기존 행은 그대로 맞는다."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'qa'").fetchone()
+    if row is None or _OLD_ANSWER_LINES not in row[0]:
+        return
+    ver = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'qa'",
+                     (row[0].replace(_OLD_ANSWER_LINES, _NEW_ANSWER_LINES),))
+        conn.execute(f"PRAGMA schema_version = {ver + 1}")
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
 
 
 def _schema_version(conn: sqlite3.Connection) -> str | None:

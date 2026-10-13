@@ -6,7 +6,7 @@ MESSAGES = {
     "qa_question_len": "질문은 1~150자로 쓴다.",
     "qa_question_line": "질문은 한 줄로 쓴다.",
     "qa_answer_len": "답변은 1~400자로 쓴다.",
-    "qa_answer_lines": "답변은 2줄까지 쓸 수 있다.",
+    "qa_answer_lines": "답변은 6줄까지 쓸 수 있다.",
     "qa_evidence_state": "근거 상태 값이 올바르지 않다.",
     "category_name_len": "분류 이름은 1~60자 한 줄로 쓴다.",
     "category_description_len": "분류 설명은 300자까지 쓸 수 있다.",

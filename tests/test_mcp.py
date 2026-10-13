@@ -65,8 +65,8 @@ def test_similar_question_reported(server):
 
 def test_validation_error_is_tool_error(server):
     call(server, "kb_add_category", {"name": "이관"})
-    err, text = call(server, "kb_add", {"category": "이관", "question": "질문", "answer": "1\n2\n3"})
-    assert err and "2줄까지" in text
+    err, text = call(server, "kb_add", {"category": "이관", "question": "질문", "answer": "1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7"})
+    assert err and "6줄까지" in text
 
 
 def test_format_rules_reject_claude_writes(server):

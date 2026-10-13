@@ -96,8 +96,8 @@ def test_update_conflict_returns_current(user, claude):
 def test_update_validation_message(user):
     user.add_category("이관")
     item = user.add_qa("이관", "질문 하나", "답변 하나")["item"]
-    with pytest.raises(ValidationError, match="지금 3줄"):
-        user.update_qa(item["id"], item["version"], answer="1\n2\n3")
+    with pytest.raises(ValidationError, match="지금 7줄"):
+        user.update_qa(item["id"], item["version"], answer="1\n2\n3\n4\n5\n6\n7")
     with pytest.raises(ValidationError, match="바꿀 값"):
         user.update_qa(item["id"], item["version"])
 

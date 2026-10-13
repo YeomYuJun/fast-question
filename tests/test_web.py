@@ -60,8 +60,8 @@ def test_create_and_search_grouped(client):
 
 def test_validation_is_400(client):
     add_basics(client)
-    r = client.post("/api/qa", json={"category": "이관", "question": "질문", "answer": "1\n2\n3"})
-    assert r.status_code == 400 and "2줄" in r.json()["error"]
+    r = client.post("/api/qa", json={"category": "이관", "question": "질문", "answer": "1\n2\n3\n4\n5\n6\n7"})
+    assert r.status_code == 400 and "6줄" in r.json()["error"]
 
 
 def test_conflict_is_409_with_current(client):
