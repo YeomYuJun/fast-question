@@ -209,6 +209,13 @@ def test_search_box_syntax_without_regex(client):
     assert client.get("/api/search", params={"q": "ren.*", "regex": "1"}).json()["hits"] == []
 
 
+def test_search_zero_hits_suggests_dropping_a_word(client):
+    item = add_basics(client)
+    res = client.get("/api/search", params={"q": "rename 없는단어"}).json()
+    assert res["total"] == 0 and res["relaxed"] == [{"dropped": "없는단어", "query": "rename", "total": 1}]
+    assert client.get("/api/search", params={"q": "rename"}).json()["hits"][0]["id"] == item["id"]
+
+
 def test_rename_category(client):
     add_basics(client)
     top = client.get("/api/categories").json()["categories"][0]

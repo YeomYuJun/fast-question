@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from kb.dictionary import load_stopwords, load_synonyms
 from kb.errors import ValidationError
-from kb.query import Query, Term, parse
+from kb.query import Query, Term, _tokens, parse
 
 if TYPE_CHECKING:
     from kb.store import Store
@@ -164,7 +164,9 @@ def _regex(q: str, case_sensitive: bool) -> re.Pattern:
 
 def search(store: "Store", query: str, *, analyzer=None, category_id: int | None = None,
            include_archived: bool = False, case_sensitive: bool = False, regex: bool = False,
-           limit: int = 200) -> dict:
+           limit: int = 200, relax: bool = False) -> dict:
+    """relax 면 결과에 relaxed 를 붙인다. 0건이고 단어가 둘 이상일 때 단어를 하나씩 뺀 질의 중
+    결과가 있는 것의 건수다(화면의 0건 안내가 쓴다)."""
     t0 = time.perf_counter()
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
@@ -264,7 +266,26 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
 
     if not hits and groups:
         result["similar"] = _similar(store, docs, ok, " ".join(parsed.words()), analyzer if morph_on else None)
+    if relax:
+        result["relaxed"] = [] if hits or regex else _relaxed(
+            store, q, analyzer=analyzer, category_id=category_id, include_archived=include_archived,
+            case_sensitive=case_sensitive)
     return done()
+
+
+def _relaxed(store: "Store", q: str, **opts) -> list[dict]:
+    """질의 토큰(단독 | 는 빼고)을 하나씩 뺀 질의마다 건수를 센다. 건수가 0 인 것은 버린다."""
+    tokens = [t for t, _ in _tokens(q)]
+    words = [i for i, t in enumerate(tokens) if t != "|"]
+    if len(words) < 2:
+        return []
+    out = []
+    for i in words:
+        rest = " ".join(t for j, t in enumerate(tokens) if j != i)
+        total = search(store, rest, limit=0, **opts)["total"]
+        if total:
+            out.append({"dropped": tokens[i], "query": rest, "total": total})
+    return out
 
 
 def _morph_ids(conn, analyzer, docs: dict[int, Doc], q: str, parsed: Query,

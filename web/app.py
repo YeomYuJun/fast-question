@@ -156,7 +156,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     def search(s: Store, r: Request, _):
         qp = r.query_params
         return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
-                        limit=int(qp.get("limit", 200)))
+                        limit=int(qp.get("limit", 200)), relax=True)
 
     def add_qa(s: Store, _, b: dict):
         res = s.add_qa(b["category"], b["question"], b["answer"], evidence=_evidence(b), force=bool(b.get("force")))

@@ -391,6 +391,10 @@ function render(res) {
       : "아직 등록된 질문이 없습니다.";
     $("#empty-new").textContent = res.query ? `“${res.query}” 질문으로 새로 등록` : "+ 새 질문";
   }
+  // 단어를 하나 빼면 결과가 있는 질의. 누르면 그 질의로 검색한다
+  fill($("#relaxed"), empty ? (res.relaxed || []).map((r) => el("button", {
+    class: "chip", type: "button", title: `"${r.query}" 로 검색`, onclick: () => searchFor(r.query),
+  }, el("code", {}, r.dropped), ` 빼고 ${r.total}건`)) : null);
   if (state.sel && rows.has(state.sel) && !state.details.has(state.sel)) loadDetail(state.sel);
 }
 
@@ -946,6 +950,15 @@ function move(dir) {
   toggle(next, true);
   // 펼친 내용이 그려진 뒤의 높이로 스크롤 위치를 정한다
   requestAnimationFrame(() => scrollTo(next));
+}
+
+function searchFor(query) {
+  const q = $("#q");
+  q.value = query;
+  state.q = query.trim();
+  state.pin = null;
+  q.focus();
+  runSearch();
 }
 
 function clearSearch() {

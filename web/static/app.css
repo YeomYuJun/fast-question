@@ -264,6 +264,12 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
   display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
 }
 
+/* 0건일 때 단어 하나를 뺀 질의 칩 */
+.relaxed { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.relaxed:empty { display: none; }
+.relaxed .chip:hover { border-color: var(--accent-line); color: var(--accent); }
+.relaxed code { font-family: var(--font-mono); color: var(--ink); }
+
 /* 알림 */
 .toast {
   position: fixed; right: var(--space-4); bottom: var(--space-4); max-width: 520px; display: flex; gap: var(--space-3);

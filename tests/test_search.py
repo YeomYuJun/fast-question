@@ -225,3 +225,25 @@ def test_search_many_ranks_by_matched_queries(store):
 def test_search_many_similar_when_all_empty(store):
     res = store.search_many(["볼륨이", "옮긴"])
     assert res["hits"] == [] and {h["id"] for h in res["similar"]} == {1, 3}
+
+
+def test_relaxed_drops_one_word_at_a_time(store):
+    res = store.search("rename 없는단어 원자적", relax=True)
+    assert res["total"] == 0
+    assert res["relaxed"] == [
+        {"dropped": "없는단어", "query": "rename 원자적", "total": store.search("rename 원자적")["total"]}]
+    assert res["relaxed"][0]["total"] > 0
+
+
+def test_relaxed_keeps_operators_and_category(store):
+    nas = store.resolve_category("이관 > NAS")
+    res = store.search("NAS | 없는말 -용량 없는단어", category_id=nas, relax=True)
+    assert res["total"] == 0
+    got = {r["dropped"]: (r["query"], r["total"]) for r in res["relaxed"]}
+    assert got == {"없는단어": ("NAS | 없는말 -용량", store.search("NAS | 없는말 -용량", category_id=nas)["total"])}
+
+
+def test_relaxed_only_when_requested_and_needed(store):
+    assert "relaxed" not in store.search("rename 없는단어")
+    assert store.search("없는단어", relax=True)["relaxed"] == []
+    assert store.search("rename", relax=True)["relaxed"] == []
