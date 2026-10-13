@@ -24,6 +24,8 @@ const ICONS = {
   trash: ["M4 7h16", "M9 7V4h6v3", "M6 7l1 13h10l1-13", "M10 11v5M14 11v5"],
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   cross: ["M6 6l12 12M18 6L6 18"],
+  copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+  link: ["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
   help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6", "M12 17h.01"],
 };
 function icon(name) {
@@ -624,7 +626,18 @@ function detailEl(id) {
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline" }, label("이력"), histLine(id, d),
+      ibtn("cp", "copy", "답 복사", "답 복사", () => copy(d.answer, "답을 복사했다.")),
+      ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했다.")),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
+}
+
+async function copy(text, done) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(done);
+  } catch (e) {
+    toast(`복사하지 못했다: ${e.message}`, { err: true });
+  }
 }
 
 // ---------- 편집 ----------
