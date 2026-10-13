@@ -1,5 +1,6 @@
 """Skill 을 ~/.claude/skills 로 복사하고, MCP 서버 fast-question 을 Claude Code 사용자 범위에 등록하고,
-즉석 질문 훅(hooks/ask_kb.py)을 ~/.claude/settings.json 의 UserPromptSubmit 에 등록한다.
+즉석 질문 훅(hooks/ask_kb.py)을 ~/.claude/settings.json 의 UserPromptSubmit 에 등록하고,
+config.json 의 DB 에 기본 사용 가이드(kb/default_guide.json)를 넣는다.
 
 사용: .venv\\Scripts\\python.exe scripts\\install.py
 훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
@@ -118,6 +119,22 @@ def register_mcp() -> str:
     return f"MCP 등록 {'완료' if r.returncode == 0 else '실패'}: {out}"
 
 
+def seed_guide() -> str:
+    """config.json 의 DB 에 기본 사용 가이드를 넣는다. DB 가 없으면 만든다."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from kb import guide
+    from kb.config import load_config
+    from kb.db import connect
+    from kb.store import Store
+    cfg = load_config()
+    conn = connect(cfg.db_path)
+    try:
+        return f"기본 가이드: {guide.seed(Store(conn, 'system'))} ({cfg.db_path})"
+    finally:
+        conn.close()
+
+
 def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     if "--remove-hook" in argv:
@@ -130,6 +147,7 @@ def main(argv: list[str]) -> int:
         print(msg)
     print(register_mcp())
     print(install_hook())
+    print(seed_guide())
     return 0
 
 

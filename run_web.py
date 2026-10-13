@@ -32,12 +32,29 @@ def setup_logging(cfg: Config) -> None:
                         handlers=handlers, force=True)
 
 
+def seed_guide(cfg: Config, log: logging.Logger) -> None:
+    """기본 사용 가이드를 넣거나 갱신한다. git pull 뒤 재시작하면 새 가이드가 반영된다. 실패해도 서버는 뜬다."""
+    from kb import guide
+    from kb.db import connect
+    from kb.store import Store
+    try:
+        conn = connect(cfg.db_path)
+        try:
+            log.info("기본 가이드: %s", guide.seed(Store(conn, "system")))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        log.exception("기본 가이드를 넣지 못했다")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", type=Path, default=None)
     cfg = load_config(ap.parse_args().config)
     setup_logging(cfg)
-    logging.getLogger("fast-question.web").info("시작: http://%s:%s, DB %s", cfg.host, cfg.port, cfg.db_path)
+    log = logging.getLogger("fast-question.web")
+    log.info("시작: http://%s:%s, DB %s", cfg.host, cfg.port, cfg.db_path)
+    seed_guide(cfg, log)
     # log_config=None: uvicorn 로그도 위 핸들러로 간다. 접근 로그는 warning 수준이라 남지 않는다
     uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning", log_config=None)
 
