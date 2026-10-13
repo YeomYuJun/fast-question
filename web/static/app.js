@@ -323,6 +323,7 @@ function scheduleSearch() {
 
 async function runSearch() {
   const my = ++searchSeq;
+  syncUrl();
   const p = new URLSearchParams({ q: state.q });
   if (state.cat) p.set("category", state.cat);
   let res;
@@ -847,6 +848,27 @@ function setHash(id) {
   history.replaceState(null, "", id ? `#qa/${id}` : location.pathname + location.search);
 }
 
+// 검색어·분류 필터는 주소의 ?q=...&cat=... 로 남긴다. 펼친 항목 #qa/<id> 는 그대로 둔다
+function syncUrl() {
+  const p = new URLSearchParams();
+  if (state.q) p.set("q", state.q);
+  if (state.cat) p.set("cat", state.cat);
+  const s = p.toString();
+  history.replaceState(null, "", location.pathname + (s ? `?${s}` : "") + location.hash);
+}
+
+// 첫 로드 때 주소의 검색 상태를 되살린다. 없는 분류 id 는 버린다(칩 없이 필터만 걸리지 않게)
+function restoreFromUrl() {
+  const p = new URLSearchParams(location.search);
+  const q = (p.get("q") || "").trim();
+  const cat = Number(p.get("cat"));
+  state.q = q;
+  $("#q").value = q;
+  state.cat = state.flat.some((c) => c.id === cat) ? cat : null;
+  renderTree();
+  renderChip();
+}
+
 // 화면 밖이면 그 행이 보이게 스크롤한다. 위는 붙는 묶음 머리 높이(44px), 아래는 16px 를 비운다
 function scrollTo(id) {
   const r = rows.get(id);
@@ -1006,7 +1028,12 @@ function init() {
     }
   });
 
-  refreshCats().then(() => (location.hash ? openFromHash() : runSearch()));
+  refreshCats().then(() => {
+    restoreFromUrl();
+    if (!location.hash) return runSearch();
+    // 검색 상태가 있으면 그 결과를 먼저 그린다. 펼칠 항목이 결과에 없을 때만 openFromHash 가 검색을 푼다
+    return (state.q || state.cat ? runSearch() : Promise.resolve()).then(openFromHash);
+  });
 }
 
 init();
