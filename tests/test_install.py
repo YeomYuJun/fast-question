@@ -59,6 +59,22 @@ def test_install_skills_copies_every_skill_folder(tmp_path):
     assert all("그대로" in m for m in install.install_skills(src, dst))
 
 
+def test_install_skills_fills_repo_path_in_md_only(tmp_path):
+    src, dst, root = tmp_path / "skill", tmp_path / "dst", tmp_path / "repo dir"
+    (src / "qa").mkdir(parents=True)
+    (src / "qa" / "SKILL.md").write_text(f'"{install.ROOT_MARK}/hooks/ask_kb.py"', encoding="utf-8")
+    (src / "qa" / "tool.py").write_text(install.ROOT_MARK, encoding="utf-8")
+    install.install_skills(src, dst, root)
+    assert (dst / "qa" / "SKILL.md").read_text(encoding="utf-8") == f'"{root.as_posix()}/hooks/ask_kb.py"'
+    assert (dst / "qa" / "tool.py").read_text(encoding="utf-8") == install.ROOT_MARK
+    assert all("그대로" in m for m in install.install_skills(src, dst, root))
+
+
+def test_skill_sources_use_repo_path_mark_not_absolute_path():
+    for f in install.SKILLS_SRC.rglob("*.md"):
+        assert "fast-question/" not in f.read_text(encoding="utf-8").replace(install.ROOT_MARK, ""), f
+
+
 def test_skill_files_have_no_control_characters():
     """역슬래시 경로를 파이썬 문자열로 옮기다 폼 피드·벨 같은 제어 문자가 들어간 적이 있다."""
     import re

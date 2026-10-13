@@ -5,7 +5,6 @@
 훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
 되돌리기: 위 훅 지우기, claude mcp remove -s user fast-question, ~/.claude/skills 아래 qa·qa-harvest 폴더 삭제
 """
-import filecmp
 import json
 import os
 import shutil
@@ -23,29 +22,35 @@ HOOK = ROOT / "hooks" / "ask_kb.py"
 HOOK_EVENT = "UserPromptSubmit"
 HOOK_TIMEOUT_S = 10
 NAME = "fast-question"
+ROOT_MARK = "{{FAST_QUESTION_ROOT}}"  # Skill 원본 md 에서 저장소 경로 자리. 설치할 때 실제 경로로 바꾼다
 
 
-def _same_tree(a: Path, b: Path) -> bool:
-    cmp = filecmp.dircmp(a, b)
-    if cmp.left_only or cmp.right_only or cmp.diff_files or cmp.funny_files:
-        return False
-    return all(_same_tree(a / d, b / d) for d in cmp.common_dirs)
+def _files(top: Path) -> dict[str, bytes]:
+    return {p.relative_to(top).as_posix(): p.read_bytes() for p in sorted(top.rglob("*"))
+            if p.is_file() and "__pycache__" not in p.parts}
 
 
-def install_skill(src: Path, dst: Path) -> str:
-    if dst.exists():
-        if _same_tree(src, dst):
+def _render(src: Path, root: Path) -> dict[str, bytes]:
+    """Skill 원본의 md 에 적힌 ROOT_MARK 를 이 저장소의 실제 경로로 바꾼다."""
+    mark, real = ROOT_MARK.encode("utf-8"), root.as_posix().encode("utf-8")
+    return {rel: data.replace(mark, real) if rel.endswith(".md") else data for rel, data in _files(src).items()}
+
+
+def install_skill(src: Path, dst: Path, root: Path = ROOT) -> str:
+    files = _render(src, root)
+    existed = dst.exists()
+    if existed:
+        if _files(dst) == files:
             return f"Skill 그대로: {dst}"
         shutil.rmtree(dst)
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
-        return f"Skill 덮어씀(내용이 달랐다): {dst}"
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
-    return f"Skill 복사: {dst}"
+    for rel, data in files.items():
+        (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+        (dst / rel).write_bytes(data)
+    return f"Skill 덮어씀(내용이 달랐다): {dst}" if existed else f"Skill 복사: {dst}"
 
 
-def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST) -> list[str]:
-    return [install_skill(d, dst_root / d.name) for d in sorted(src_root.iterdir())
+def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST, root: Path = ROOT) -> list[str]:
+    return [install_skill(d, dst_root / d.name, root) for d in sorted(src_root.iterdir())
             if d.is_dir() and (d / "SKILL.md").exists()]
 
 
