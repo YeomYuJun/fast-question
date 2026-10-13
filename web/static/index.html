@@ -49,7 +49,8 @@
     <div class="col">
       <div id="search" class="search">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-        <input id="q" type="search" placeholder="무엇이 궁금한가요?  예) rename 원자적" aria-label="질문·답변 검색" autocomplete="off" spellcheck="false">
+        <input id="q" type="search" placeholder="무엇이 궁금한가요?  예) rename 원자적" aria-label="질문·답변 검색" autocomplete="off" spellcheck="false" list="recent-q">
+        <datalist id="recent-q"></datalist>
         <button id="help-btn" class="ibtn help" type="button" aria-label="검색 문법 보기" title="검색 문법" aria-expanded="false" aria-controls="help"></button>
         <div id="help" class="help-pop" role="dialog" aria-label="검색 문법" hidden>
           <table>

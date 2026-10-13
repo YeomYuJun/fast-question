@@ -521,7 +521,10 @@ function toggle(id, force) {
   if (prev && prev !== id) repaint(prev);
   repaint(id);
   setHash(open ? id : null);
-  if (open) loadDetail(id);
+  if (open) {
+    if (state.q) remember(state.q);
+    loadDetail(id);
+  }
 }
 
 async function loadDetail(id) {
@@ -952,7 +955,34 @@ function move(dir) {
   requestAnimationFrame(() => scrollTo(next));
 }
 
+// 최근 검색어 10개(localStorage). 입력 중간값이 쌓이지 않게 입력이 2초 멈췄을 때, Enter, 결과 행 펼침, 칩 클릭 때만 남긴다
+const RECENT_MAX = 10;
+let rememberTimer = null;
+
+function recentList() {
+  try {
+    const v = JSON.parse(store("fq-recent") || "[]");
+    return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function renderRecent(list = recentList()) {
+  fill($("#recent-q"), list.map((s) => el("option", { value: s })));
+}
+
+function remember(query) {
+  clearTimeout(rememberTimer);
+  const q = (query || "").trim();
+  if (!q) return;
+  const list = [q, ...recentList().filter((s) => s !== q)].slice(0, RECENT_MAX);
+  store("fq-recent", JSON.stringify(list));
+  renderRecent(list);
+}
+
 function searchFor(query) {
+  remember(query);
   const q = $("#q");
   q.value = query;
   state.q = query.trim();
@@ -1001,6 +1031,8 @@ function init() {
     }
     if (state.sel) toggle(state.sel, false);
     scheduleSearch();
+    clearTimeout(rememberTimer);
+    rememberTimer = setTimeout(() => remember(q.value), 2000);
   });
 
   document.addEventListener("keydown", (e) => {
@@ -1020,6 +1052,7 @@ function init() {
     } else if (e.key === "Enter" && a === q) {
       // 펼친 행이 없을 때만 첫 결과를 펼친다
       e.preventDefault();
+      remember(q.value);
       const ids = visibleIds();
       if (ids.length && !ids.includes(state.sel)) {
         toggle(ids[0], true);
@@ -1062,6 +1095,7 @@ function init() {
   });
   setTheme(document.documentElement.getAttribute("data-theme") || "light");
   openSide(store("fq-side") === "1");
+  renderRecent();
 
   window.addEventListener("hashchange", openFromHash);
   // 다른 창(Claude 등록 등)에서 바뀐 내용을 화면으로 돌아올 때 다시 읽는다
