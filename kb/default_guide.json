@@ -5,7 +5,7 @@
     {
       "category": "검색",
       "question": "fast-question 검색창에서 쓸 수 있는 질의 문법은?",
-      "answer": "공백으로 나눈 단어는 모두 든 항목만 찾는다(AND).\n- a | b: 둘 중 하나가 든 항목(OR)\n- -a: a 가 든 항목을 뺀다\n- \"a b\": 공백을 포함한 구절\n- q:a · a:a: 질문에서만 · 답변에서만 찾기\n- path:x: 근거 파일 경로에 x 가 든 항목",
+      "answer": "공백으로 나눈 단어는 모두 든 항목만 찾는다(AND). 검색창의 ? 버튼에 같은 표가 있다.\n- a | b: 둘 중 하나가 든 항목(OR)\n- -a: a 가 든 항목을 뺀다\n- \"a b\": 공백을 포함한 구절\n- q:a · a:a: 질문에서만 · 답변에서만 찾기\n- path:x: 근거 파일 경로에 x 가 든 항목",
       "evidence": [
         {
           "kind": "auto",
@@ -41,7 +41,7 @@
     {
       "category": "화면",
       "question": "fast-question 화면의 단축키는?",
-      "answer": "/ 로 검색창에 가고, ↑↓ 로 결과를 옮기며 펼친다.\n- Enter: 검색창에서 첫 결과 펼치기\n- E: 펼친 항목 편집\n- Esc: 펼친 항목 접기, 펼친 항목이 없으면 검색어·분류 필터 지우기\n- 편집 중 Ctrl+Enter: 저장, Esc: 취소",
+      "answer": "/ 로 검색창에 가고, ↑↓ 로 결과를 옮기며 펼친다.\n- Enter: 검색창에서 첫 결과 펼치기\n- E: 펼친 항목 편집\n- Esc: 문법 도움말 닫기 → 펼친 항목 접기 → 검색어·분류 필터·24시간 보기 지우기 순으로 하나씩\n- 편집 중 Ctrl+Enter: 저장, Esc: 취소",
       "evidence": [
         {
           "kind": "auto",
@@ -191,6 +191,54 @@
           "kind": "auto",
           "path": "kb/jobs.py",
           "anchor": "recheck"
+        }
+      ]
+    },
+    {
+      "category": "화면",
+      "question": "fast-question 화면에서 답이나 항목 주소를 복사하려면?",
+      "answer": "항목을 펼치면 이력 줄 끝에 답 복사·주소 복사 버튼이 있다.\n- 주소 형식: http://127.0.0.1:8765/#qa/<id>",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "ibtn(\"cp\", \"copy\""
+        }
+      ]
+    },
+    {
+      "category": "화면",
+      "question": "fast-question 에서 최근 24시간 안에 등록된 Q&A 만 보려면?",
+      "answer": "요약 줄의 '최근 24시간 N건' 칩을 누른다.\n- 다시 누르거나 Esc 로 해제\n- 그 기간에 등록된 항목이 없으면 칩이 보이지 않음",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "function renderSince"
+        }
+      ]
+    },
+    {
+      "category": "화면",
+      "question": "fast-question 분류의 Q&A 를 Markdown 파일로 내보내려면?",
+      "answer": "분류 패널에서 분류 편집을 켜고 그 분류 줄의 내보내기 버튼을 누른다.\n- 대분류는 중분류마다 절을 나눠 함께 내보냄\n- 삭제한 항목은 빠짐",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/app.py",
+          "anchor": "def export_markdown"
+        }
+      ]
+    },
+    {
+      "category": "검색",
+      "question": "fast-question 검색이 0건일 때 다시 찾는 방법은?",
+      "answer": "검색어가 두 단어 이상이면 단어를 하나씩 뺀 질의의 건수가 칩으로 나오고, 누르면 그 질의로 찾는다.\n- 비슷한 결과도 함께 보임",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/search.py",
+          "anchor": "def _relaxed"
         }
       ]
     }
