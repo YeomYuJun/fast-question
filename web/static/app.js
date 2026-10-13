@@ -524,7 +524,7 @@ function pick(d) {
 }
 
 function dline(label, value, extra) {
-  const v = el("span", { class: "val ell " + (extra || ""), title: "누르면 전부 보인다" }, value);
+  const v = el("span", { class: "val ell " + (extra || "") }, value);
   v.addEventListener("click", (e) => {
     if (e.target.tagName !== "A") v.classList.toggle("wrap");
   });
@@ -607,7 +607,7 @@ function detailEl(id) {
     el("div", { class: "dline" }, label("근거"), ev),
     d.links.length
       ? el("div", { class: "dline" }, label("연결"),
-        dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell" }, "→ " + l.question)), "links"))
+        dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline" }, label("이력"), histLine(id, d),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
