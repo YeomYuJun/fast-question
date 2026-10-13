@@ -542,9 +542,19 @@ function pick(d) {
 function dline(label, value, extra) {
   const v = el("span", { class: "val ell " + (extra || "") }, value);
   v.addEventListener("click", (e) => {
-    if (e.target.tagName !== "A") v.classList.toggle("wrap");
+    if (!e.target.closest("a")) v.classList.toggle("wrap");
   });
   return v;
+}
+
+// 로컬 경로를 VS Code 로 여는 주소. 구간마다 인코딩하고(공백·#) 드라이브 콜론은 그대로 둔다
+function vscodeUrl(p) {
+  const parts = p.replace(/\\/g, "/").split("/").map((s) => (/^[A-Za-z]:$/.test(s) ? s : encodeURIComponent(s)));
+  return "vscode://file" + (p.startsWith("/") || p.startsWith("\\") ? "" : "/") + parts.join("/");
+}
+
+function evLink(path, ...kids) {
+  return el("a", { class: "evlink", href: vscodeUrl(path), title: `VS Code 로 열기: ${path}`, onclick: (e) => e.stopPropagation() }, ...kids);
 }
 
 // 파일 경로는 폴더와 파일 이름으로 나눈다. 폴더는 앞쪽을 줄이고 파일 이름은 남긴다
@@ -562,8 +572,16 @@ function evidenceText(d) {
     if (e.kind === "file" || e.kind === "dir") {
       const [dir, file] = splitPath(e.path || "");
       // 폴더 칸은 direction: rtl 로 앞쪽을 줄인다. 끝의 구분자가 앞으로 옮겨 그려지지 않게 LRM 을 붙인다
-      if (dir) f.append(el("span", { class: "dir" }, dir + "‎"));
-      f.append(el("span", { class: "file" }, file));
+      const spans = [dir ? el("span", { class: "dir" }, dir + "‎") : null, el("span", { class: "file" }, file)];
+      if (e.kind === "file") f.append(evLink(e.path, spans)); // 폴더 근거는 링크를 두지 않는다
+      else f.append(...spans.filter(Boolean));
+    } else if (e.kind === "git" && e.path) {
+      f.append(evLink(e.path, el("span", { class: "target" }, e.path)));
+    } else if (e.kind === "git") {
+      // 경로가 여럿이면 저장소 기준 상대 경로다. glob 이 든 경로는 열 수 없어 글자로 둔다
+      const repo = e.repo.replace(/[\\/]$/, "");
+      f.append(el("span", { class: "target" }, repo,
+        (e.paths || []).flatMap((p) => [" ", /[*?[]/.test(p) ? p : evLink(`${repo}/${p}`, p)])));
     } else {
       const target = e.kind === "note" ? e.text
         : e.kind === "githead" ? e.repo

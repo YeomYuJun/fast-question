@@ -212,6 +212,9 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .ev .dir { min-width: 0; flex: 0 1000 auto; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .ev.wrap .dir { direction: ltr; white-space: normal; }
 .ev .file { flex: none; color: var(--muted); }
+/* 근거 경로 링크는 상자 없이 폴더·파일 칸을 그대로 둔다(줄임 배치 유지). 마우스를 올리면 accent 밑줄 */
+.ev a.evlink { display: contents; color: inherit; }
+.ev a.evlink:hover .file, .ev a.evlink:hover .target, .ev .target a.evlink:hover { color: var(--accent); text-decoration: underline; }
 .ev .target, .ev .anchor { min-width: 0; flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ev.wrap .target, .ev.wrap .anchor { white-space: normal; }
 .hist { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); }
