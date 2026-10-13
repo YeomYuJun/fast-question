@@ -9,17 +9,19 @@ run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업,
 import dataclasses
 import json
 import logging
+import re
 import sqlite3
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
+from urllib.parse import quote
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -80,6 +82,26 @@ def _qa_out(item: dict) -> dict:
 def _evidence(body: dict) -> list[dict] | None:
     line = body.get("evidence_line")
     return None if line is None else parse_line(line)
+
+
+def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
+    """(분류 경로, Markdown). 분류 경로를 제목으로, 항목마다 "### 질문" 과 답변을 쓴다.
+    대분류는 바로 아래 항목 뒤에 중분류마다 "## 경로" 절을 둔다. 삭제한 항목과 빈 중분류는 뺀다."""
+    tree = store.categories()
+    cat = next((c for t in tree for c in [t, *t["children"]] if c["id"] == category_id), None)
+    if cat is None:
+        raise NotFoundError(f"분류를 찾지 못했다: {category_id}")
+
+    def items(cid: int) -> list[str]:
+        rows = store.conn.execute(
+            "SELECT question, answer FROM qa WHERE category_id = ? AND deleted_at IS NULL ORDER BY id", (cid,))
+        return [f"### {q}\n\n{a}\n" for q, a in rows]
+
+    parts = [f"# {cat['path']}\n", *items(cat["id"])]
+    for child in cat["children"]:
+        if body := items(child["id"]):
+            parts += [f"## {child['path']}\n", *body]
+    return cat["path"], "\n".join(parts)
 
 
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
@@ -150,6 +172,31 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             return JSONResponse(data)
         return handler
 
+    async def export(request: Request) -> Response:
+        """분류 하나를 Markdown 파일로 내려준다. 오류는 api() 와 같은 JSON 이다."""
+        raw = request.query_params.get("category", "")
+        if not raw.isdigit():
+            return JSONResponse({"error": "category 에 분류 id 가 필요하다."}, status_code=400)
+
+        def work():
+            conn = connect(path)
+            try:
+                return export_markdown(Store(conn, "user", analyzer), int(raw))
+            finally:
+                conn.close()
+
+        try:
+            cat_path, text = await run_in_threadpool(work)
+        except NotFoundError as e:
+            return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+        except sqlite3.OperationalError as e:
+            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+                                 "code": "busy"}, status_code=503)
+        name = re.sub(r'[\\/:*?"<>|]+', "_", cat_path.replace(" > ", "-")) + ".md"
+        # 한글 파일 이름은 latin-1 헤더에 그대로 못 넣어 RFC 5987 형식으로 보낸다
+        return Response(text, media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
     def pid(request: Request, name: str = "id") -> int:
         return int(request.path_params[name])
 
@@ -174,6 +221,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
             pid(r), b["version"], name=b.get("name"), description=b.get("description"))), methods=["PATCH"]),
+        Route("/api/export", export),
         Route("/api/categories/{id:int}/impact", api(lambda s, r, b: s.category_impact(pid(r)))),
         Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
             pid(r), b["version"])), methods=["POST"]),

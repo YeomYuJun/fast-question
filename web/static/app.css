@@ -112,7 +112,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 }
 .ibtn.rn:hover { color: var(--accent); }
 .ibtn.del:hover { color: var(--stale); }
-.ibtn.cp:hover { color: var(--accent); }
+.ibtn.cp:hover, .ibtn.dl:hover { color: var(--accent); }
 .dline .ibtn { align-self: center; margin: -3px 0; }
 .ibtn.ok { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ibtn.ok:hover { color: var(--accent-ink); filter: brightness(1.08); }

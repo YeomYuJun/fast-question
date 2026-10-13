@@ -25,6 +25,7 @@ const ICONS = {
   check: ["M5 12.5l4.5 4.5L19 7.5"],
   cross: ["M6 6l12 12M18 6L6 18"],
   copy: ["M9 9h10v10H9z", "M5 15V5h10"],
+  download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
   link: ["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
   help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6", "M12 17h.01"],
 };
@@ -183,6 +184,9 @@ function renderTreeEdit() {
     if (state.catRenaming === c.id) return renameForm(c, cls);
     return el("div", { class: `facet-edit ${cls}` },
       el("span", { class: "name", title: c.description || null }, c.name),
+      // 내보내기는 링크다. 파일 이름은 서버의 Content-Disposition 이 정한다
+      el("a", { class: "ibtn dl", href: `/api/export?category=${c.id}`, download: "",
+        "aria-label": `${c.path} Markdown 내보내기`, title: "Markdown 내보내기" }, icon("download")),
       ibtn("rn", "pen", `${c.path} 이름 변경`, "이름 변경", () => { state.catRenaming = c.id; renderTree(); }),
       ibtn("del", "trash", `${c.path} 삭제`, "삭제", () => deleteCategory(c)));
   };

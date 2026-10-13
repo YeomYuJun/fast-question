@@ -224,6 +224,30 @@ def test_search_since_hours_and_relax_off(client):
     assert "relaxed" not in client.get("/api/search", params={"q": "rename 없는단어", "relax": "0"}).json()
 
 
+def test_export_category_markdown(client):
+    item = add_basics(client)
+    client.post("/api/qa", json={"category": "이관", "question": "이관 대상은?", "answer": "NAS 와 DB 다.\n- NAS: 파일\n- DB: 테이블"})
+    client.post("/api/categories", json={"name": "DB", "parent": "이관"})
+    gone = client.post("/api/qa", json={"category": "이관 > DB", "question": "지운 질문?", "answer": "지운 답이다."}).json()["item"]
+    client.post(f"/api/qa/{gone['id']}/archive", json={"version": gone["version"]})
+    tops = client.get("/api/categories").json()["categories"]
+    top = tops[0]
+    nas = next(c for c in top["children"] if c["name"] == "NAS")
+
+    r = client.get("/api/export", params={"category": nas["id"]})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/markdown")
+    assert "filename*=UTF-8''" in r.headers["content-disposition"]
+    assert r.text == f"# 이관 > NAS\n\n### {item['question']}\n\n{item['answer']}\n"
+
+    whole = client.get("/api/export", params={"category": top["id"]}).text
+    assert whole.startswith("# 이관\n\n### 이관 대상은?\n\nNAS 와 DB 다.\n- NAS: 파일\n- DB: 테이블\n")
+    assert "## 이관 > NAS\n\n### .part 를 쓰는 이유" in whole
+    assert "지운 질문" not in whole and "## 이관 > DB" not in whole
+
+    assert client.get("/api/export", params={"category": 999}).status_code == 404
+    assert client.get("/api/export").status_code == 400
+
+
 def test_rename_category(client):
     add_basics(client)
     top = client.get("/api/categories").json()["categories"][0]
