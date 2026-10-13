@@ -687,7 +687,7 @@ function detailEl(id) {
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline" }, label("이력"), histLine(id, d),
-      ibtn("cp", "copy", "답 복사", "답 복사", () => copy(d.answer, "답을 복사했다.")),
+      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A를 복사했다.")),
       ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했다.")),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
 }
