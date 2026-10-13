@@ -155,8 +155,10 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     def search(s: Store, r: Request, _):
         qp = r.query_params
+        # since: 그 시간 안에 등록된 항목만. relax=0: 건수만 세는 보조 요청이라 단어 빼기 제안을 계산하지 않는다
         return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
-                        limit=int(qp.get("limit", 200)), relax=True)
+                        limit=int(qp.get("limit", 200)), relax=qp.get("relax") != "0",
+                        since_hours=float(qp["since"]) if qp.get("since") else None)
 
     def add_qa(s: Store, _, b: dict):
         res = s.add_qa(b["category"], b["question"], b["answer"], evidence=_evidence(b), force=bool(b.get("force")))

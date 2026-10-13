@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import unicodedata
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
 from kb.dictionary import load_stopwords, load_synonyms
@@ -36,6 +37,7 @@ class Doc(NamedTuple):
     updated_at: str
     category_id: int
     archived: bool
+    created_at: str
 
 
 _CACHE: dict[str, tuple[tuple, dict[int, Doc]]] = {}
@@ -55,9 +57,9 @@ def _corpus(conn) -> dict[int, Doc]:
         return cached[1]
     with _LOCK:
         docs = {
-            r[0]: Doc(r[1], r[2], _flat(r[1]) + "\0" + _flat(r[2]), r[3], r[4], bool(r[5]))
+            r[0]: Doc(r[1], r[2], _flat(r[1]) + "\0" + _flat(r[2]), r[3], r[4], bool(r[5]), r[6])
             for r in conn.execute(
-                "SELECT id, question, answer, updated_at, category_id, deleted_at IS NOT NULL FROM qa")
+                "SELECT id, question, answer, updated_at, category_id, deleted_at IS NOT NULL, created_at FROM qa")
         }
         _CACHE[db] = (stamp, docs)
     return docs
@@ -114,7 +116,15 @@ def _path_ids(conn, alts: list[str]) -> set[int]:
     return found
 
 
-def _filter(store: "Store", include_archived: bool, category_id: int | None):
+def _now() -> datetime:
+    """since_hours 의 기준 시각. 테스트가 바꿔 끼운다(created_at 은 트리거가 지금 시각으로만 넣는다)."""
+    return datetime.now(timezone.utc)
+
+
+def _filter(store: "Store", include_archived: bool, category_id: int | None, since_hours: float | None = None):
+    cutoff = None
+    if since_hours is not None:  # created_at 과 같은 형식(UTC, 밀리초, Z)이라 글자 비교가 시각 비교다
+        cutoff = (_now() - timedelta(hours=since_hours)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     cats = None
     if category_id is not None:
         cats = {category_id} | {r[0] for r in store.conn.execute(
@@ -122,6 +132,8 @@ def _filter(store: "Store", include_archived: bool, category_id: int | None):
 
     def ok(d: Doc) -> bool:
         if d.archived and not include_archived:
+            return False
+        if cutoff is not None and d.created_at < cutoff:
             return False
         return cats is None or d.category_id in cats
     return ok
@@ -164,13 +176,14 @@ def _regex(q: str, case_sensitive: bool) -> re.Pattern:
 
 def search(store: "Store", query: str, *, analyzer=None, category_id: int | None = None,
            include_archived: bool = False, case_sensitive: bool = False, regex: bool = False,
-           limit: int = 200, relax: bool = False) -> dict:
-    """relax 면 결과에 relaxed 를 붙인다. 0건이고 단어가 둘 이상일 때 단어를 하나씩 뺀 질의 중
+           limit: int = 200, relax: bool = False, since_hours: float | None = None) -> dict:
+    """since_hours 면 그 시간 안에 등록(created_at)된 항목만 찾는다.
+    relax 면 결과에 relaxed 를 붙인다. 0건이고 단어가 둘 이상일 때 단어를 하나씩 뺀 질의 중
     결과가 있는 것의 건수다(화면의 0건 안내가 쓴다)."""
     t0 = time.perf_counter()
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
-    ok = _filter(store, include_archived, category_id)
+    ok = _filter(store, include_archived, category_id, since_hours)
     # 빈 검색(최근 목록)에는 형태소가 필요 없으므로 Kiwi 를 띄우지 않는다
     morph_on = bool(q and analyzer is not None and analyzer.ready(conn))
     result = {"query": q, "total": 0, "groups": [], "hits": [], "similar": [],
@@ -183,10 +196,10 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
 
     if not q:
         ids = sorted((i for i, d in docs.items() if ok(d)), key=lambda i: (docs[i].updated_at, i), reverse=True)
+        result["total"] = len(ids)
         ids = ids[:min(limit, RECENT_LIMIT)]
         result["hits"] = [dict(i, tier="recent", in_question=False, spans={"question": [], "answer": []})
                           for i in store.items(ids)]
-        result["total"] = len(ids)
         return done()
 
     tier_of: dict[int, str] = {}
@@ -269,7 +282,7 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
     if relax:
         result["relaxed"] = [] if hits or regex else _relaxed(
             store, q, analyzer=analyzer, category_id=category_id, include_archived=include_archived,
-            case_sensitive=case_sensitive)
+            case_sensitive=case_sensitive, since_hours=since_hours)
     return done()
 
 

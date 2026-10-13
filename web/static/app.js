@@ -138,6 +138,7 @@ const state = {
   histOpen: new Set(), // 이력을 전부 펼친 항목 id
   catEdit: false, // 분류 패널이 편집(이름 변경·삭제) 상태다
   catRenaming: null, // 이름을 고치는 중인 분류 id
+  since: false, // 최근 24시간 안에 등록한 항목만 보기
 };
 const rows = new Map(); // id -> 행 요소(row.hit 에 검색 결과 항목)
 const groups = new Map(); // 묶음 키 -> 묶음 요소
@@ -265,7 +266,7 @@ async function searchCounts(res) {
   let groups = res.groups;
   let total = res.total;
   if (state.cat) { // 분류로 거른 결과에는 다른 분류의 건수가 없어서, 거르지 않은 검색을 한 번 더 한다
-    const all = await api("GET", "/api/search?" + new URLSearchParams({ q: state.q, limit: 1 })).catch(() => null);
+    const all = await api("GET", "/api/search?" + searchParams({ limit: 1, relax: 0 }, false)).catch(() => null);
     if (!all) return null;
     groups = all.groups;
     total = all.total;
@@ -278,6 +279,21 @@ function renderChip() {
   const c = state.flat.find((x) => x.id === state.cat);
   chip.hidden = !c;
   chip.textContent = c ? `${c.path} ×` : "";
+}
+
+// 요약 줄의 "최근 24시간 N건" 칩. 켜져 있지 않고 0건이면 숨긴다
+function renderSince(n) {
+  const chip = $("#since-chip");
+  chip.hidden = !state.since && !n;
+  chip.textContent = `최근 24시간 ${n}건`;
+  chip.classList.toggle("on", state.since);
+  chip.setAttribute("aria-pressed", String(state.since));
+}
+
+function setSince(on) {
+  state.since = on;
+  state.pin = null;
+  runSearch();
 }
 
 function setCat(id) {
@@ -323,15 +339,30 @@ function scheduleSearch() {
   searchTimer = setTimeout(runSearch, 150);
 }
 
+const SINCE_HOURS = 24;
+
+// 지금 검색 조건의 요청 인자. withCat 이 거짓이면 분류 필터를 뺀다
+function searchParams(extra = {}, withCat = true) {
+  const p = new URLSearchParams({ q: state.q, ...extra });
+  if (withCat && state.cat) p.set("category", state.cat);
+  if (state.since && !("since" in extra)) p.set("since", SINCE_HOURS);
+  return p;
+}
+
+// 칩 건수: 켜져 있으면 본 검색의 건수, 꺼져 있으면 같은 조건에 since 를 더해 건수만 센다
+async function sinceCount(res) {
+  if (state.since) return res.total;
+  const r = await api("GET", "/api/search?" + searchParams({ since: SINCE_HOURS, limit: 0, relax: 0 })).catch(() => null);
+  return r ? r.total : 0;
+}
+
 async function runSearch() {
   const my = ++searchSeq;
   syncUrl();
-  const p = new URLSearchParams({ q: state.q });
-  if (state.cat) p.set("category", state.cat);
   let res;
   try {
-    res = await api("GET", "/api/search?" + p);
-    if (state.pin && !state.q && !state.cat && !res.hits.some((h) => h.id === state.pin)) {
+    res = await api("GET", "/api/search?" + searchParams());
+    if (state.pin && !state.q && !state.cat && !state.since && !res.hits.some((h) => h.id === state.pin)) {
       const it = await api("GET", `/api/qa/${state.pin}`).catch(() => null);
       if (it && !it.archived) {
         state.details.set(it.id, it);
@@ -342,8 +373,9 @@ async function runSearch() {
     if (my === searchSeq) $("#sum-count").textContent = e.message;
     return;
   }
-  const counts = await searchCounts(res);
+  const [counts, recentN] = await Promise.all([searchCounts(res), sinceCount(res)]);
   if (my !== searchSeq) return; // 늦게 도착한 이전 응답은 버린다
+  renderSince(recentN);
   state.counts = counts;
   renderTree();
   render(res);
@@ -388,7 +420,7 @@ function render(res) {
   if (empty) {
     $("#empty-msg").textContent = res.query
       ? (similar ? "일치하는 질문이 없습니다. 비슷한 결과를 아래에 보입니다." : "일치하는 질문이 없습니다.")
-      : "아직 등록된 질문이 없습니다.";
+      : state.since ? `최근 ${SINCE_HOURS}시간 안에 등록한 질문이 없습니다.` : "아직 등록된 질문이 없습니다.";
     $("#empty-new").textContent = res.query ? `“${res.query}” 질문으로 새로 등록` : "+ 새 질문";
   }
   // 단어를 하나 빼면 결과가 있는 질의. 누르면 그 질의로 검색한다
@@ -891,6 +923,7 @@ function syncUrl() {
   const p = new URLSearchParams();
   if (state.q) p.set("q", state.q);
   if (state.cat) p.set("cat", state.cat);
+  if (state.since) p.set("since", SINCE_HOURS);
   const s = p.toString();
   history.replaceState(null, "", location.pathname + (s ? `?${s}` : "") + location.hash);
 }
@@ -903,6 +936,7 @@ function restoreFromUrl() {
   state.q = q;
   $("#q").value = q;
   state.cat = state.flat.some((c) => c.id === cat) ? cat : null;
+  state.since = p.has("since");
   renderTree();
   renderChip();
 }
@@ -927,6 +961,7 @@ async function openFromHash() {
     state.q = "";
     $("#q").value = "";
     state.cat = null;
+    state.since = false;
     renderTree();
     renderChip();
     await runSearch();
@@ -996,6 +1031,7 @@ function clearSearch() {
   q.value = "";
   state.q = "";
   state.cat = null;
+  state.since = false;
   renderTree();
   renderChip();
   runSearch();
@@ -1059,10 +1095,10 @@ function init() {
         requestAnimationFrame(() => scrollTo(ids[0]));
       }
     } else if (e.key === "Escape") {
-      // 문법 도움말이 열려 있으면 그것만 닫는다. 아니면 펼친 행을 먼저 접고, 없으면 검색어와 분류 필터를 지운다
+      // 문법 도움말이 열려 있으면 그것만 닫는다. 아니면 펼친 행을 먼저 접고, 없으면 검색어·분류 필터·24시간 보기를 지운다
       if (!$("#help").hidden) openHelp(false);
       else if (state.sel && rows.has(state.sel) && !rows.get(state.sel).classList.contains("out")) toggle(state.sel, false);
-      else if (q.value || state.cat) clearSearch();
+      else if (q.value || state.cat || state.since) clearSearch();
     } else if ((e.key === "e" || e.key === "E") && !typing && state.sel && !state.editing && state.details.has(state.sel)) {
       e.preventDefault();
       startEdit(state.sel);
@@ -1078,6 +1114,7 @@ function init() {
   $("#new-btn").addEventListener("click", () => openNew(state.q));
   $("#empty-new").addEventListener("click", () => openNew(state.q));
   $("#cat-chip").addEventListener("click", () => setCat(null));
+  $("#since-chip").addEventListener("click", () => setSince(!state.since));
   $("#toggle-side").addEventListener("click", () => openSide($("#side").hidden));
   $("#cat-add").addEventListener("click", () => {
     $("#cat-form").hidden = false;
@@ -1110,7 +1147,7 @@ function init() {
     restoreFromUrl();
     if (!location.hash) return runSearch();
     // 검색 상태가 있으면 그 결과를 먼저 그린다. 펼칠 항목이 결과에 없을 때만 openFromHash 가 검색을 푼다
-    return (state.q || state.cat ? runSearch() : Promise.resolve()).then(openFromHash);
+    return (state.q || state.cat || state.since ? runSearch() : Promise.resolve()).then(openFromHash);
   });
 }
 

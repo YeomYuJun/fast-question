@@ -267,7 +267,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 /* 0건일 때 단어 하나를 뺀 질의 칩 */
 .relaxed { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .relaxed:empty { display: none; }
-.relaxed .chip:hover { border-color: var(--accent-line); color: var(--accent); }
+.chip:hover { border-color: var(--accent-line); color: var(--accent); }
 .relaxed code { font-family: var(--font-mono); color: var(--ink); }
 
 /* 알림 */

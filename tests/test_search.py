@@ -247,3 +247,22 @@ def test_relaxed_only_when_requested_and_needed(store):
     assert "relaxed" not in store.search("rename 없는단어")
     assert store.search("없는단어", relax=True)["relaxed"] == []
     assert store.search("rename", relax=True)["relaxed"] == []
+
+
+def test_since_filters_by_created_at(store, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import kb.search as search_mod
+    assert store.search("", since_hours=24)["total"] == 11
+    later = datetime.now(timezone.utc) + timedelta(hours=48)
+    monkeypatch.setattr(search_mod, "_now", lambda: later)
+    assert store.search("", since_hours=24)["total"] == 0
+    assert store.search("NAS", since_hours=24)["hits"] == []
+    assert store.search("", since_hours=72)["total"] == 11
+    assert {h["id"] for h in store.search("NAS", since_hours=72)["hits"]} == {1, 3, 4}
+
+
+def test_empty_query_total_counts_beyond_recent_limit(store, monkeypatch):
+    import kb.search as search_mod
+    monkeypatch.setattr(search_mod, "RECENT_LIMIT", 5)
+    res = store.search("")
+    assert len(res["hits"]) == 5 and res["total"] == 11

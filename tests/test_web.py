@@ -216,6 +216,14 @@ def test_search_zero_hits_suggests_dropping_a_word(client):
     assert client.get("/api/search", params={"q": "rename"}).json()["hits"][0]["id"] == item["id"]
 
 
+def test_search_since_hours_and_relax_off(client):
+    add_basics(client)
+    assert client.get("/api/search", params={"since": "24"}).json()["total"] == 1
+    assert client.get("/api/search", params={"q": "rename", "since": "24"}).json()["total"] == 1
+    assert client.get("/api/search", params={"since": "abc"}).status_code == 400
+    assert "relaxed" not in client.get("/api/search", params={"q": "rename 없는단어", "relax": "0"}).json()
+
+
 def test_rename_category(client):
     add_basics(client)
     top = client.get("/api/categories").json()["categories"][0]
