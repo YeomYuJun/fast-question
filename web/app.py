@@ -202,9 +202,10 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     def search(s: Store, r: Request, _):
         qp = r.query_params
-        # since: 그 시간 안에 등록된 항목만. relax=0: 건수만 세는 보조 요청이라 단어 빼기 제안을 계산하지 않는다
+        # since: 그 시간 안에 등록된 항목만. relax=1: 단어 빼기 제안을 붙인다(화면의 본 검색만 켠다.
+        # 즉석 질문 훅·건수만 세는 요청은 넘기지 않아 단어 수만큼의 추가 검색을 하지 않는다)
         return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
-                        limit=int(qp.get("limit", 200)), relax=qp.get("relax") != "0",
+                        limit=int(qp.get("limit", 200)), relax=qp.get("relax") == "1",
                         since_hours=float(qp["since"]) if qp.get("since") else None)
 
     def add_qa(s: Store, _, b: dict):

@@ -211,17 +211,18 @@ def test_search_box_syntax_without_regex(client):
 
 def test_search_zero_hits_suggests_dropping_a_word(client):
     item = add_basics(client)
-    res = client.get("/api/search", params={"q": "rename 없는단어"}).json()
+    res = client.get("/api/search", params={"q": "rename 없는단어", "relax": "1"}).json()
     assert res["total"] == 0 and res["relaxed"] == [{"dropped": "없는단어", "query": "rename", "total": 1}]
     assert client.get("/api/search", params={"q": "rename"}).json()["hits"][0]["id"] == item["id"]
+    # 즉석 질문 훅처럼 relax 를 넘기지 않는 요청은 단어 빼기를 계산하지 않는다
+    assert "relaxed" not in client.get("/api/search", params={"q": "rename 없는단어"}).json()
 
 
-def test_search_since_hours_and_relax_off(client):
+def test_search_since_hours(client):
     add_basics(client)
     assert client.get("/api/search", params={"since": "24"}).json()["total"] == 1
     assert client.get("/api/search", params={"q": "rename", "since": "24"}).json()["total"] == 1
     assert client.get("/api/search", params={"since": "abc"}).status_code == 400
-    assert "relaxed" not in client.get("/api/search", params={"q": "rename 없는단어", "relax": "0"}).json()
 
 
 def test_export_category_markdown(client):

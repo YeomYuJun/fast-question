@@ -270,7 +270,7 @@ async function searchCounts(res) {
   let groups = res.groups;
   let total = res.total;
   if (state.cat) { // 분류로 거른 결과에는 다른 분류의 건수가 없어서, 거르지 않은 검색을 한 번 더 한다
-    const all = await api("GET", "/api/search?" + searchParams({ limit: 1, relax: 0 }, false)).catch(() => null);
+    const all = await api("GET", "/api/search?" + searchParams({ limit: 1 }, false)).catch(() => null);
     if (!all) return null;
     groups = all.groups;
     total = all.total;
@@ -356,7 +356,7 @@ function searchParams(extra = {}, withCat = true) {
 // 칩 건수: 켜져 있으면 본 검색의 건수, 꺼져 있으면 같은 조건에 since 를 더해 건수만 센다
 async function sinceCount(res) {
   if (state.since) return res.total;
-  const r = await api("GET", "/api/search?" + searchParams({ since: SINCE_HOURS, limit: 0, relax: 0 })).catch(() => null);
+  const r = await api("GET", "/api/search?" + searchParams({ since: SINCE_HOURS, limit: 0 })).catch(() => null);
   return r ? r.total : 0;
 }
 
@@ -365,7 +365,7 @@ async function runSearch() {
   syncUrl();
   let res;
   try {
-    res = await api("GET", "/api/search?" + searchParams());
+    res = await api("GET", "/api/search?" + searchParams({ relax: 1 }));
     if (state.pin && !state.q && !state.cat && !state.since && !res.hits.some((h) => h.id === state.pin)) {
       const it = await api("GET", `/api/qa/${state.pin}`).catch(() => null);
       if (it && !it.archived) {
