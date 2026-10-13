@@ -171,7 +171,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/categories", api(lambda s, r, b: s.add_category(
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
-            pid(r), b["version"], name=b["name"])), methods=["PATCH"]),
+            pid(r), b["version"], name=b.get("name"), description=b.get("description"))), methods=["PATCH"]),
         Route("/api/categories/{id:int}/impact", api(lambda s, r, b: s.category_impact(pid(r)))),
         Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
             pid(r), b["version"])), methods=["POST"]),

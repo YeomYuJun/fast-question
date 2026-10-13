@@ -154,8 +154,8 @@ async function refreshCats() {
   renderChip();
 }
 
-function facet(name, n, on, onclick, cls) {
-  return el("button", { class: `facet ${cls}${on ? " on" : ""}${n ? "" : " zero"}`, type: "button", "aria-pressed": String(on), onclick },
+function facet(name, n, on, onclick, cls, title) {
+  return el("button", { class: `facet ${cls}${on ? " on" : ""}${n ? "" : " zero"}`, type: "button", "aria-pressed": String(on), title: title || null, onclick },
     el("span", { class: "name" }, name), el("span", { class: "n" }, n));
 }
 
@@ -169,8 +169,8 @@ function renderTree() {
   fill($("#cat-tree"),
     facet("전체", total, state.cat === null, () => setCat(null), "top"),
     state.cats.flatMap((t) => [
-      facet(t.name, countOf(t), state.cat === t.id, () => setCat(t.id), "top"),
-      ...t.children.map((c) => facet(c.name, hits ? own(c) : c.count, state.cat === c.id, () => setCat(c.id), "child")),
+      facet(t.name, countOf(t), state.cat === t.id, () => setCat(t.id), "top", t.description),
+      ...t.children.map((c) => facet(c.name, hits ? own(c) : c.count, state.cat === c.id, () => setCat(c.id), "child", c.description)),
     ]));
 }
 
@@ -179,28 +179,37 @@ function renderTreeEdit() {
   const line = (c, cls) => {
     if (state.catRenaming === c.id) return renameForm(c, cls);
     return el("div", { class: `facet-edit ${cls}` },
-      el("span", { class: "name" }, c.name),
+      el("span", { class: "name", title: c.description || null }, c.name),
       ibtn("rn", "pen", `${c.path} 이름 변경`, "이름 변경", () => { state.catRenaming = c.id; renderTree(); }),
       ibtn("del", "trash", `${c.path} 삭제`, "삭제", () => deleteCategory(c)));
   };
   fill($("#cat-tree"), state.cats.flatMap((t) => [line(t, "top"), ...t.children.map((c) => line(c, "child"))]));
 }
 
+// 이름과 설명을 함께 고친다. 바뀐 값만 보낸다
 function renameForm(c, cls) {
   const input = el("input", { class: "fld", value: c.name, "aria-label": `${c.path} 새 이름`, autocomplete: "off" });
+  const desc = el("input", {
+    class: "fld desc", value: c.description || "", "aria-label": `${c.path} 설명`, placeholder: "설명 (선택)",
+    maxlength: 300, autocomplete: "off",
+  });
   const cancel = () => { state.catRenaming = null; renderTree(); };
   const form = el("form", {
     class: `facet-edit rename ${cls}`,
     onsubmit: async (e) => {
       e.preventDefault();
       const name = input.value.trim();
-      if (!name || name === c.name) return cancel();
+      const description = desc.value.trim();
+      const body = { version: c.version };
+      if (name && name !== c.name) body.name = name;
+      if (description !== (c.description || "")) body.description = description;
+      if (Object.keys(body).length === 1) return cancel();
       try {
-        const done = await api("PATCH", `/api/categories/${c.id}`, { version: c.version, name });
+        const done = await api("PATCH", `/api/categories/${c.id}`, body);
         state.catRenaming = null;
         await refreshCats();
         runSearch();
-        toast(`분류 이름을 "${done.path}" 로 바꿨다.`);
+        toast(body.name ? `분류 이름을 "${done.path}" 로 바꿨다.` : `분류 "${done.path}" 의 설명을 바꿨다.`);
       } catch (err) {
         toast(err.message, { err: true });
       }
@@ -208,7 +217,7 @@ function renameForm(c, cls) {
     onkeydown: (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } },
   }, input,
   ibtn("ok", "check", "저장", "저장 (Enter)", null, "submit"),
-  ibtn("no", "cross", "취소", "취소 (Esc)", cancel));
+  ibtn("no", "cross", "취소", "취소 (Esc)", cancel), desc);
   setTimeout(() => { input.focus(); input.select(); }, 0);
   return form;
 }
@@ -404,10 +413,13 @@ function groupEl(key, path, n) {
     groups.set(key, g);
   }
   const i = path.indexOf(" > ");
+  // 분류 설명은 경로 글자의 title 로 둔다. 머리 버튼의 title 은 접기·펴기가 쓴다
+  const cat = state.flat.find((c) => String(c.id) === key);
+  const top = cat && cat.parent_id ? state.flat.find((c) => c.id === cat.parent_id) : null;
   fill(g.firstChild,
     el("span", { class: "chev", "aria-hidden": "true" }, "▼"),
-    i >= 0 ? el("span", { class: "top-name" }, path.slice(0, i) + " /") : null,
-    el("span", {}, i >= 0 ? path.slice(i + 3) : path),
+    i >= 0 ? el("span", { class: "top-name", title: (top && top.description) || null }, path.slice(0, i) + " /") : null,
+    el("span", { title: (cat && cat.description) || null }, i >= 0 ? path.slice(i + 3) : path),
     el("span", { class: "rule" }),
     el("span", { class: "grp-n" }, n));
   paintFold(key, g);

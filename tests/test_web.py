@@ -219,6 +219,18 @@ def test_rename_category(client):
     assert stale.status_code == 409
 
 
+def test_update_category_description(client):
+    add_basics(client)
+    top = client.get("/api/categories").json()["categories"][0]
+    r = client.patch(f"/api/categories/{top['id']}", json={"version": top["version"], "description": "이관 사업 지식"})
+    assert r.status_code == 200 and r.json()["description"] == "이관 사업 지식" and r.json()["name"] == "이관"
+    both = client.patch(f"/api/categories/{top['id']}",
+                        json={"version": r.json()["version"], "name": "이관 사업", "description": ""})
+    assert both.status_code == 200 and (both.json()["name"], both.json()["description"]) == ("이관 사업", "")
+    empty = client.patch(f"/api/categories/{top['id']}", json={"version": both.json()["version"]})
+    assert empty.status_code == 400
+
+
 def test_delete_category_with_impact(client):
     item = add_basics(client)
     top = client.get("/api/categories").json()["categories"][0]
