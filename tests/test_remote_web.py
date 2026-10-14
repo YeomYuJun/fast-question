@@ -12,9 +12,14 @@ from web.app import ACCOUNT_KEY, create_app
 URL = "https://fq.example.com"
 
 
+def _no_kiwi():
+    raise RuntimeError("이 파일은 형태소 계층을 쓰지 않는다")
+
+
 @pytest.fixture(scope="module")
 def analyzer():
-    return Analyzer()
+    # Kiwi(약 600 MB)를 띄우지 않는다. 형태소 계층이 꺼지면 E·Y 로 찾는다(test_morph 가 확인한다)
+    return Analyzer(loader=_no_kiwi)
 
 
 @pytest.fixture
