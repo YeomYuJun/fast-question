@@ -11,11 +11,14 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
+/healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
+형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
 """
 import dataclasses
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import threading
 from contextlib import asynccontextmanager
@@ -50,6 +53,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
+HEALTH_DISK_MIN = 0.10
+HEALTH_PATH = "/healthz"
 log = logging.getLogger("fast-question.web")
 
 
@@ -66,6 +71,7 @@ class SameOriginOnly:
 
     다른 사이트가 사용자 브라우저로 보내는 요청(text/plain POST 는 사전 확인 없이 간다)과
     DNS 재바인딩으로 KB 를 읽거나 사용자 이름으로 항목을 심는 것을 막는다.
+    상태 점검(/healthz)은 사용자 데이터를 돌려주지 않아 검사하지 않는다. 컨테이너 안 점검은 Host 가 도메인이 아니다.
     """
 
     def __init__(self, app, hosts: set[str]):
@@ -74,7 +80,7 @@ class SameOriginOnly:
         self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받는다."
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
+        if scope["type"] == "http" and scope["path"] != HEALTH_PATH:
             headers = {k.lower(): v.decode("latin-1").lower() for k, v in scope["headers"]}
             host = headers.get(b"host", "")
             origin = headers.get(b"origin")
@@ -237,6 +243,30 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         return Response(text, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
+    def health_checks() -> dict:
+        out: dict = {"db": "ok"}
+        try:
+            conn = connect_control(tenant.control_path(cfg.data_dir)) if remote else connect(path)
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - 어떤 실패든 점검 실패로 돌려준다
+            out["db"] = f"{type(e).__name__}: {e}"
+        try:
+            usage = shutil.disk_usage(cfg.data_dir if remote else path.parent)
+            out["disk_free"] = round(usage.free / usage.total, 4)
+        except OSError as e:
+            out["disk_free"], out["disk_error"] = None, f"{type(e).__name__}: {e}"
+        out["morph"] = bool(analyzer.enabled)
+        out["ok"] = (out["db"] == "ok" and out["disk_free"] is not None
+                     and out["disk_free"] >= HEALTH_DISK_MIN and out["morph"])
+        return out
+
+    async def healthz(_request: Request) -> JSONResponse:
+        out = await run_in_threadpool(health_checks)
+        return JSONResponse(out, status_code=200 if out["ok"] else 503)
+
     def pid(request: Request, name: str = "id") -> int:
         return int(request.path_params[name])
 
@@ -256,6 +286,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     routes = [
         Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
+        Route(HEALTH_PATH, healthz),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/projects", api(lambda s, r, b: s.project_sources())),
