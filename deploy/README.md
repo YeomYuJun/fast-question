@@ -50,3 +50,15 @@ docker compose -f "deploy\compose.yaml" up -d --build
 - 로그: 앱 로그는 표준 에러로 나가 `docker compose -f "deploy\compose.yaml" logs app` 로 본다. `/data/logs/web.log` 에도 남는다.
 - 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본).
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
+
+## 로컬 DB 옮기기
+
+사용자 PC 에서 저장소 루트에서 실행한다. 서버 주소와 개인 토큰은 `%USERPROFILE%\.fast-question\credentials.json` 에서 읽는다.
+
+```powershell
+.venv\Scripts\python.exe scripts\push_local.py
+```
+
+- `data\kb.sqlite3`(또는 `--db <파일>`)의 온라인 백업 사본을 만들어 `POST /api/import/db` 로 올린다. 로컬 DB 는 바꾸지 않는다.
+- 서버의 내 DB 가 비어 있으면(기본 가이드만 있으면) 파일 내용을 통째로 바꾼다. 아니면 항목을 하나씩 넣고 이미 있는 항목과 비슷한 질문은 건너뛴 목록을 보여 준다.
+- 손상됐거나 스키마 버전·표 목록이 서버와 다른 파일은 거부한다. 상한은 200 MB 다.

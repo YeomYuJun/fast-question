@@ -9,7 +9,7 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
-/api/me 는 web/auth.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+/api/me 는 web/auth.py 에, 로컬 DB 가져오기 POST /api/import/db 는 web/importer.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
 /healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
 형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
@@ -45,7 +45,7 @@ from kb.jobs import run_due, run_due_all
 from kb.morph import Analyzer
 from kb.store import Store
 from mcp_server.http import RemoteMcp
-from web import auth
+from web import auth, importer
 from web.auth import ACCOUNT_KEY
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -152,6 +152,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             return path
         account_id = request.scope.get(ACCOUNT_KEY)
         return None if account_id is None else tenant.db_path_for(cfg.data_dir, account_id)
+
+    user_db_lock = threading.Lock()  # 사용자 DB 를 새로 만들거나 통째로 바꾸는 일을 한 번에 하나만 한다
 
     def unauthorized() -> JSONResponse:
         return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
@@ -313,6 +315,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     if remote:
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
+        routes.insert(1, importer.route(db_for, cfg.data_dir / "tmp", analyzer, user_db_lock))
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
