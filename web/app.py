@@ -6,8 +6,9 @@
 쓰기 잠금 대기 초과 503 으로 돌려준다.
 run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
 
-원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층이 ASGI scope 의
-ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
+원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
+SessionAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
+/api/me 는 web/auth.py 에 있다. 원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
 """
 import dataclasses
 import json
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import quote, urlsplit
 
+import httpx
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
@@ -37,14 +39,14 @@ from kb.evidence import line_of, parse_line
 from kb.jobs import run_due
 from kb.morph import Analyzer
 from kb.store import Store
+from web import auth
+from web.auth import ACCOUNT_KEY
 
 STATIC = Path(__file__).resolve().parent / "static"
 # 화면 파일은 매번 서버에 확인하게 한다(안 바뀌었으면 304). 헤더가 없으면 브라우저가 옛 app.js 를
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
-# 인증 계층만 채우는 scope 키. 헤더·쿼리에서 계정을 읽는 경로는 없다
-ACCOUNT_KEY = "fq.account_id"
 log = logging.getLogger("fast-question.web")
 
 
@@ -113,7 +115,8 @@ def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
 
 
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
-               analyzer: Analyzer | None = None) -> Starlette:
+               analyzer: Analyzer | None = None, http_transport: httpx.AsyncBaseTransport | None = None) -> Starlette:
+    """http_transport: 원격 모드 로그인이 GitHub·Google 을 부를 때 쓰는 httpx 전송(테스트가 바꿔 끼운다)."""
     cfg = cfg or load_config()
     remote = cfg.mode == "remote"
     analyzer = analyzer if analyzer is not None else Analyzer()
@@ -266,11 +269,15 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
         Mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static"),
     ]
+    middleware = [Middleware(SameOriginOnly, hosts={f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"})]
     if remote:
-        hosts = {urlsplit(cfg.public_url).netloc.lower()}
+        control_file = tenant.control_path(cfg.data_dir)
+        routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
+        middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
+                      Middleware(auth.SessionAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
     else:
-        hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
-    app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)], lifespan=lifespan)
+        routes.insert(1, Route("/api/me", lambda r: JSONResponse({"mode": "local"})))
+    app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
     app.state.db_path = path
     app.state.analyzer = analyzer
     app.state.run_jobs = run_jobs

@@ -285,3 +285,19 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
   .side { max-width: none; min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); }
   .main { padding-top: var(--space-4); }
 }
+
+/* ---------- 원격 모드: 계정·로그인 ---------- */
+.account { display: flex; align-items: center; gap: var(--space-2); }
+.account-name { max-width: 160px; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.login {
+  max-width: 360px; margin: 96px auto 0; padding: var(--space-6); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
+  display: flex; flex-direction: column; gap: var(--space-3);
+}
+.login-title { margin: 0; font-size: 18px; line-height: 26px; font-weight: 700; }
+.login-note { margin: 0; font-size: 13px; color: var(--muted); word-break: keep-all; }
+.login-btns { display: flex; flex-direction: column; gap: var(--space-2); }
+.login-btn { display: block; padding: 8px 12px; font-size: 14px; text-align: center; }
+.login-btn:hover { text-decoration: none; }
+.login-err { margin: 0; font-size: 13px; color: var(--stale); word-break: keep-all; }
+@media (max-width: 420px) { .login { margin: 48px var(--space-4) 0; } }

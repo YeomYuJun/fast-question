@@ -61,6 +61,8 @@ async function api(method, url, body) {
   }
   const r = await fetch(url, opt);
   const data = await r.json().catch(() => ({}));
+  // 원격 모드에서 세션이 끝났으면 로그인 화면으로 바꾼다
+  if (r.status === 401 && data.code === "unauthorized") showLogin(data.providers || []);
   if (!r.ok) {
     const err = new Error(data.error || `HTTP ${r.status}`);
     err.status = r.status;
@@ -1058,6 +1060,62 @@ function setTheme(t, save) {
 
 // ---------- 시작 ----------
 
+// ---------- 원격 모드 로그인 ----------
+const PROVIDERS = { github: "GitHub", google: "Google" };
+const LOGIN_ERRORS = {
+  denied: "로그인을 취소했다.",
+  state: "로그인 시간이 지났거나 다른 창에서 시작했다. 다시 로그인한다.",
+  provider: "로그인 공급자의 응답을 확인하지 못했다. 다시 시도한다.",
+  closed: "이 계정은 로그인할 수 없다.",
+};
+
+function showLogin(providers) {
+  if (!$("#login").hidden) return;
+  const p = new URLSearchParams(location.search);
+  const code = p.get("login_error");
+  p.delete("login_error");
+  const rest = p.toString();
+  if (code) history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  // 로그인 뒤 지금 주소(검색어·펼친 항목)로 돌아온다
+  const next = encodeURIComponent(location.pathname + location.search + location.hash);
+  fill($("#login-btns"), providers.map((name) =>
+    el("a", { class: "btn login-btn", href: `/auth/login/${name}?next=${next}` }, `${PROVIDERS[name] || name} 로 로그인`)));
+  if (!providers.length) fill($("#login-btns"), el("p", { class: "login-note" }, "켜진 로그인 공급자가 없다."));
+  $("#login-err").hidden = !code;
+  $("#login-err").textContent = LOGIN_ERRORS[code] || "";
+  for (const id of ["#app", "#toggle-side", "#new-btn", "#account"]) $(id).hidden = true;
+  $(".keys").hidden = true;
+  $("#login").hidden = false;
+}
+
+function showAccount(account) {
+  const fallback = account.providers.map((n) => `${PROVIDERS[n] || n} 계정`).join(", ");
+  $("#account-name").textContent = account.display_name || fallback;
+  $("#account-name").title = `${fallback}으로 로그인`;
+  $("#account").hidden = false;
+}
+
+async function logout() {
+  try {
+    await api("POST", "/auth/logout");
+  } catch (e) {
+    toast(e.message, { err: true });
+    return;
+  }
+  location.reload();
+}
+
+// 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
+async function whoami() {
+  try {
+    const me = await api("GET", "/api/me");
+    if (me.account) showAccount(me.account);
+    return true;
+  } catch (e) {
+    return e.status !== 401;  // 그 밖의 실패는 화면을 띄우고 각 요청의 오류로 보인다
+  }
+}
+
 function init() {
   const q = $("#q");
   // 검색어를 입력하면 펼친 행과 편집을 닫는다
@@ -1138,21 +1196,24 @@ function init() {
   openSide(store("fq-side") === "1");
   renderRecent();
 
+  $("#logout-btn").addEventListener("click", logout);
+
   window.addEventListener("hashchange", openFromHash);
   // 다른 창(Claude 등록 등)에서 바뀐 내용을 화면으로 돌아올 때 다시 읽는다
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && !state.editing && !state.catRenaming && !$("#new-slot").firstChild) {
+    if (document.visibilityState === "visible" && $("#login").hidden && !state.editing && !state.catRenaming
+        && !$("#new-slot").firstChild) {
       refreshCats();
       runSearch();
     }
   });
 
-  refreshCats().then(() => {
+  whoami().then((ok) => ok && refreshCats().then(() => {
     restoreFromUrl();
     if (!location.hash) return runSearch();
     // 검색 상태가 있으면 그 결과를 먼저 그린다. 펼칠 항목이 결과에 없을 때만 openFromHash 가 검색을 푼다
     return (state.q || state.cat || state.since ? runSearch() : Promise.resolve()).then(openFromHash);
-  });
+  }));
 }
 
 init();

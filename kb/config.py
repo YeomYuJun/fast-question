@@ -2,6 +2,9 @@
 
 mode 가 local(기본)이면 db_path 하나를 쓴다. remote 면 계정마다 data_dir/users/<id>/kb.sqlite3 를 쓰고
 public_url(https://도메인, 경로 없음)의 Host 만 받는다.
+원격 모드 로그인: oauth.github.client_id, oauth.google.client_id. client secret 은 config 에 두지 않고
+환경 변수 FQ_GITHUB_SECRET, FQ_GOOGLE_SECRET 으로 받는다(web/auth.py). allowed_logins 가 비어 있지 않으면
+그 목록("github:<숫자 id>", "google:<sub>")의 신원만 로그인한다.
 """
 import json
 from dataclasses import dataclass
@@ -22,6 +25,8 @@ DEFAULTS = {
     "mode": "local",
     "public_url": "",
     "data_dir": None,
+    "oauth": {},
+    "allowed_logins": [],
 }
 MODES = ("local", "remote")
 
@@ -39,6 +44,9 @@ class Config:
     mode: str = "local"
     public_url: str = ""
     data_dir: Path | None = None
+    github_client_id: str = ""
+    google_client_id: str = ""
+    allowed_logins: frozenset[str] = frozenset()
 
 
 def _path(value: str) -> Path:
@@ -64,6 +72,9 @@ def load_config(path: Path | None = None) -> Config:
         mode=_mode(raw),
         public_url=_public_url(raw),
         data_dir=None if raw["data_dir"] is None else _path(raw["data_dir"]),
+        github_client_id=str((raw["oauth"].get("github") or {}).get("client_id", "")),
+        google_client_id=str((raw["oauth"].get("google") or {}).get("client_id", "")),
+        allowed_logins=frozenset(str(x) for x in raw["allowed_logins"]),
     )
 
 

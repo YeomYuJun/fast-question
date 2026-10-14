@@ -23,12 +23,23 @@
   <div class="grow"></div>
   <span class="keys">/ 검색 · ↑↓ 이동 · Enter 펼치기 · E 편집 · Esc 지우기</span>
   <button id="new-btn" class="btn primary" type="button">+ 새 질문</button>
+  <span id="account" class="account" hidden>
+    <span id="account-name" class="account-name"></span>
+    <button id="logout-btn" class="navbtn small" type="button">로그아웃</button>
+  </span>
   <button id="theme-btn" class="iconbtn" type="button" aria-label="테마 바꾸기">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"></path></svg>
   </button>
 </header>
 
-<div class="layout">
+<section id="login" class="login" hidden>
+  <h1 class="login-title">로그인</h1>
+  <p class="login-note">GitHub 또는 Google 계정으로 로그인하면 내 질문·답변 DB 가 열린다.</p>
+  <div id="login-btns" class="login-btns"></div>
+  <p id="login-err" class="login-err" role="alert" hidden></p>
+</section>
+
+<div id="app" class="layout">
   <aside id="side" class="side" hidden>
     <div class="side-head">
       <span class="label">분류</span>

@@ -67,3 +67,13 @@ def test_remote_mode_reads_url_and_data_dir(tmp_path):
 def test_remote_mode_requires_valid_settings(tmp_path, body, needle):
     with pytest.raises(ValueError, match=needle):
         load_config(_write(tmp_path, body))
+
+
+def test_oauth_client_ids_and_allowed_logins(tmp_path):
+    cfg = load_config(_write(tmp_path, {"mode": "remote", "public_url": "https://fq.example.com", "data_dir": "d",
+                                        "oauth": {"github": {"client_id": "gh-id"}, "google": {"client_id": "g-id"}},
+                                        "allowed_logins": ["github:42"]}))
+
+    assert (cfg.github_client_id, cfg.google_client_id) == ("gh-id", "g-id")
+    assert cfg.allowed_logins == frozenset({"github:42"})
+    assert load_config(tmp_path / "없음.json").allowed_logins == frozenset()
