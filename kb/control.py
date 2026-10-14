@@ -303,3 +303,15 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
         with tx(conn):
             conn.execute("UPDATE personal_token SET last_used_at = ? WHERE id = ?", (_iso(t), row["id"]))
     return {"account_id": row["account_id"], "token_id": row["id"], "expires_at": row["expires_at"]}
+
+
+def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | None = None) -> None:
+    """탈퇴: 계정에 탈퇴 시각을 적고 세션·개인 토큰·OAuth 토큰·인가 코드를 모두 끊는다. 신원 행은 남아 다시 로그인하면 거부된다."""
+    t = _iso(_now(now))
+    with tx(conn):
+        conn.execute("UPDATE account SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", (t, account_id))
+        conn.execute("DELETE FROM session WHERE account_id = ?", (account_id,))
+        conn.execute("UPDATE personal_token SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL",
+                     (t, account_id))
+        conn.execute("DELETE FROM oauth_token WHERE account_id = ?", (account_id,))
+        conn.execute("DELETE FROM auth_code WHERE account_id = ?", (account_id,))

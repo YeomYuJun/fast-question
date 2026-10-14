@@ -1173,8 +1173,27 @@ async function renderConnect(made) {
       ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(installCommand(), "설치 명령을 복사했다."))),
     el("div", { class: "connect-export" }, el("span", { class: "label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받는다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."),
-      el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")));
+      el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")),
+    leaveForm());
   if (made) name.value = "";
+}
+
+// 탈퇴: 확인 문구를 입력해야 버튼이 동작한다
+function leaveForm() {
+  const word = el("input", { class: "fld", "aria-label": "탈퇴 확인 문구", placeholder: "탈퇴", autocomplete: "off" });
+  return el("form", { class: "connect-leave", onsubmit: async (ev) => {
+    ev.preventDefault();
+    try {
+      await api("POST", "/api/account/delete", { confirm: word.value.trim() });
+    } catch (e) {
+      toast(e.message, { err: true });
+      return;
+    }
+    location.href = "/";
+  } },
+  el("span", { class: "label" }, "탈퇴"),
+  el("p", { class: "connect-note" }, "계정을 지운다. 이 계정의 로그인·토큰이 모두 끊기고 DB 를 더 열 수 없다. 먼저 DB 파일을 받아 둔다. 계속하려면 탈퇴 를 입력한다."),
+  el("div", { class: "connect-form" }, word, el("button", { class: "btn danger", type: "submit" }, "탈퇴")));
 }
 
 // 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
