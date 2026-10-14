@@ -7,7 +7,7 @@
 run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
-SessionAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
+AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에 있다. 원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
 """
 import dataclasses
@@ -274,7 +274,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
-                      Middleware(auth.SessionAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
+                      Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
     else:
         routes.insert(1, Route("/api/me", lambda r: JSONResponse({"mode": "local"})))
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)

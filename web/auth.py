@@ -6,7 +6,9 @@
   scope 는 openid 만(이메일·이름을 받지 않는다).
 - GitHub: access token 으로 /user 를 불러 숫자 id 를 신원 키, login 을 표시 이름으로 쓴다. 토큰은 저장하지 않는다.
 - 세션 쿠키: Secure(https 일 때, 이름 앞에 __Host-) · HttpOnly · SameSite=Lax · Path=/. 값은 kb/control.py 세션.
-- SessionAuth 는 살아 있는 세션의 계정 id 를 scope 의 ACCOUNT_KEY 에 넣는다. 이 값을 넣는 곳은 이 미들웨어뿐이다.
+- AccountAuth 는 살아 있는 세션 쿠키 또는 `Authorization: Bearer fq_pat_…`(개인 토큰)의 계정 id 를 scope 의
+  ACCOUNT_KEY 에, 어느 쪽인지("session"/"token")를 AUTH_KIND_KEY 에 넣는다. 이 값을 넣는 곳은 이 미들웨어뿐이다.
+- 개인 토큰 관리(/api/account/tokens)는 브라우저 세션으로만 한다(토큰으로 토큰을 만들 수 없다).
 - client secret 은 환경 변수 FQ_GITHUB_SECRET, FQ_GOOGLE_SECRET. client_id 와 secret 이 둘 다 있는 공급자만 켠다.
 로그인 실패는 /?login_error=<denied|state|provider|closed> 로 돌려보내고 화면이 문구를 보인다.
 """
@@ -31,6 +33,7 @@ from kb import control
 from kb.config import Config
 
 ACCOUNT_KEY = "fq.account_id"
+AUTH_KIND_KEY = "fq.auth"
 GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuration"
 GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
@@ -155,24 +158,35 @@ def cookie_names(cfg: Config) -> tuple[str, str, bool]:
     return f"{prefix}fq_session", f"{prefix}fq_login", secure
 
 
-class SessionAuth:
+def bearer(headers) -> str:
+    kind, _, value = headers.get("authorization", "").partition(" ")
+    return value.strip() if kind.lower() == "bearer" else ""
+
+
+class AccountAuth:
     def __init__(self, app, control_path, cookie: str):
         self.app, self.control_path, self.cookie = app, control_path, cookie
 
-    def _lookup(self, token: str) -> int | None:
+    def _lookup(self, kind: str, token: str) -> int | None:
         conn = control.connect_control(self.control_path)
         try:
+            if kind == "token":
+                found = control.token_account(conn, token)
+                return None if found is None else found["account_id"]
             return control.session_account(conn, token)
         finally:
             conn.close()
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
-            token = Request(scope).cookies.get(self.cookie)
+            request = Request(scope)
+            pat = bearer(request.headers)
+            kind, token = ("token", pat) if pat.startswith(control.TOKEN_PREFIX) else (
+                "session", request.cookies.get(self.cookie, ""))
             if token:
-                account_id = await run_in_threadpool(self._lookup, token)
+                account_id = await run_in_threadpool(self._lookup, kind, token)
                 if account_id is not None:
-                    scope = dict(scope, **{ACCOUNT_KEY: account_id})
+                    scope = dict(scope, **{ACCOUNT_KEY: account_id, AUTH_KIND_KEY: kind})
         await self.app(scope, receive, send)
 
 
@@ -263,7 +277,39 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         return JSONResponse({"mode": "remote", "account": {
             "id": acc["id"], "display_name": acc["display_name"], "providers": acc["providers"]}})
 
+    def need_session(request: Request) -> Response | None:
+        if request.scope.get(AUTH_KIND_KEY) != "session":
+            return JSONResponse({"error": "브라우저에서 로그인해야 한다.", "code": "unauthorized"}, status_code=401)
+        return None
+
+    async def tokens(request: Request) -> Response:
+        if (denied := need_session(request)) is not None:
+            return denied
+        account_id = request.scope[ACCOUNT_KEY]
+        if request.method == "GET":
+            return JSONResponse({"tokens": await run_in_threadpool(db, control.list_personal_tokens, account_id)})
+        try:
+            name = (await request.json()).get("name", "")
+        except ValueError:
+            return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
+        try:
+            made = await run_in_threadpool(db, control.create_personal_token, account_id, str(name))
+        except control.TokenRefused as e:
+            return JSONResponse({"error": str(e), "code": "invalid"}, status_code=400)
+        log.info("개인 토큰 발급: 계정 %s, 토큰 %s", account_id, made["id"])
+        return JSONResponse(made)
+
+    async def revoke(request: Request) -> Response:
+        if (denied := need_session(request)) is not None:
+            return denied
+        if not await run_in_threadpool(db, control.revoke_personal_token, request.scope[ACCOUNT_KEY],
+                                       request.path_params["id"]):
+            return JSONResponse({"error": "토큰을 찾지 못했다.", "code": "not_found"}, status_code=404)
+        return JSONResponse({"ok": True})
+
     return [
+        Route("/api/account/tokens", tokens, methods=["GET", "POST"]),
+        Route("/api/account/tokens/{id:int}", revoke, methods=["DELETE"]),
         Route("/auth/login/{provider}", login),
         Route("/auth/callback/{provider}", callback),
         Route("/auth/logout", logout, methods=["POST"]),
