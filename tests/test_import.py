@@ -129,10 +129,11 @@ def _truncated(tmp_path):
 def test_import_rejects_bad_files_and_keeps_db(cfg, app, tmp_path, make, needle):
     with client_for(app, 1) as c:
         c.post("/api/categories", json={"name": "그대로"})
+        before = c.get("/api/categories").json()["categories"]
         r = c.post("/api/import/db", content=make(tmp_path), headers=OCTET)
         assert r.status_code == 400 and r.json()["code"] == "invalid_db", r.text
         assert needle in r.json()["error"]
-        assert [x["name"] for x in c.get("/api/categories").json()["categories"]] == ["그대로"]
+        assert c.get("/api/categories").json()["categories"] == before
     assert not list((cfg.data_dir / "tmp").glob("*")), "받은 임시 파일을 지운다"
 
 

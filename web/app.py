@@ -7,7 +7,8 @@
 run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌린다. 로컬 모드는 kb.jobs.run_due(백업, 근거 재검증,
 재색인), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·재색인, 제어 DB 백업)이다.
 
-원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
+원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 웹 요청이 사용자 DB 를 처음
+만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 1회 넣는다. 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, 로컬 DB 가져오기 POST /api/import/db 는 web/importer.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
@@ -35,7 +36,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from kb import tenant
+from kb import guide, tenant
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
@@ -155,6 +156,21 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     user_db_lock = threading.Lock()  # 사용자 DB 를 새로 만들거나 통째로 바꾸는 일을 한 번에 하나만 한다
 
+    def open_kb(db: Path) -> sqlite3.Connection:
+        """요청의 KB 연결. 원격 모드에서 파일이 없으면 만들면서 기본 가이드를 넣는다(스레드 풀에서 부른다)."""
+        if not remote or db.exists():
+            return connect(db)
+        with user_db_lock:
+            fresh = not db.exists()
+            conn = connect(db)
+            if fresh:
+                try:
+                    log.info("기본 가이드(%s): %s", db.parent.name,
+                             guide.seed(Store(conn, "system"), guide.load_remote(cfg.public_url)))
+                except Exception:  # noqa: BLE001 - 가이드를 못 넣어도 요청은 처리한다
+                    log.exception("기본 가이드를 넣지 못했다: %s", db)
+            return conn
+
     def unauthorized() -> JSONResponse:
         return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
 
@@ -195,7 +211,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
 
             def work():
-                conn = connect(db)
+                conn = open_kb(db)
                 try:
                     return fn(Store(conn, "user", analyzer), request, body)
                 finally:
@@ -227,7 +243,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             return JSONResponse({"error": "category 에 분류 id 가 필요하다."}, status_code=400)
 
         def work():
-            conn = connect(db)
+            conn = open_kb(db)
             try:
                 return export_markdown(Store(conn, "user", analyzer), int(raw))
             finally:

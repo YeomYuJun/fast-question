@@ -95,10 +95,11 @@ def test_account_gets_own_db(cfg, app):
 def test_accounts_are_isolated(app):
     with client_for(app, 1) as a:
         item = add_basics(a)
-        cat = a.get("/api/categories").json()["categories"][0]["id"]
+        cat = next(x["id"] for x in a.get("/api/categories").json()["categories"] if x["name"] == "이관")
     with client_for(app, 2) as b:
         assert b.get("/api/search", params={"q": "rename"}).json()["hits"] == []
-        assert b.get("/api/categories").json()["categories"] == []
+        # 새 사용자 DB 에는 기본 가이드만 있다
+        assert [x["name"] for x in b.get("/api/categories").json()["categories"]] == ["fast-question"]
         assert b.get(f"/api/qa/{item['id']}").status_code == 404
         assert b.get("/api/export", params={"category": cat}).status_code == 404
         assert b.patch(f"/api/qa/{item['id']}", json={"version": 1, "answer": "덮어쓰기"}).status_code == 404
@@ -150,4 +151,4 @@ def test_seed_guide_skipped_in_remote_mode(cfg):
 def test_projects_for_hook(app):
     with client_for(app, 1) as c:
         add_basics(c)
-        assert c.get("/api/projects").json() == {"names": ["이관"], "roots": []}
+        assert c.get("/api/projects").json() == {"names": ["fast-question", "이관"], "roots": []}
