@@ -222,3 +222,14 @@ def test_push_local_sends_device_id_as_origin(cfg, app, tmp_path):
         creds = {"url": URL, "token": token, "device_id": "pc-abc"}
         assert push.main(["--db", str(tmp_path / "local.sqlite3")], creds=creds, http=c) == 0
     assert _origins(cfg, acc)["file"] == "pc-abc"
+
+
+def test_replaced_db_is_backed_up_on_next_job_run(cfg, app, tmp_path):
+    from kb.jobs import run_due_all
+
+    local = local_db(tmp_path)
+    set_meta(local, "last_backup", "2099-01-01T00:00:00.000Z")  # 로컬에서 방금 백업한 DB 를 올린다
+    body = snapshot(local, tmp_path / "upload.sqlite3")
+    with client_for(app, 1) as c:
+        assert c.post("/api/import/db", content=body, headers=OCTET).json()["mode"] == "replaced"
+    assert "path" in run_due_all(cfg)["users"][1]["backup"], "서버 백업 기한은 로컬 기록을 따르지 않는다"

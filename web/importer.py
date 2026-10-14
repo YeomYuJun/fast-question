@@ -117,6 +117,8 @@ def replace(db: Path, upload: Path, origin: str = "") -> dict:
     try:
         src.backup(dst)  # 파일을 바꿔 끼우지 않는다. 남은 -wal 이 새 파일에 다시 적용되는 일을 막는다
         dst.execute("PRAGMA journal_mode = WAL")
+        with tx(dst):  # 로컬의 마지막 백업 시각이 따라오면 서버 백업이 그만큼 미뤄진다
+            dst.execute("DELETE FROM meta WHERE key = 'last_backup'")
         if origin:
             _stamp_origin(dst, origin)
         items = dst.execute("SELECT count(*) FROM qa WHERE deleted_at IS NULL").fetchone()[0]
