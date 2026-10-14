@@ -11,7 +11,7 @@ from kb.db import BUMP, NOW, get_meta, set_meta, tx
 from kb.errors import ConflictError, NotFoundError, ValidationError, from_sqlite
 from kb import dictionary as dict_mod
 from kb import search as search_mod
-from kb.evidence import Checker, capture, overall_state, spec_of
+from kb.evidence import Checker, accept_captured, capture, overall_state, spec_of
 from kb.morph import write_index
 from kb.schema import AUDITED
 from kb.text import check_answer, check_name, check_question, clean
@@ -33,13 +33,32 @@ def dice(a: set[str], b: set[str]) -> float:
     return 2 * len(a & b) / (len(a) + len(b)) if a and b else 0.0
 
 
+REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없다. "
+                        "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 쓴다.")
+
+
 class Store:
-    def __init__(self, conn: sqlite3.Connection, actor: Actor, analyzer=None):
+    def __init__(self, conn: sqlite3.Connection, actor: Actor, analyzer=None, *, remote: bool = False):
+        """remote: 원격 서버의 사용자 DB. 근거 spec 의 captured(로컬 프록시가 사용자 PC 에서 만든 캡처값)를
+        형식만 확인하고 저장하고, 캡처값 없는 파일·폴더·git 근거와 재검증(서버 파일시스템을 읽는다)은 거부한다."""
         if actor not in ACTORS:
             raise ValueError(f"알 수 없는 쓰기 주체: {actor}")
         self.conn = conn
         self.actor = actor
         self.analyzer = analyzer
+        self.remote = remote
+
+    def _capture(self, spec: dict) -> dict:
+        if not self.remote:
+            return capture(spec)
+        if "captured" in spec:
+            row = accept_captured(spec["captured"])
+            if row["kind"] in ("url", "note"):  # 서버가 직접 만들 수 있고, 형식 규칙이 spec 의 글을 검사한다
+                raise ValidationError("url·note 근거는 captured 없이 보낸다.")
+            return row
+        if (spec.get("kind") or "auto") not in ("url", "note"):
+            raise ValidationError(REMOTE_PATH_EVIDENCE)
+        return capture(spec)
 
     # ---------- 공통 ----------
 
@@ -250,7 +269,7 @@ class Store:
         q, a = check_question(question), check_answer(answer)
         cid = self.resolve_category(category)
         # 근거는 쓰기 전에 모두 캡처한다. 하나라도 틀리면 아무것도 쓰지 않는다
-        captured = [capture(spec) for spec in evidence or []]
+        captured = [self._capture(spec) for spec in evidence or []]
         if not force:
             sim = self.similar(q)
             if sim:
@@ -328,16 +347,17 @@ class Store:
 
     def add_evidence(self, qa_id: int, spec: dict) -> dict:
         self._qa_row(qa_id)
-        e = capture(spec)
+        e = self._capture(spec)
         with self._writing():
             self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
             self._recompute_state(qa_id)
         return self.get_qa(qa_id)
 
-    def recapture_evidence(self, evidence_id: int) -> dict:
-        """근거를 지금 상태로 다시 기록한다. git 근거는 현재 HEAD 기준이 된다."""
+    def recapture_evidence(self, evidence_id: int, captured: dict | None = None) -> dict:
+        """근거를 지금 상태로 다시 기록한다. git 근거는 현재 HEAD 기준이 된다.
+        원격 모드는 로컬 프록시가 그 PC 에서 다시 캡처한 값(captured)을 받는다."""
         row = self._evidence_row(evidence_id)
-        e = capture(spec_of(row))
+        e = self._capture(spec_of(row) if captured is None else {"captured": captured})
         verdict = "external" if e["kind"] in ("url", "note") else "same"
         with self._writing() as c:
             c.execute(
@@ -359,6 +379,8 @@ class Store:
     def recheck(self, qa_id: int | None = None) -> list[dict]:
         """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다.
         판정 변화는 근거 파일이 바뀌어 생긴 것이므로 누가 재검증을 눌렀든 system 주체로 기록한다."""
+        if self.remote:
+            raise ValidationError("원격 서버는 근거 파일을 읽을 수 없어 재검증할 수 없다. 사용자 PC 의 로컬 검사기가 판정한다.")
         sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
                "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL")
         params: tuple = ()
@@ -400,7 +422,7 @@ class Store:
             sets["category_id"] = self.resolve_category(category)
         if not sets and evidence is None:
             raise ValidationError("바꿀 값이 없다.")
-        captured = [capture(spec) for spec in evidence] if evidence is not None else None  # 쓰기 전에 모두 캡처
+        captured = [self._capture(spec) for spec in evidence] if evidence is not None else None  # 쓰기 전에 모두 캡처
         sets["change_note"] = note
         steps = []
         if "question" in sets or "answer" in sets:
@@ -535,6 +557,9 @@ class Store:
         return dict_mod.snapshot(self.conn)
 
     def dict_action(self, action: str, **kw) -> dict:
+        if self.remote and action.startswith("user_word"):
+            # 형태소 분석기(약 600 MB)는 서버에 하나라 사용자 단어를 사용자마다 둘 수 없다
+            raise ValidationError("원격 서버에서는 형태소 사용자 단어를 바꿀 수 없다. 동의어·불용어는 쓸 수 있다.")
         with self._writing() as c:
             reindex = dict_mod.apply(c, self.actor, action, **kw)
         return {"snapshot": dict_mod.snapshot(self.conn), "reindex_needed": reindex}

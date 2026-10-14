@@ -2,6 +2,8 @@
 
 쓰기 주체는 open_store 가 돌려주는 Store 의 actor(run_mcp.py 에서 claude)로 고정된다.
 KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현재 값을 붙인다.
+remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고, 근거 재기록은
+로컬 프록시가 보낸 캡처값(spec.captured)을 쓴다. 근거·재검증·사전의 원격 제한은 Store(remote=True)가 건다.
 """
 import json
 from pathlib import Path
@@ -53,8 +55,9 @@ def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
     return lambda: Store(connect(db_path), "claude", analyzer=analyzer)
 
 
-def build_server(open_store: Callable[[], Store]) -> MCPServer:
-    server = MCPServer("fast-question", instructions=INSTRUCTIONS)
+def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=None,
+                 token_verifier=None) -> MCPServer:
+    server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth, token_verifier=token_verifier)
 
     def run(fn: Callable[[Store], Any]) -> Any:
         store = open_store()
@@ -186,8 +189,9 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
             if action in ("recapture", "archive"):
                 if evidence_id is None:
                     raise KbError(f"{action} 에는 evidence_id 가 필요하다.")
-                fn = s.recapture_evidence if action == "recapture" else s.archive_evidence
-                return _detail(fn(evidence_id))
+                if action == "archive":
+                    return _detail(s.archive_evidence(evidence_id))
+                return _detail(s.recapture_evidence(evidence_id, captured=(spec or {}).get("captured")))
             raise KbError(f"알 수 없는 근거 동작이다: {action}")
         return run(go)
 
@@ -226,6 +230,8 @@ def build_server(open_store: Callable[[], Store]) -> MCPServer:
         나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다.
         file 에 항목 배열 JSON 파일의 절대경로를 주면 그 파일을 읽는다. 초안 파일을 그대로 넣을 때는 file 을 쓴다
         (항목을 다시 옮겨 적으면 글자가 바뀔 수 있다). 항목의 다른 키는 무시한다."""
+        if file and remote:
+            raise ValueError("원격 서버는 사용자 PC 의 파일을 읽을 수 없다. 로컬 프록시가 파일을 읽어 items 로 보낸다.")
         if file:
             # 윈도우에서 만든 JSON 은 BOM 이 붙어 온다
             items = json.loads(Path(file).read_text(encoding="utf-8-sig"))

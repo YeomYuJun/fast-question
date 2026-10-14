@@ -193,6 +193,31 @@ def capture(spec: Mapping) -> dict:
     return _row("note", anchor=anchor, captured={"text": text})
 
 
+ROW_KEYS = ("kind", "path", "anchor", "repo", "commit_sha", "paths_json", "captured_json")
+CAPTURED_MAX_BYTES = 64 * 1024
+
+
+def accept_captured(row) -> dict:
+    """다른 PC 에서 capture() 로 만든 행을 받는다(원격 모드). 경로는 그 PC 의 것이라 확인하지 않고 형식만 본다."""
+    if not isinstance(row, Mapping):
+        raise ValidationError("captured 는 capture() 결과 객체다.")
+    out = {k: row.get(k) for k in ROW_KEYS}
+    if out["kind"] not in KINDS or out["kind"] == "auto":
+        raise ValidationError(f"captured 의 kind 가 올바르지 않다: {out['kind']}")
+    for k in ROW_KEYS[1:]:
+        if out[k] is not None and not isinstance(out[k], str):
+            raise ValidationError(f"captured 의 {k} 는 문자열이다.")
+    for k in ("paths_json", "captured_json"):
+        if out[k] is not None:
+            try:
+                json.loads(out[k])
+            except ValueError:
+                raise ValidationError(f"captured 의 {k} 가 JSON 이 아니다.") from None
+    if len(json.dumps(out, ensure_ascii=False).encode("utf-8")) > CAPTURED_MAX_BYTES:
+        raise ValidationError(f"captured 는 {CAPTURED_MAX_BYTES // 1024} KB 까지 받는다.")
+    return out
+
+
 LINE_SEP = " ; "
 NOTE_PREFIX = "메모:"
 

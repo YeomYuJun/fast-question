@@ -8,7 +8,8 @@ run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업,
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
-/api/me 는 web/auth.py 에 있다. 원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
+/api/me 는 web/auth.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
 """
 import dataclasses
 import json
@@ -39,6 +40,7 @@ from kb.evidence import line_of, parse_line
 from kb.jobs import run_due
 from kb.morph import Analyzer
 from kb.store import Store
+from mcp_server.http import RemoteMcp
 from web import auth
 from web.auth import ACCOUNT_KEY
 
@@ -120,6 +122,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     cfg = cfg or load_config()
     remote = cfg.mode == "remote"
     analyzer = analyzer if analyzer is not None else Analyzer()
+    mcp = RemoteMcp(cfg, analyzer) if remote else None
     if remote:
         path = None
         connect_control(tenant.control_path(cfg.data_dir)).close()  # 스키마 준비
@@ -161,7 +164,11 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         stop = threading.Event()
         if run_jobs and not remote:
             threading.Thread(target=jobs_loop, args=(stop,), name="jobs", daemon=True).start()
-        yield
+        if mcp is None:
+            yield
+        else:
+            async with mcp.running():
+                yield
         stop.set()
 
     def api(fn: Callable[[Store, Request, dict], object]):
@@ -273,6 +280,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     if remote:
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
+        routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
     else:
