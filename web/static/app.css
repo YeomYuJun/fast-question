@@ -328,6 +328,8 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .token-item.expired .name { color: var(--faint); }
 .connect-cmd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; }
 .connect-cmd .label { grid-column: 1 / -1; }
+.connect-export { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.connect-export .btn:hover { text-decoration: none; }
 .connect-cmd pre {
   margin: 0; padding: var(--space-2) var(--space-3); background: var(--surface-2); border-radius: var(--radius-md);
   font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;

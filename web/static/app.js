@@ -1170,7 +1170,10 @@ async function renderConnect(made) {
       : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다."),
     el("div", { class: "connect-cmd" }, el("span", { class: "label" }, "설치 명령 (PowerShell)"),
       el("pre", { class: "mono" }, installCommand()),
-      ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(installCommand(), "설치 명령을 복사했다."))));
+      ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(installCommand(), "설치 명령을 복사했다."))),
+    el("div", { class: "connect-export" }, el("span", { class: "label" }, "내보내기"),
+      el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받는다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."),
+      el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")));
   if (made) name.value = "";
 }
 
