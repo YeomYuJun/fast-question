@@ -22,7 +22,7 @@ def test_export_db_opens_as_local_db(app, tmp_path):
     conn = connect(out)  # 로컬 모드가 여는 방식 그대로
     try:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-        assert [r[0] for r in conn.execute("SELECT question FROM qa")] == ["내보낼 질문"]
+        assert [r[0] for r in conn.execute("SELECT question FROM qa WHERE created_by != 'system'")] == ["내보낼 질문"]
     finally:
         conn.close()
 

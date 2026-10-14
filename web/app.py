@@ -4,18 +4,23 @@
 요청마다 SQLite 연결을 새로 열고(스레드 풀에서 실행), 형태소 분석기는 앱에 하나를 둔다.
 오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
 쓰기 잠금 대기 초과 503 으로 돌려준다.
-run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
+run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌린다. 로컬 모드는 kb.jobs.run_due(백업, 근거 재검증,
+재색인), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·재색인, 제어 DB 백업)이다.
 
-원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
+원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 웹 요청이 사용자 DB 를 처음
+만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 1회 넣는다. 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
-/api/me 는 web/auth.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
-원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
+/api/me 는 web/auth.py 에, 로컬 DB 가져오기 POST /api/import/db 는 web/importer.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
+/healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
+형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
 """
 import dataclasses
 import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -35,18 +40,18 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from kb import tenant
+from kb import control, guide, tenant
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
 from kb.dbcopy import copy_db
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
-from kb.jobs import run_due
+from kb.jobs import run_due, run_due_all
 from kb.morph import Analyzer
 from kb.store import Store
 from mcp_server.http import RemoteMcp
-from web import auth, oauth_as
+from web import auth, importer, oauth_as
 from web.auth import ACCOUNT_KEY
 from web.limits import BodyLimit, RateLimit
 
@@ -55,6 +60,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
+HEALTH_DISK_MIN = 0.10
+HEALTH_PATH = "/healthz"
 log = logging.getLogger("fast-question.web")
 
 
@@ -71,6 +78,7 @@ class SameOriginOnly:
 
     다른 사이트가 사용자 브라우저로 보내는 요청(text/plain POST 는 사전 확인 없이 간다)과
     DNS 재바인딩으로 KB 를 읽거나 사용자 이름으로 항목을 심는 것을 막는다.
+    상태 점검(/healthz)은 사용자 데이터를 돌려주지 않아 검사하지 않는다. 컨테이너 안 점검은 Host 가 도메인이 아니다.
     """
 
     def __init__(self, app, hosts: set[str]):
@@ -79,7 +87,7 @@ class SameOriginOnly:
         self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받는다."
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
+        if scope["type"] == "http" and scope["path"] != HEALTH_PATH:
             headers = {k.lower(): v.decode("latin-1").lower() for k, v in scope["headers"]}
             host = headers.get(b"host", "")
             origin = headers.get(b"origin")
@@ -127,7 +135,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     """http_transport: 원격 모드 로그인이 GitHub·Google 을 부를 때 쓰는 httpx 전송(테스트가 바꿔 끼운다)."""
     cfg = cfg or load_config()
     remote = cfg.mode == "remote"
-    analyzer = analyzer if analyzer is not None else Analyzer()
+    if analyzer is None:  # 원격 모드의 사용자 단어는 제어 DB 의 서버 전역 사전이다
+        analyzer = (Analyzer(words=control.words_source(tenant.control_path(cfg.data_dir))) if remote
+                    else Analyzer())
     mcp = RemoteMcp(cfg, analyzer) if remote else None
     if remote:
         path = None
@@ -152,6 +162,23 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         account_id = request.scope.get(ACCOUNT_KEY)
         return None if account_id is None else tenant.db_path_for(cfg.data_dir, account_id)
 
+    user_db_lock = threading.Lock()  # 사용자 DB 를 새로 만들거나 통째로 바꾸는 일을 한 번에 하나만 한다
+
+    def open_kb(db: Path) -> sqlite3.Connection:
+        """요청의 KB 연결. 원격 모드에서 파일이 없으면 만들면서 기본 가이드를 넣는다(스레드 풀에서 부른다)."""
+        if not remote or db.exists():
+            return connect(db)
+        with user_db_lock:
+            fresh = not db.exists()
+            conn = connect(db)
+            if fresh:
+                try:
+                    log.info("기본 가이드(%s): %s", db.parent.name,
+                             guide.seed(Store(conn, "system"), guide.load_remote(cfg.public_url)))
+                except Exception:  # noqa: BLE001 - 가이드를 못 넣어도 요청은 처리한다
+                    log.exception("기본 가이드를 넣지 못했다: %s", db)
+            return conn
+
     def unauthorized() -> JSONResponse:
         return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
 
@@ -160,7 +187,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     def jobs_loop(stop: threading.Event) -> None:
         while not stop.is_set():
             try:
-                run_due(job_cfg, analyzer)
+                run_due_all(cfg, analyzer) if remote else run_due(job_cfg, analyzer)
             except Exception:  # 다음 주기에 다시 돈다
                 log.exception("주기 작업 실패")
             stop.wait(JOB_INTERVAL_S)
@@ -168,7 +195,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     @asynccontextmanager
     async def lifespan(_app):
         stop = threading.Event()
-        if run_jobs and not remote:
+        if run_jobs:
             threading.Thread(target=jobs_loop, args=(stop,), name="jobs", daemon=True).start()
         if mcp is None:
             yield
@@ -192,7 +219,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
 
             def work():
-                conn = connect(db)
+                conn = open_kb(db)
                 try:
                     return fn(Store(conn, "user", analyzer, remote=remote), request, body)
                 finally:
@@ -224,7 +251,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             return JSONResponse({"error": "category 에 분류 id 가 필요하다."}, status_code=400)
 
         def work():
-            conn = connect(db)
+            conn = open_kb(db)
             try:
                 return export_markdown(Store(conn, "user", analyzer, remote=remote), int(raw))
             finally:
@@ -251,7 +278,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         def work() -> str:
             fd, tmp = tempfile.mkstemp(prefix="fq-export-", suffix=".sqlite3")
             os.close(fd)
-            conn = connect(db)
+            conn = open_kb(db)
             try:
                 copy_db(conn, Path(tmp))
             finally:
@@ -266,6 +293,30 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         return FileResponse(tmp, media_type="application/vnd.sqlite3",
                             filename=f"fast-question-{datetime.now():%Y%m%d}.sqlite3",
                             background=BackgroundTask(os.unlink, tmp))
+
+    def health_checks() -> dict:
+        out: dict = {"db": "ok"}
+        try:
+            conn = connect_control(tenant.control_path(cfg.data_dir)) if remote else connect(path)
+            try:
+                conn.execute("SELECT 1").fetchone()
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - 어떤 실패든 점검 실패로 돌려준다
+            out["db"] = f"{type(e).__name__}: {e}"
+        try:
+            usage = shutil.disk_usage(cfg.data_dir if remote else path.parent)
+            out["disk_free"] = round(usage.free / usage.total, 4)
+        except OSError as e:
+            out["disk_free"], out["disk_error"] = None, f"{type(e).__name__}: {e}"
+        out["morph"] = bool(analyzer.enabled)
+        out["ok"] = (out["db"] == "ok" and out["disk_free"] is not None
+                     and out["disk_free"] >= HEALTH_DISK_MIN and out["morph"])
+        return out
+
+    async def healthz(_request: Request) -> JSONResponse:
+        out = await run_in_threadpool(health_checks)
+        return JSONResponse(out, status_code=200 if out["ok"] else 503)
 
     def pid(request: Request, name: str = "id") -> int:
         return int(request.path_params[name])
@@ -297,6 +348,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     routes = [
         Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
+        Route(HEALTH_PATH, healthz),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/projects", api(lambda s, r, b: s.project_sources())),
@@ -327,6 +379,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes[1:1] = oauth_as.routes(auth.providers_from(cfg), control_file)  # /oauth/continue/<id>
+        routes.insert(1, importer.route(db_for, cfg.data_dir / "tmp", analyzer, user_db_lock))
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(BodyLimit),

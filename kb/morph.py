@@ -1,8 +1,9 @@
 """Kiwi 형태소 분석기와 형태소 색인(qa_morph_fts).
 
 - Kiwi 는 처음 쓸 때 띄운다(약 2.5초). 분석은 쓰기 트랜잭션 밖에서 한다.
-- 분석기 버전은 DB 의 사용자 단어 목록에서 계산한다. web 과 MCP 가 각자 띄운 Kiwi 는
-  쓰기·검색 전에 이 버전을 비교해 다르면 다시 띄운다.
+- 분석기 버전은 사용자 단어 목록에서 계산한다. 목록은 기본이 연결한 DB 의 user_word 이고, 원격 모드는
+  제어 DB 의 서버 전역 사전(kb/control.py global_user_word)을 주입한다(Analyzer(words=...)). web 과 MCP 가 각자
+  띄운 Kiwi 는 쓰기·검색 전에 이 버전을 비교해 다르면 다시 띄운다.
 - 색인 행의 ver 가 현재 버전과 다르거나 행이 없으면 재색인 대상이다.
 """
 import functools
@@ -53,19 +54,25 @@ def _merge(spans: list[tuple[int, int]]) -> list[list[int]]:
 
 
 class Analyzer:
-    def __init__(self, loader: Callable | None = None):
+    def __init__(self, loader: Callable | None = None,
+                 words: Callable[[sqlite3.Connection], list[tuple[str, str]]] | None = None):
+        """words: 연결을 받아 사용자 단어 (단어, 품사) 목록을 돌려준다. 없으면 그 DB 의 user_word 다."""
         self._loader = loader or _default_loader
+        self._words = words or load_user_words
         self._lock = threading.RLock()
         self._kiwi = None
         self.version: str | None = None
         self.enabled = True
         self.error: str | None = None
 
+    def user_words(self, conn: sqlite3.Connection) -> list[tuple[str, str]]:
+        return self._words(conn)
+
     def ready(self, conn: sqlite3.Connection) -> bool:
-        """DB 사용자 단어 기준 버전으로 Kiwi 를 준비한다. 쓸 수 없으면 False."""
+        """사용자 단어 기준 버전으로 Kiwi 를 준비한다. 쓸 수 없으면 False."""
         if not self.enabled:
             return False
-        words = load_user_words(conn)
+        words = self.user_words(conn)
         want = compute_version(words)
         with self._lock:
             if self._kiwi is None or self.version != want:
@@ -154,8 +161,9 @@ def _pending_sql(limit: bool) -> str:
             "WHERE m.rowid IS NULL OR m.ver IS NOT ?" + (" LIMIT ?" if limit else ""))
 
 
-def pending_count(conn: sqlite3.Connection) -> int:
-    want = compute_version(load_user_words(conn))
+def pending_count(conn: sqlite3.Connection, analyzer: Analyzer | None = None) -> int:
+    """재색인 대상 행 수. analyzer 를 주면 그 분석기의 사용자 단어 공급원으로 버전을 계산한다."""
+    want = compute_version(analyzer.user_words(conn) if analyzer is not None else load_user_words(conn))
     return conn.execute(f"SELECT count(*) FROM ({_pending_sql(False)})", (want,)).fetchone()[0]
 
 

@@ -95,10 +95,11 @@ def test_account_gets_own_db(cfg, app):
 def test_accounts_are_isolated(app):
     with client_for(app, 1) as a:
         item = add_basics(a)
-        cat = a.get("/api/categories").json()["categories"][0]["id"]
+        cat = next(x["id"] for x in a.get("/api/categories").json()["categories"] if x["name"] == "이관")
     with client_for(app, 2) as b:
         assert b.get("/api/search", params={"q": "rename"}).json()["hits"] == []
-        assert b.get("/api/categories").json()["categories"] == []
+        # 새 사용자 DB 에는 기본 가이드만 있다
+        assert [x["name"] for x in b.get("/api/categories").json()["categories"]] == ["fast-question"]
         assert b.get(f"/api/qa/{item['id']}").status_code == 404
         assert b.get("/api/export", params={"category": cat}).status_code == 404
         assert b.patch(f"/api/qa/{item['id']}", json={"version": 1, "answer": "덮어쓰기"}).status_code == 404
@@ -116,14 +117,24 @@ def test_remote_host_and_origin_check(app):
         assert c.get("/api/categories", headers={"Origin": URL}).status_code == 200
 
 
-def test_remote_mode_runs_no_single_db_jobs(cfg, analyzer):
-    """사용자별 주기 작업 전에는 원격 모드에서 단일 DB 주기 작업·Kiwi 미리 띄우기를 돌리지 않는다."""
+def test_remote_mode_runs_per_user_jobs_only(cfg, analyzer):
+    """원격 모드는 사용자 DB 마다 주기 작업을 돌리고 단일 DB(cfg.db_path)·cfg.backup_dir 와 Kiwi 미리 띄우기는 하지 않는다."""
+    from kb.db import connect
+
+    connect(tenant.db_path_for(cfg.data_dir, 1)).close()
     before = set(threading.enumerate())
     app = create_app(cfg, run_jobs=True, analyzer=analyzer)
+    user_backups = tenant.user_dir(cfg.data_dir, 1) / "backup"
     with client_for(app, 1) as c:
         assert c.get("/api/categories").status_code == 200
         names = {t.name for t in set(threading.enumerate()) - before}
-    assert "jobs" not in names and "kiwi-warmup" not in names
+        for _ in range(50):
+            if list(user_backups.glob("kb-*.sqlite3")) and list((cfg.data_dir / "backup").glob("control-*.sqlite3")):
+                break
+            threading.Event().wait(0.1)
+    assert "jobs" in names and "kiwi-warmup" not in names
+    assert list(user_backups.glob("kb-*.sqlite3")), "web 이 뜨면 사용자 DB 백업이 돌아야 한다"
+    assert list((cfg.data_dir / "backup").glob("control-*.sqlite3")), "제어 DB 도 백업한다"
     assert not cfg.db_path.exists() and not cfg.backup_dir.exists()
 
 
@@ -140,4 +151,4 @@ def test_seed_guide_skipped_in_remote_mode(cfg):
 def test_projects_for_hook(app):
     with client_for(app, 1) as c:
         add_basics(c)
-        assert c.get("/api/projects").json() == {"names": ["이관"], "roots": []}
+        assert c.get("/api/projects").json() == {"names": ["fast-question", "이관"], "roots": []}

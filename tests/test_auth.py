@@ -283,7 +283,8 @@ def test_account_session_cannot_read_other_account(app):
     with client(app) as b:
         login(b, "github")
         assert b.get(f"/api/qa/{item['id']}").status_code == 404
-        assert b.get("/api/search", params={"q": "질문"}).json()["hits"] == []
+        hits = b.get("/api/search", params={"q": "질문"}).json()["hits"]
+        assert "A 의 질문" not in [h["question"] for h in hits]  # 새 DB 에는 기본 가이드만 있다
 
 
 def test_unknown_cookie_is_not_a_session(app):

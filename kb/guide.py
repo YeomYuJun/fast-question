@@ -3,15 +3,20 @@
 seed() 는 빠진 항목을 넣고, 마지막으로 system 이 쓴 항목만 json 과 같게 고친다.
 사람이나 Claude 가 고친 가이드 항목은 덮어쓰지 않는다. scripts/install.py 와 run_web.py 가 부른다.
 근거 경로는 저장소 루트 기준 상대 경로로 적고, 넣을 때 이 저장소의 절대 경로로 바꾼다.
+원격 모드는 load_remote() 를 쓴다. 서버의 파일 경로는 사용자에게 뜻이 없고 저장소가 공개되지 않아 근거 없이 넣고,
+답변의 로컬 화면 주소(LOCAL_URL)를 서버의 public_url 로 바꾼다. web/app.py 가 사용자 DB 를 처음 만들 때 1회 넣는다.
 """
 import json
 from pathlib import Path
 
-from kb.errors import NotFoundError
+from kb.errors import NotFoundError, ValidationError
 from kb.store import Store
+from kb.text import check_answer
 
 ROOT = Path(__file__).resolve().parent.parent
 GUIDE_FILE = Path(__file__).resolve().parent / "default_guide.json"
+LOCAL_URL = "http://127.0.0.1:8765"
+REMOTE_URL_FALLBACK = "이 서버 주소"  # public_url 로 바꾸면 답변 글자 수 상한을 넘을 때 쓴다
 
 
 def load(path: Path = GUIDE_FILE, root: Path = ROOT) -> dict:
@@ -19,6 +24,19 @@ def load(path: Path = GUIDE_FILE, root: Path = ROOT) -> dict:
     for item in data["items"]:
         item["evidence"] = [dict(e, path=str(root / e["path"])) if e.get("path") else e
                             for e in item.get("evidence") or []]
+    return data
+
+
+def load_remote(public_url: str, path: Path = GUIDE_FILE) -> dict:
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    for item in data["items"]:
+        item["evidence"] = []
+        answer = item["answer"].replace(LOCAL_URL, public_url)
+        try:
+            check_answer(answer)
+        except ValidationError:
+            answer = item["answer"].replace(LOCAL_URL, REMOTE_URL_FALLBACK)
+        item["answer"] = answer
     return data
 
 

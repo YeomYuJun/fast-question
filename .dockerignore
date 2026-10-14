@@ -1,0 +1,17 @@
+.git
+.venv
+.claude
+.superpowers
+.pytest_cache
+**/__pycache__
+**/*.pyc
+data
+docs
+design
+deploy
+hooks
+scripts
+!scripts/global_words.py
+skill
+tests
+config.json

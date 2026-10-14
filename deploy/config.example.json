@@ -1,0 +1,17 @@
+{
+  "mode": "remote",
+  "public_url": "https://www.domain-example.com",
+  "host": "0.0.0.0",
+  "port": 8765,
+  "data_dir": "/data",
+  "log_dir": "/data/logs",
+  "log_keep_days": 14,
+  "backup_keep": 14,
+  "oauth": {
+    "github": {"client_id": ""},
+    "google": {"client_id": ""}
+  },
+  "allowed_logins": [],
+  "backup_s3_bucket": "",
+  "backup_s3_prefix": ""
+}

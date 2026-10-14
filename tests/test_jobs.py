@@ -152,3 +152,157 @@ def test_autostart_builds_command_without_running(monkeypatch, capsys):
     assert args[:2] == ["schtasks", "/Create"] and "ONLOGON" in args
     tr = args[args.index("/TR") + 1]
     assert "pythonw.exe" in tr and "run_web.py" in tr and tr.count('"') == 4
+
+
+def remote_cfg(tmp_path: Path, **kw) -> Config:
+    return make_cfg(tmp_path, mode="remote", public_url="https://fq.example.com", data_dir=tmp_path / "data", **kw)
+
+
+def user_db(cfg: Config, account_id: int, question: str = "사용자 백업 질문?"):
+    from kb import tenant
+
+    conn = connect(tenant.db_path_for(cfg.data_dir, account_id))
+    s = Store(conn, "user")
+    s.add_category("이관")
+    s.add_qa("이관", question, "사용자 사본에도 이 행이 있어야 한다.")
+    return conn
+
+
+def test_run_due_all_backs_up_each_user_and_control_db(tmp_path):
+    from kb import tenant
+    from kb.control import connect_control
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    connect_control(tenant.control_path(cfg.data_dir)).close()
+    for acc in (1, 2):
+        user_db(cfg, acc, f"계정 {acc} 의 질문?").close()
+
+    done = run_due_all(cfg)
+    assert set(done["users"]) == {1, 2}
+    for acc in (1, 2):
+        assert set(done["users"][acc]) == {"backup"}  # 근거 재검증은 서버에서 돌지 않는다
+        copies = list((tenant.user_dir(cfg.data_dir, acc) / "backup").glob("kb-*.sqlite3"))
+        assert len(copies) == 1
+        copy = sqlite3.connect(copies[0])
+        assert copy.execute("SELECT question FROM qa").fetchone()[0] == f"계정 {acc} 의 질문?"
+        copy.close()
+    assert done["control"]["backup"]["path"].endswith(".sqlite3")
+    assert len(list((cfg.data_dir / "backup").glob("control-*.sqlite3"))) == 1
+    assert not cfg.db_path.exists() and not cfg.backup_dir.exists()  # 단일 DB 경로는 건드리지 않는다
+
+    assert run_due_all(cfg) == {}  # 방금 돌았으므로 건너뛴다
+    later = datetime.now(timezone.utc) + timedelta(hours=25)
+    assert set(run_due_all(cfg, now=later)["users"]) == {1, 2}
+
+
+def test_run_due_all_one_broken_user_does_not_stop_others(tmp_path):
+    from kb import tenant
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    broken = tenant.db_path_for(cfg.data_dir, 1)
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"not a database" * 100)
+    user_db(cfg, 2).close()
+
+    done = run_due_all(cfg)
+    assert "error" in done["users"][1]["open"]
+    assert "path" in done["users"][2]["backup"]
+    assert "path" in done["control"]["backup"]
+
+
+def test_run_due_all_reindexes_users_without_recheck(tmp_path):
+    from kb import tenant
+    from kb.jobs import run_due_all
+    from kb.morph import Analyzer, pending_count
+
+    class FakeKiwi:
+        def add_user_word(self, *_):
+            return True
+
+        def tokenize(self, _):
+            return []
+
+    cfg = remote_cfg(tmp_path)
+    user_db(cfg, 1).close()
+    done = run_due_all(cfg, analyzer=Analyzer(loader=FakeKiwi))
+    assert done["users"][1]["reindex"] == 1
+    conn = connect(tenant.db_path_for(cfg.data_dir, 1))
+    assert pending_count(conn) == 0 and get_meta(conn, "last_recheck") is None
+    conn.close()
+
+
+class FakeS3:
+    """boto3 S3 클라이언트의 upload_file(Filename, Bucket, Key) 만 흉내 낸다."""
+
+    def __init__(self, fail_for: str = ""):
+        self.calls, self.fail_for = [], fail_for
+
+    def upload_file(self, filename, bucket, key):
+        if self.fail_for and self.fail_for in key:
+            raise OSError("네트워크 끊김")
+        assert Path(filename).is_file()
+        self.calls.append((bucket, key))
+
+
+def test_run_due_all_uploads_fresh_backups_to_s3(tmp_path):
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path, backup_s3_bucket="fq-backup", backup_s3_prefix="prod/")
+    for acc in (1, 2):
+        user_db(cfg, acc).close()
+    s3 = FakeS3()
+    done = run_due_all(cfg, s3=s3)
+    stamp = f"{date.today():%Y%m%d}"
+    assert sorted(s3.calls) == [("fq-backup", f"prod/control/control-{stamp}.sqlite3"),
+                                ("fq-backup", f"prod/users/1/kb-{stamp}.sqlite3"),
+                                ("fq-backup", f"prod/users/2/kb-{stamp}.sqlite3")]
+    assert done["users"][1]["upload"] == {"url": f"s3://fq-backup/prod/users/1/kb-{stamp}.sqlite3"}
+
+    s3.calls.clear()
+    assert run_due_all(cfg, s3=s3) == {} and s3.calls == []  # 새 백업이 없으면 올리지 않는다
+
+
+def test_s3_upload_failure_keeps_backup_and_other_users(tmp_path):
+    from kb import tenant
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path, backup_s3_bucket="fq-backup")
+    for acc in (1, 2):
+        user_db(cfg, acc).close()
+    s3 = FakeS3(fail_for="users/1/")
+    done = run_due_all(cfg, s3=s3)
+    assert "네트워크 끊김" in done["users"][1]["upload"]["error"]
+    assert "path" in done["users"][1]["backup"]
+    assert list((tenant.user_dir(cfg.data_dir, 1) / "backup").glob("kb-*.sqlite3"))
+    assert ("fq-backup", f"users/2/kb-{date.today():%Y%m%d}.sqlite3") in s3.calls
+
+
+def test_no_bucket_means_no_upload(tmp_path):
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    user_db(cfg, 1).close()
+    s3 = FakeS3()
+    done = run_due_all(cfg, s3=s3)
+    assert "upload" not in done["users"][1] and s3.calls == []
+
+
+def test_missing_boto3_is_reported_as_upload_error(tmp_path, monkeypatch):
+    import builtins
+
+    from kb.jobs import run_due_all
+
+    real_import = builtins.__import__
+
+    def no_boto3(name, *a, **kw):
+        if name == "boto3":
+            raise ImportError("No module named 'boto3'")
+        return real_import(name, *a, **kw)
+    monkeypatch.setattr(builtins, "__import__", no_boto3)
+    cfg = remote_cfg(tmp_path, backup_s3_bucket="fq-backup")
+    user_db(cfg, 1).close()
+    done = run_due_all(cfg)
+    assert "boto3" in done["users"][1]["upload"]["error"]
+    assert "path" in done["users"][1]["backup"]

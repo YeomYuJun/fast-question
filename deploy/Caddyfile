@@ -1,0 +1,6 @@
+# www.domain-example.com 은 자리표시자다. 실제 도메인으로 바꾸고 config.json 의 public_url 호스트와 같게 둔다.
+# Caddy 가 Let's Encrypt 인증서를 받고 HTTP 를 HTTPS 로 넘긴다. Host 헤더는 그대로 app 에 전달된다.
+www.domain-example.com {
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy app:8765
+}

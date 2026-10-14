@@ -34,7 +34,7 @@ def setup_logging(cfg: Config) -> None:
 
 def seed_guide(cfg: Config, log: logging.Logger) -> None:
     """기본 사용 가이드를 넣거나 갱신한다. git pull 뒤 재시작하면 새 가이드가 반영된다. 실패해도 서버는 뜬다.
-    원격 모드는 넣지 않는다(가이드 근거가 이 서버의 파일 경로라 사용자에게 뜻이 없다)."""
+    원격 모드는 여기서 넣지 않는다. 사용자 DB 를 처음 만들 때 web/app.py 가 원격용 가이드(근거 없음)를 넣는다."""
     if cfg.mode == "remote":
         return
     from kb import guide
