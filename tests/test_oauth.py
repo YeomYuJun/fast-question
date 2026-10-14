@@ -367,3 +367,9 @@ def test_idle_clients_are_deleted_after_a_year(cfg, app):
     finally:
         conn.close()
     assert idle != used
+
+
+def test_consent_page_keeps_origin_for_its_own_form():
+    """no-referrer 면 브라우저가 승인 폼 POST 에 Origin: null 을 붙여 같은 출처 검사에 막힌다(브라우저 확인에서 찾음)."""
+    from web.oauth_as import PAGE_HEADERS
+    assert PAGE_HEADERS["Referrer-Policy"] == "same-origin"

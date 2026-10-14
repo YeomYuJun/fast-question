@@ -176,8 +176,10 @@ dd {{ margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-
 </body>
 </html>
 """
+# Referrer-Policy 는 same-origin 이다. no-referrer 면 Chrome 이 이 페이지의 승인 폼 POST 에 Origin: null 을 붙여
+# 같은 출처 검사(SameOriginOnly)가 거부한다. same-origin 도 다른 사이트(콜백 주소)에는 리퍼러를 보내지 않는다
 PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY",
-                "Content-Security-Policy": "frame-ancestors 'none'", "Referrer-Policy": "no-referrer"}
+                "Content-Security-Policy": "frame-ancestors 'none'", "Referrer-Policy": "same-origin"}
 
 
 def page(title: str, body: str, status: int = 200) -> HTMLResponse:
