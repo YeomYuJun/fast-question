@@ -4,12 +4,13 @@
 요청마다 SQLite 연결을 새로 열고(스레드 풀에서 실행), 형태소 분석기는 앱에 하나를 둔다.
 오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
 쓰기 잠금 대기 초과 503 으로 돌려준다.
-run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
+run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌린다. 로컬 모드는 kb.jobs.run_due(백업, 근거 재검증,
+재색인), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·재색인, 제어 DB 백업)이다.
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
-원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
+원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
 """
 import dataclasses
 import json
@@ -37,7 +38,7 @@ from kb.control import connect_control
 from kb.db import connect
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
-from kb.jobs import run_due
+from kb.jobs import run_due, run_due_all
 from kb.morph import Analyzer
 from kb.store import Store
 from mcp_server.http import RemoteMcp
@@ -154,7 +155,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     def jobs_loop(stop: threading.Event) -> None:
         while not stop.is_set():
             try:
-                run_due(job_cfg, analyzer)
+                run_due_all(cfg, analyzer) if remote else run_due(job_cfg, analyzer)
             except Exception:  # 다음 주기에 다시 돈다
                 log.exception("주기 작업 실패")
             stop.wait(JOB_INTERVAL_S)
@@ -162,7 +163,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     @asynccontextmanager
     async def lifespan(_app):
         stop = threading.Event()
-        if run_jobs and not remote:
+        if run_jobs:
             threading.Thread(target=jobs_loop, args=(stop,), name="jobs", daemon=True).start()
         if mcp is None:
             yield

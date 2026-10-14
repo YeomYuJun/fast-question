@@ -116,14 +116,24 @@ def test_remote_host_and_origin_check(app):
         assert c.get("/api/categories", headers={"Origin": URL}).status_code == 200
 
 
-def test_remote_mode_runs_no_single_db_jobs(cfg, analyzer):
-    """사용자별 주기 작업 전에는 원격 모드에서 단일 DB 주기 작업·Kiwi 미리 띄우기를 돌리지 않는다."""
+def test_remote_mode_runs_per_user_jobs_only(cfg, analyzer):
+    """원격 모드는 사용자 DB 마다 주기 작업을 돌리고 단일 DB(cfg.db_path)·cfg.backup_dir 와 Kiwi 미리 띄우기는 하지 않는다."""
+    from kb.db import connect
+
+    connect(tenant.db_path_for(cfg.data_dir, 1)).close()
     before = set(threading.enumerate())
     app = create_app(cfg, run_jobs=True, analyzer=analyzer)
+    user_backups = tenant.user_dir(cfg.data_dir, 1) / "backup"
     with client_for(app, 1) as c:
         assert c.get("/api/categories").status_code == 200
         names = {t.name for t in set(threading.enumerate()) - before}
-    assert "jobs" not in names and "kiwi-warmup" not in names
+        for _ in range(50):
+            if list(user_backups.glob("kb-*.sqlite3")) and list((cfg.data_dir / "backup").glob("control-*.sqlite3")):
+                break
+            threading.Event().wait(0.1)
+    assert "jobs" in names and "kiwi-warmup" not in names
+    assert list(user_backups.glob("kb-*.sqlite3")), "web 이 뜨면 사용자 DB 백업이 돌아야 한다"
+    assert list((cfg.data_dir / "backup").glob("control-*.sqlite3")), "제어 DB 도 백업한다"
     assert not cfg.db_path.exists() and not cfg.backup_dir.exists()
 
 

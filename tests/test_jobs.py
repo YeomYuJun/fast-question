@@ -152,3 +152,82 @@ def test_autostart_builds_command_without_running(monkeypatch, capsys):
     assert args[:2] == ["schtasks", "/Create"] and "ONLOGON" in args
     tr = args[args.index("/TR") + 1]
     assert "pythonw.exe" in tr and "run_web.py" in tr and tr.count('"') == 4
+
+
+def remote_cfg(tmp_path: Path, **kw) -> Config:
+    return make_cfg(tmp_path, mode="remote", public_url="https://fq.example.com", data_dir=tmp_path / "data", **kw)
+
+
+def user_db(cfg: Config, account_id: int, question: str = "사용자 백업 질문?"):
+    from kb import tenant
+
+    conn = connect(tenant.db_path_for(cfg.data_dir, account_id))
+    s = Store(conn, "user")
+    s.add_category("이관")
+    s.add_qa("이관", question, "사용자 사본에도 이 행이 있어야 한다.")
+    return conn
+
+
+def test_run_due_all_backs_up_each_user_and_control_db(tmp_path):
+    from kb import tenant
+    from kb.control import connect_control
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    connect_control(tenant.control_path(cfg.data_dir)).close()
+    for acc in (1, 2):
+        user_db(cfg, acc, f"계정 {acc} 의 질문?").close()
+
+    done = run_due_all(cfg)
+    assert set(done["users"]) == {1, 2}
+    for acc in (1, 2):
+        assert set(done["users"][acc]) == {"backup"}  # 근거 재검증은 서버에서 돌지 않는다
+        copies = list((tenant.user_dir(cfg.data_dir, acc) / "backup").glob("kb-*.sqlite3"))
+        assert len(copies) == 1
+        copy = sqlite3.connect(copies[0])
+        assert copy.execute("SELECT question FROM qa").fetchone()[0] == f"계정 {acc} 의 질문?"
+        copy.close()
+    assert done["control"]["backup"]["path"].endswith(".sqlite3")
+    assert len(list((cfg.data_dir / "backup").glob("control-*.sqlite3"))) == 1
+    assert not cfg.db_path.exists() and not cfg.backup_dir.exists()  # 단일 DB 경로는 건드리지 않는다
+
+    assert run_due_all(cfg) == {}  # 방금 돌았으므로 건너뛴다
+    later = datetime.now(timezone.utc) + timedelta(hours=25)
+    assert set(run_due_all(cfg, now=later)["users"]) == {1, 2}
+
+
+def test_run_due_all_one_broken_user_does_not_stop_others(tmp_path):
+    from kb import tenant
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    broken = tenant.db_path_for(cfg.data_dir, 1)
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"not a database" * 100)
+    user_db(cfg, 2).close()
+
+    done = run_due_all(cfg)
+    assert "error" in done["users"][1]["open"]
+    assert "path" in done["users"][2]["backup"]
+    assert "path" in done["control"]["backup"]
+
+
+def test_run_due_all_reindexes_users_without_recheck(tmp_path):
+    from kb import tenant
+    from kb.jobs import run_due_all
+    from kb.morph import Analyzer, pending_count
+
+    class FakeKiwi:
+        def add_user_word(self, *_):
+            return True
+
+        def tokenize(self, _):
+            return []
+
+    cfg = remote_cfg(tmp_path)
+    user_db(cfg, 1).close()
+    done = run_due_all(cfg, analyzer=Analyzer(loader=FakeKiwi))
+    assert done["users"][1]["reindex"] == 1
+    conn = connect(tenant.db_path_for(cfg.data_dir, 1))
+    assert pending_count(conn) == 0 and get_meta(conn, "last_recheck") is None
+    conn.close()
