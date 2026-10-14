@@ -51,6 +51,18 @@ docker compose -f "deploy\compose.yaml" up -d --build
 - 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본).
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
 
+## 형태소 사용자 단어
+
+원격 모드의 Kiwi 사용자 단어는 서버 전역 사전 하나다(제어 DB 의 `global_user_word` 표). 사용자가 MCP `kb_dict` 로 바꾸는 것은 거부된다. 운영자가 컨테이너 안에서 바꾼다.
+
+```powershell
+docker compose -f "deploy\compose.yaml" exec app python scripts/global_words.py --config /etc/fq/config.json list
+docker compose -f "deploy\compose.yaml" exec app python scripts/global_words.py --config /etc/fq/config.json add 망연계 NNP
+docker compose -f "deploy\compose.yaml" exec app python scripts/global_words.py --config /etc/fq/config.json remove 망연계
+```
+
+바꾸면 다음 검색·쓰기 때 Kiwi 를 한 번 다시 띄우고(약 2초), 주기 작업이 모든 사용자 DB 를 재색인한다.
+
 ## 로컬 DB 옮기기
 
 사용자 PC 에서 저장소 루트에서 실행한다. 서버 주소와 개인 토큰은 `%USERPROFILE%\.fast-question\credentials.json` 에서 읽는다.

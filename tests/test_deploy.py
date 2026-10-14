@@ -23,6 +23,7 @@ def test_dockerfile_copies_existing_paths_not_ignored():
     for src in copied:
         assert (ROOT / src).exists(), src
         assert src not in ignored, src
+    assert "!scripts/global_words.py" in ignored  # 운영자 명령은 컨테이너 안에서 돈다
     assert "USER fq" in text and 'VOLUME ["/data"]' in text
     assert '"--config", "/etc/fq/config.json"' in text
 

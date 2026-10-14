@@ -7,6 +7,8 @@ DDL 전체의 sha256 이라 손으로 올리지 않는다. DDL 이 바뀐 뒤 �
 - 세션 쿠키 값은 256비트 난수이고 표에는 sha256 만 둔다. 비활동 30일 또는 생성 90일이 지나면 끝난다.
 - 로그인 상태(state, PKCE verifier)는 10분 안에 한 번만 쓸 수 있다.
 - 개인 토큰(fq_pat_…)은 훅·로컬 프록시가 Bearer 로 쓴다. 표에는 sha256 만 두고, 180일 뒤 끝난다. 계정당 살아 있는 토큰 10개.
+- 형태소 사용자 단어는 원격 모드에서 서버 전역 사전(global_user_word) 하나다. Kiwi 가 프로세스에 하나라 사용자마다
+  둘 수 없다. 운영자가 scripts/global_words.py 로 바꾸고, 분석기는 words_source() 로 이 표를 읽는다.
 세션·로그인 상태의 시각은 이 모듈이 UTC ISO 문자열로 넣고 비교한다(now 인자로 테스트한다).
 """
 import hashlib
@@ -81,8 +83,17 @@ CREATE TABLE IF NOT EXISTS personal_token (
 CREATE INDEX IF NOT EXISTS personal_token_account ON personal_token(account_id);
 """
 
+GLOBAL_WORD_TAGS = ("NNP", "NNG", "SL", "XR", "VV", "VA")  # 사용자 KB 의 user_word 와 같은 품사
+GLOBAL_WORD_DDL = f"""
+CREATE TABLE IF NOT EXISTS global_user_word (
+    word TEXT PRIMARY KEY CHECK (length(word) BETWEEN 1 AND 40 AND instr(word, ' ') = 0),
+    tag TEXT NOT NULL CHECK (tag IN ({", ".join(f"'{t}'" for t in GLOBAL_WORD_TAGS)})),
+    created_at TEXT NOT NULL DEFAULT ({NOW})
+);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, GLOBAL_WORD_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
@@ -263,3 +274,37 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
         with tx(conn):
             conn.execute("UPDATE personal_token SET last_used_at = ? WHERE id = ?", (_iso(t), row["id"]))
     return {"account_id": row["account_id"], "token_id": row["id"], "expires_at": row["expires_at"]}
+
+
+def global_words(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """서버 전역 형태소 사용자 단어 (단어, 품사). kb.dictionary.load_user_words 와 같은 순서다."""
+    return [(r[0], r[1]) for r in conn.execute("SELECT word, tag FROM global_user_word ORDER BY word, tag")]
+
+
+def add_global_word(conn: sqlite3.Connection, word: str, tag: str = "NNP") -> None:
+    word = (word or "").strip()
+    if not 1 <= len(word) <= 40 or any(c.isspace() for c in word):
+        raise ValueError("단어는 공백 없는 1~40자다.")
+    if tag not in GLOBAL_WORD_TAGS:
+        raise ValueError(f"품사는 {'·'.join(GLOBAL_WORD_TAGS)} 중 하나다: {tag}")
+    try:
+        with tx(conn):
+            conn.execute("INSERT INTO global_user_word(word, tag) VALUES (?, ?)", (word, tag))
+    except sqlite3.IntegrityError:
+        raise ValueError(f"이미 있는 단어다: {word}") from None
+
+
+def remove_global_word(conn: sqlite3.Connection, word: str) -> bool:
+    with tx(conn):
+        return conn.execute("DELETE FROM global_user_word WHERE word = ?", (word.strip(),)).rowcount == 1
+
+
+def words_source(path: Path | str):
+    """Analyzer(words=...) 에 넣는 공급원. 사용자 DB 연결은 쓰지 않고 제어 DB 를 매번 연다(단어가 바로 반영된다)."""
+    def words(_conn: sqlite3.Connection) -> list[tuple[str, str]]:
+        conn = connect_control(path)
+        try:
+            return global_words(conn)
+        finally:
+            conn.close()
+    return words

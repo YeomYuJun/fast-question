@@ -36,7 +36,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from kb import guide, tenant
+from kb import control, guide, tenant
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
@@ -129,7 +129,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     """http_transport: 원격 모드 로그인이 GitHub·Google 을 부를 때 쓰는 httpx 전송(테스트가 바꿔 끼운다)."""
     cfg = cfg or load_config()
     remote = cfg.mode == "remote"
-    analyzer = analyzer if analyzer is not None else Analyzer()
+    if analyzer is None:  # 원격 모드의 사용자 단어는 제어 DB 의 서버 전역 사전이다
+        analyzer = (Analyzer(words=control.words_source(tenant.control_path(cfg.data_dir))) if remote
+                    else Analyzer())
     mcp = RemoteMcp(cfg, analyzer) if remote else None
     if remote:
         path = None

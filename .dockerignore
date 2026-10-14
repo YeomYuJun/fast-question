@@ -11,6 +11,7 @@ design
 deploy
 hooks
 scripts
+!scripts/global_words.py
 skill
 tests
 config.json

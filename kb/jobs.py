@@ -68,7 +68,7 @@ def _run(jobs: list, label: str = "") -> dict:
 
 
 def _reindex_job(conn: sqlite3.Connection, analyzer) -> list:
-    if analyzer is not None and analyzer.enabled and pending_count(conn):
+    if analyzer is not None and analyzer.enabled and pending_count(conn, analyzer):
         return [("reindex", lambda: reindex(conn, analyzer) if analyzer.ready(conn) else 0)]
     return []
 

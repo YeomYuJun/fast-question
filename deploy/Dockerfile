@@ -15,6 +15,7 @@ COPY kb ./kb
 COPY web ./web
 COPY mcp_server ./mcp_server
 COPY run_web.py ./
+COPY scripts/global_words.py ./scripts/
 
 # 볼륨을 처음 붙일 때 Docker 가 이미지의 /data 소유자를 그대로 가져가므로 VOLUME 앞에서 만든다
 RUN useradd --system --uid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin fq \
