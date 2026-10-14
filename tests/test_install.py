@@ -80,3 +80,69 @@ def test_skill_files_have_no_control_characters():
     import re
     for f in install.SKILLS_SRC.rglob("*.md"):
         assert not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", f.read_text(encoding="utf-8")), f
+
+
+def test_install_skills_fills_screen_url(tmp_path):
+    src, dst = tmp_path / "skill", tmp_path / "dst"
+    (src / "qa").mkdir(parents=True)
+    (src / "qa" / "SKILL.md").write_text(f"화면 {install.URL_MARK}/#qa/1", encoding="utf-8")
+    install.install_skills(src, dst, url="https://fq.example.com/")
+    assert (dst / "qa" / "SKILL.md").read_text(encoding="utf-8") == "화면 https://fq.example.com/#qa/1"
+    assert "덮어씀" in install.install_skills(src, dst, url="http://127.0.0.1:8765")[0]
+
+
+def test_skill_sources_use_url_mark_not_local_address():
+    texts = [f.read_text(encoding="utf-8") for f in install.SKILLS_SRC.rglob("SKILL.md")]
+    assert all("127.0.0.1:8765" not in t for t in texts)
+    assert sum(install.URL_MARK in t for t in texts) == 2
+
+
+class FakeRun:
+    def __init__(self, registered: bytes | None):
+        self.registered, self.calls = registered, []
+
+    def __call__(self, args, **kw):
+        import subprocess
+        self.calls.append(args[1:3] + (["--remote"] if "--remote" in args else []))
+        ok = args[2] != "get" or self.registered is not None
+        return subprocess.CompletedProcess(args, 0 if ok else 1, self.registered or b"", b"")
+
+
+def test_register_mcp_switches_between_local_and_remote():
+    fresh = FakeRun(None)
+    assert "완료" in install.register_mcp(remote=True, run=fresh, claude="claude")
+    assert fresh.calls[-1] == ["mcp", "add", "--remote"]
+
+    local = FakeRun(b"Command: python.exe run_mcp.py")
+    install.register_mcp(remote=True, run=local, claude="claude")
+    assert [c[:2] for c in local.calls] == [["mcp", "get"], ["mcp", "remove"], ["mcp", "add"]]
+
+    remote = FakeRun(b"Command: python.exe run_mcp.py --remote")
+    assert "이미" in install.register_mcp(remote=True, run=remote, claude="claude")
+    install.register_mcp(remote=False, run=remote, claude="claude")
+    assert remote.calls[-1] == ["mcp", "add"]
+
+
+def _opener(status: int, body: dict):
+    import io
+    from urllib.error import HTTPError
+
+    def opener(req, timeout):
+        assert req.get_header("Authorization") == "Bearer fq_pat_abc"
+        if status != 200:
+            raise HTTPError(req.full_url, status, "x", {}, io.BytesIO(b"{}"))
+        return io.BytesIO(json.dumps(body).encode())
+    return opener
+
+
+def test_install_remote_checks_token_before_writing(tmp_path, monkeypatch):
+    import pytest
+
+    from kb.remote import credentials_path, load_credentials
+    with pytest.raises(ValueError):
+        install.install_remote("https://fq.example.com", "fq_pat_abc", _opener(401, {}))
+    assert not credentials_path().exists()
+    msgs = install.install_remote("https://fq.example.com/", "fq_pat_abc",
+                                  _opener(200, {"account": {"id": 1, "display_name": "octo", "providers": ["github"]}}))
+    assert "octo" in msgs[0]
+    assert load_credentials() == {"url": "https://fq.example.com", "token": "fq_pat_abc"}
