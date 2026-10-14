@@ -77,3 +77,12 @@ def test_oauth_client_ids_and_allowed_logins(tmp_path):
     assert (cfg.github_client_id, cfg.google_client_id) == ("gh-id", "g-id")
     assert cfg.allowed_logins == frozenset({"github:42"})
     assert load_config(tmp_path / "없음.json").allowed_logins == frozenset()
+
+
+def test_backup_s3_keys_default_empty_and_prefix_gets_slash(tmp_path):
+    cfg = load_config(tmp_path / "없음.json")
+    assert cfg.backup_s3_bucket == "" and cfg.backup_s3_prefix == ""
+
+    cfg = load_config(_write(tmp_path, {"backup_s3_bucket": "fq-backup", "backup_s3_prefix": "prod"}))
+    assert cfg.backup_s3_bucket == "fq-backup" and cfg.backup_s3_prefix == "prod/"
+    assert load_config(_write(tmp_path, {"backup_s3_prefix": "prod/"})).backup_s3_prefix == "prod/"

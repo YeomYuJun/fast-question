@@ -5,13 +5,14 @@
 로컬 모드는 run_due 가 cfg.db_path 하나를 맡는다. 원격 모드는 run_due_all 이 사용자 DB(kb/tenant.py)마다
 백업(users/<id>/backup/)과 재색인을 하고, 제어 DB 를 data_dir/backup/control-YYYYMMDD.sqlite3 로 백업한다.
 원격 모드는 근거 재검증을 하지 않는다(근거 파일은 사용자 PC 에 있다). 한 사용자의 실패가 다른 사용자를 막지 않는다.
+backup_s3_bucket 이 있으면 그 주기에 만든 백업 사본을 S3 에 올린다(kb/s3backup.py). 업로드 실패는 백업을 되돌리지 않는다.
 """
 import logging
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kb import tenant
+from kb import s3backup, tenant
 from kb.config import Config
 from kb.control import connect_control
 from kb.db import NOW, connect, get_meta
@@ -90,10 +91,30 @@ def run_due(cfg: Config, analyzer=None, now: datetime | None = None) -> dict:
         conn.close()
 
 
-def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None) -> dict:
-    """원격 모드: 사용자 DB 마다 기한이 된 백업·재색인을 돌리고 제어 DB 를 백업한다.
+class _Uploader:
+    """S3 클라이언트는 올릴 사본이 처음 생길 때 만든다(boto3 가 없으면 그때 업로드 오류가 된다)."""
+
+    def __init__(self, cfg: Config, s3=None):
+        self.bucket, self.prefix, self._s3 = cfg.backup_s3_bucket, cfg.backup_s3_prefix, s3
+
+    def job(self, result: dict, key_of) -> list:
+        if not self.bucket or "path" not in result.get("backup", {}):
+            return []
+
+        def upload() -> dict:
+            if self._s3 is None:
+                self._s3 = s3backup.client()
+            path = Path(result["backup"]["path"])
+            return s3backup.upload(self._s3, self.bucket, key_of(self.prefix, path), path)
+        return [("upload", upload)]
+
+
+def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None) -> dict:
+    """원격 모드: 사용자 DB 마다 기한이 된 백업·재색인을 돌리고 제어 DB 를 백업한다. s3: 업로드에 쓸 클라이언트
+    (없으면 backup_s3_bucket 이 있을 때 boto3 로 만든다).
     결과는 {"users": {계정 id: {작업: 결과}}, "control": {작업: 결과}} 에서 돌린 것만 담는다. 없으면 빈 dict."""
     now = now or datetime.now(timezone.utc)
+    uploader = _Uploader(cfg, s3)
     done: dict = {}
     users: dict = {}
     for account_id, path in tenant.list_user_dbs(cfg.data_dir):
@@ -109,7 +130,9 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None) -> dict
             if _due(conn, "last_backup", BACKUP_EVERY_HOURS, now):
                 backup_dir = tenant.user_dir(cfg.data_dir, account_id) / "backup"
                 jobs.append(("backup", lambda: {"path": str(backup(conn, backup_dir, cfg.backup_keep))}))
-            if result := _run(jobs + _reindex_job(conn, analyzer), label):
+            result = _run(jobs + _reindex_job(conn, analyzer), label)
+            result.update(_run(uploader.job(result, lambda p, f: s3backup.user_key(p, account_id, f)), label))
+            if result:
                 users[account_id] = result
         except Exception as e:  # noqa: BLE001 - meta 를 못 읽는 DB 도 다음 사용자로 넘어간다
             log.exception("%s작업 실패", label)
@@ -124,6 +147,7 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None) -> dict
             if _due(conn, "last_backup", BACKUP_EVERY_HOURS, now):
                 control = _run([("backup", lambda: {"path": str(backup(
                     conn, cfg.data_dir / "backup", cfg.backup_keep, name="control"))})], "control ")
+                control.update(_run(uploader.job(control, s3backup.control_key), "control "))
                 done["control"] = control
         finally:
             conn.close()
