@@ -1105,6 +1105,75 @@ async function logout() {
   location.reload();
 }
 
+// ---------- 원격 모드 연결: 개인 토큰과 설치 명령 ----------
+function installCommand() {
+  return [
+    "# fast-question 저장소 폴더에서 PowerShell 로 실행한다. 토큰을 물으면 붙여 넣는다",
+    `.venv\\Scripts\\python.exe scripts\\install.py --remote ${location.origin}`,
+  ].join("\r\n");
+}
+
+function openConnect(open) {
+  $("#connect").hidden = !open;
+  $("#connect-btn").classList.toggle("on", open);
+  $("#connect-btn").setAttribute("aria-expanded", String(open));
+  if (open) renderConnect();
+}
+
+async function revokeToken(t) {
+  if (!window.confirm(`토큰 "${t.name}" 을 폐기한다. 이 토큰을 쓰는 PC 는 더 연결되지 않는다.\n폐기를 하시겠습니까?`)) return;
+  try {
+    await api("DELETE", `/api/account/tokens/${t.id}`);
+  } catch (e) {
+    toast(e.message, { err: true });
+    return;
+  }
+  toast("토큰을 폐기했다.");
+  renderConnect();
+}
+
+// made: 방금 만든 토큰. 토큰 값은 이때 한 번만 보인다
+async function renderConnect(made) {
+  let tokens = [];
+  try {
+    tokens = (await api("GET", "/api/account/tokens")).tokens;
+  } catch (e) {
+    toast(e.message, { err: true });
+  }
+  const name = el("input", { class: "fld", "aria-label": "토큰 이름", placeholder: "PC 이름 (예: 회사 노트북)",
+    maxlength: 60, autocomplete: "off" });
+  const form = el("form", { class: "connect-form", onsubmit: async (ev) => {
+    ev.preventDefault();
+    try {
+      renderConnect(await api("POST", "/api/account/tokens", { name: name.value }));
+    } catch (e) {
+      toast(e.message, { err: true });
+    }
+  } }, name, el("button", { class: "btn primary", type: "submit" }, "토큰 만들기"));
+  const day = (iso) => (iso || "").slice(0, 10);
+  fill($("#connect"),
+    el("div", { class: "connect-head" }, el("span", { class: "label" }, "연결"),
+      el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
+    el("p", { class: "connect-note" },
+      "이 PC 의 Claude Code 와 즉석 질문 훅을 이 서버에 붙인다. 토큰은 PC 마다 하나씩 만든다."),
+    made ? el("div", { class: "token-made", role: "status" },
+      el("p", {}, `토큰 "${made.name}" 을 만들었다. 이 값은 지금만 보인다.`),
+      el("div", { class: "token-row" }, el("code", { class: "mono token-value" }, made.token),
+        ibtn("cp", "copy", "토큰 복사", "토큰 복사", () => copy(made.token, "토큰을 복사했다.")))) : null,
+    form,
+    tokens.length
+      ? el("ul", { class: "token-list" }, tokens.map((t) => el("li", { class: "token-item" + (t.expired ? " expired" : "") },
+        el("span", { class: "name" }, t.name),
+        el("span", { class: "meta mono", title: `만든 날 ${t.created_at}` },
+          t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀"),
+        ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
+      : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다."),
+    el("div", { class: "connect-cmd" }, el("span", { class: "label" }, "설치 명령 (PowerShell)"),
+      el("pre", { class: "mono" }, installCommand()),
+      ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(installCommand(), "설치 명령을 복사했다."))));
+  if (made) name.value = "";
+}
+
 // 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
 async function whoami() {
   try {
@@ -1197,6 +1266,7 @@ function init() {
   renderRecent();
 
   $("#logout-btn").addEventListener("click", logout);
+  $("#connect-btn").addEventListener("click", () => openConnect($("#connect").hidden));
 
   window.addEventListener("hashchange", openFromHash);
   // 다른 창(Claude 등록 등)에서 바뀐 내용을 화면으로 돌아올 때 다시 읽는다

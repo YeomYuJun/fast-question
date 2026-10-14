@@ -301,3 +301,34 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .login-btn:hover { text-decoration: none; }
 .login-err { margin: 0; font-size: 13px; color: var(--stale); word-break: keep-all; }
 @media (max-width: 420px) { .login { margin: 48px var(--space-4) 0; } }
+
+/* 연결: 개인 토큰과 설치 명령 */
+.connect {
+  margin: 0 0 var(--space-4); padding: var(--space-4); background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-lg); display: flex; flex-direction: column; gap: var(--space-3);
+}
+.connect .label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.connect-head { display: flex; align-items: center; }
+.connect-head .label { flex-grow: 1; }
+.connect-note { margin: 0; font-size: 12.5px; color: var(--muted); word-break: keep-all; }
+.connect-form { display: flex; gap: var(--space-2); }
+.connect-form .fld { flex: 1 1 auto; }
+.token-made {
+  display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); font-size: 12.5px;
+  background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: var(--radius-md);
+}
+.token-made p { margin: 0; }
+.token-row { display: flex; align-items: center; gap: var(--space-2); }
+.token-value { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.token-list { list-style: none; margin: 0; padding: 0; }
+.token-item { display: flex; align-items: center; gap: var(--space-2); padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.token-item:last-child { border-bottom: 0; }
+.token-item .name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.token-item .meta { font-size: 11.5px; color: var(--faint); }
+.token-item.expired .name { color: var(--faint); }
+.connect-cmd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; }
+.connect-cmd .label { grid-column: 1 / -1; }
+.connect-cmd pre {
+  margin: 0; padding: var(--space-2) var(--space-3); background: var(--surface-2); border-radius: var(--radius-md);
+  font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
