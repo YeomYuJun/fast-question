@@ -43,6 +43,7 @@ from kb.store import Store
 from mcp_server.http import RemoteMcp
 from web import auth
 from web.auth import ACCOUNT_KEY
+from web.limits import RateLimit
 
 STATIC = Path(__file__).resolve().parent / "static"
 # 화면 파일은 매번 서버에 확인하게 한다(안 바뀌었으면 304). 헤더가 없으면 브라우저가 옛 app.js 를
@@ -296,7 +297,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
-                      Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0])]
+                      Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0]),
+                      Middleware(RateLimit)]
     else:
         routes.insert(1, Route("/api/me", lambda r: JSONResponse({"mode": "local"})))
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
