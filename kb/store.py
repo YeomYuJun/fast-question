@@ -33,6 +33,9 @@ def dice(a: set[str], b: set[str]) -> float:
     return 2 * len(a & b) / (len(a) + len(b)) if a and b else 0.0
 
 
+# 원격 모드 계정당 상한(삭제한 행 포함, 행이 남아 공간을 쓴다)
+QUOTAS = {"qa": ("Q&A", 20_000), "category": ("분류", 500), "evidence": ("근거", 100_000)}
+
 REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없다. "
                         "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 쓴다.")
 
@@ -47,6 +50,14 @@ class Store:
         self.actor = actor
         self.analyzer = analyzer
         self.remote = remote
+
+    def _check_quota(self, table: str, adding: int = 1) -> None:
+        if not self.remote or adding <= 0:
+            return
+        label, limit = QUOTAS[table]
+        n = self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        if n + adding > limit:
+            raise ValidationError(f"이 계정에 {label} {n}건이 있다. 계정당 {limit}건(삭제한 것 포함)까지 둔다.", code="quota")
 
     def _capture(self, spec: dict) -> dict:
         if not self.remote:
@@ -188,6 +199,7 @@ class Store:
     def add_category(self, name: str, parent: int | str | None = None, description: str = "") -> dict:
         name = check_name(name)
         parent_id = self.resolve_category(parent) if parent not in (None, "") else None
+        self._check_quota("category")
         with self._writing() as c:
             cid = c.execute(
                 "INSERT INTO category(name, parent_id, description, created_by, updated_by) VALUES (?,?,?,?,?)",
@@ -270,6 +282,8 @@ class Store:
         cid = self.resolve_category(category)
         # 근거는 쓰기 전에 모두 캡처한다. 하나라도 틀리면 아무것도 쓰지 않는다
         captured = [self._capture(spec) for spec in evidence or []]
+        self._check_quota("qa")
+        self._check_quota("evidence", len(captured))
         if not force:
             sim = self.similar(q)
             if sim:
@@ -348,6 +362,7 @@ class Store:
     def add_evidence(self, qa_id: int, spec: dict) -> dict:
         self._qa_row(qa_id)
         e = self._capture(spec)
+        self._check_quota("evidence")
         with self._writing():
             self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
             self._recompute_state(qa_id)
@@ -480,6 +495,7 @@ class Store:
         if evidence is not None and self.remote:
             evidence, keep = self._split_kept(id, evidence)
         captured = [self._capture(spec) for spec in evidence] if evidence is not None else None  # 쓰기 전에 모두 캡처
+        self._check_quota("evidence", len(captured or []))
         sets["change_note"] = note
         steps = []
         if "question" in sets or "answer" in sets:
