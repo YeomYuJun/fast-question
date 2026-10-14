@@ -104,7 +104,7 @@ def test_metadata_documents(app):
     assert asm["scopes_supported"] == ["kb"] and asm["code_challenge_methods_supported"] == ["S256"]
     assert {"authorization_code", "refresh_token"} <= set(asm["grant_types_supported"])
     assert prm["resource"] == RESOURCE
-    assert [s.rstrip("/") for s in prm["authorization_servers"]] == [URL]
+    assert prm["authorization_servers"] == [URL]
     assert prm["scopes_supported"] == ["kb"]
 
 
