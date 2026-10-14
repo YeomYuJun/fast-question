@@ -56,8 +56,9 @@ def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
 
 
 def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=None,
-                 token_verifier=None) -> MCPServer:
-    server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth, token_verifier=token_verifier)
+                 auth_server_provider=None) -> MCPServer:
+    server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth,
+                       auth_server_provider=auth_server_provider)
 
     def run(fn: Callable[[Store], Any]) -> Any:
         store = open_store()
