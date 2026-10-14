@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import unicodedata
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -40,7 +41,11 @@ class Doc(NamedTuple):
     created_at: str
 
 
-_CACHE: dict[str, tuple[tuple, dict[int, Doc]]] = {}
+# DB 경로별 메모리 사본. 원격 모드는 사용자마다 DB 가 달라 사본이 사용자 수만큼 생기므로, 가장 오래 쓰지 않은 것부터
+# 비워 DB 수와 항목 합계를 상한 아래로 둔다(1만 건 사본이 수 MB). 밀려난 DB 는 다음 검색에서 다시 읽는다
+CACHE_MAX_DBS = 200
+CACHE_MAX_DOCS = 500_000
+_CACHE: "OrderedDict[str, tuple[tuple, dict[int, Doc]]]" = OrderedDict()
 _LOCK = threading.Lock()
 
 
@@ -52,17 +57,28 @@ def _corpus(conn) -> dict[int, Doc]:
     db = conn.execute("PRAGMA database_list").fetchone()[2]
     stamp = tuple(conn.execute(
         "SELECT (SELECT ifnull(max(id), 0) FROM revision), (SELECT ifnull(max(id), 0) FROM qa)").fetchone())
-    cached = _CACHE.get(db)
-    if cached and cached[0] == stamp:
-        return cached[1]
     with _LOCK:
+        cached = _CACHE.get(db)
+        if cached and cached[0] == stamp:
+            _CACHE.move_to_end(db)
+            return cached[1]
         docs = {
             r[0]: Doc(r[1], r[2], _flat(r[1]) + "\0" + _flat(r[2]), r[3], r[4], bool(r[5]), r[6])
             for r in conn.execute(
                 "SELECT id, question, answer, updated_at, category_id, deleted_at IS NOT NULL, created_at FROM qa")
         }
         _CACHE[db] = (stamp, docs)
+        _CACHE.move_to_end(db)
+        _evict()
     return docs
+
+
+def _evict() -> None:
+    """_LOCK 안에서 부른다. 방금 넣은 사본(맨 뒤)은 남긴다."""
+    total = sum(len(docs) for _, docs in _CACHE.values())
+    while len(_CACHE) > 1 and (len(_CACHE) > CACHE_MAX_DBS or total > CACHE_MAX_DOCS):
+        _, (_, docs) = _CACHE.popitem(last=False)
+        total -= len(docs)
 
 
 def _field_flat(d: Doc, field: str | None) -> str:
