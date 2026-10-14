@@ -1,7 +1,8 @@
 """원격 모드의 제어 DB(data_dir/control.sqlite3): 계정, 로그인 신원, 브라우저 세션, 진행 중인 로그인.
 사용자 KB 와 다른 파일이고 KB 스키마를 깔지 않는다.
 
-표는 쓰는 단계에서 CREATE TABLE IF NOT EXISTS 로 더한다. 버전은 meta 의 control_schema_version 이다.
+표는 기능별 DDL 상수(DDL_PARTS)에 CREATE TABLE IF NOT EXISTS 로 더한다. 버전(meta 의 control_schema_version)은
+DDL 전체의 sha256 이라 손으로 올리지 않는다. DDL 이 바뀐 뒤 처음 연결할 때 전체 DDL 을 다시 실행한다.
 - 신원(provider, provider_sub)은 계정 하나에 묶인다. 공급자가 다르면 계정도 다르다(이메일로 합치지 않는다).
 - 세션 쿠키 값은 256비트 난수이고 표에는 sha256 만 둔다. 비활동 30일 또는 생성 90일이 지나면 끝난다.
 - 로그인 상태(state, PKCE verifier)는 10분 안에 한 번만 쓸 수 있다.
@@ -16,7 +17,6 @@ from pathlib import Path
 
 from kb.db import NOW, get_meta, open_db, tx
 
-CONTROL_SCHEMA_VERSION = "3"
 PROVIDERS = ("github", "google")
 SESSION_IDLE = timedelta(days=30)
 SESSION_MAX = timedelta(days=90)
@@ -26,7 +26,7 @@ TOKEN_PREFIX = "fq_pat_"
 TOKEN_LIFETIME = timedelta(days=180)
 TOKEN_MAX = 10
 
-DDL = f"""
+ACCOUNT_DDL = f"""
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 CREATE TABLE IF NOT EXISTS account (
@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS identity (
     PRIMARY KEY (provider, provider_sub)
 );
 CREATE INDEX IF NOT EXISTS identity_account ON identity(account_id);
+"""
 
+SESSION_DDL = """
 CREATE TABLE IF NOT EXISTS session (
     id_hash TEXT PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES account(id),
@@ -63,7 +65,9 @@ CREATE TABLE IF NOT EXISTS login_state (
     next TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+"""
 
+TOKEN_DDL = """
 CREATE TABLE IF NOT EXISTS personal_token (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES account(id),
@@ -75,10 +79,12 @@ CREATE TABLE IF NOT EXISTS personal_token (
     revoked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS personal_token_account ON personal_token(account_id);
-
-INSERT INTO meta(key, value) VALUES ('control_schema_version', '{CONTROL_SCHEMA_VERSION}')
-ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 """
+
+# 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL)
+DDL = "".join(DDL_PARTS)
+CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
 
 class LoginRefused(Exception):
@@ -99,7 +105,9 @@ def _version(conn: sqlite3.Connection) -> str | None:
 def connect_control(path: Path | str) -> sqlite3.Connection:
     conn = open_db(path)
     if _version(conn) != CONTROL_SCHEMA_VERSION:
-        conn.executescript("BEGIN IMMEDIATE;\n" + DDL + "\nCOMMIT;")
+        conn.executescript("BEGIN IMMEDIATE;\n" + DDL + "\nINSERT INTO meta(key, value) VALUES "
+                           f"('control_schema_version', '{CONTROL_SCHEMA_VERSION}') "
+                           "ON CONFLICT(key) DO UPDATE SET value = excluded.value;\nCOMMIT;")
     return conn
 
 

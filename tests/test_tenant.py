@@ -69,3 +69,17 @@ def test_accounts_survive_reopen(data_dir):
         assert get_account(conn, b + 100) is None
     finally:
         conn.close()
+
+
+def test_control_db_rebuilds_when_ddl_changes(data_dir, monkeypatch):
+    from kb import control
+    path = tenant.control_path(data_dir)
+    connect_control(path).close()
+    monkeypatch.setattr(control, "DDL", control.DDL + "CREATE TABLE IF NOT EXISTS later_feature (id INTEGER PRIMARY KEY);")
+    monkeypatch.setattr(control, "CONTROL_SCHEMA_VERSION", "changed")
+    conn = connect_control(path)
+    try:
+        assert conn.execute("SELECT count(*) FROM sqlite_master WHERE name = 'later_feature'").fetchone()[0] == 1
+        assert conn.execute("SELECT value FROM meta WHERE key = 'control_schema_version'").fetchone()[0] == "changed"
+    finally:
+        conn.close()
