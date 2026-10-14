@@ -327,3 +327,27 @@ def test_local_mode_has_no_login(tmp_path, analyzer):
     with TestClient(app, base_url="http://127.0.0.1:8765") as c:
         assert c.get("/api/me").json() == {"mode": "local"}
         assert c.get("/auth/login/google", follow_redirects=False).status_code == 404
+
+
+def test_signup_limit_per_ip(tmp_path):
+    conn = control.connect_control(tmp_path / "control.sqlite3")
+    t0 = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    try:
+        for n in range(control.SIGNUP_PER_HOUR):
+            control.login_identity(conn, "google", f"s{n}", ip="1.2.3.4", now=t0)
+        with pytest.raises(control.SignupLimited):
+            control.login_identity(conn, "google", "s-more", ip="1.2.3.4", now=t0)
+        assert control.login_identity(conn, "google", "s0", ip="1.2.3.4", now=t0)[1] is False  # 기존 계정은 들어온다
+        assert control.login_identity(conn, "google", "s-other", ip="5.6.7.8", now=t0)[1] is True
+        assert control.login_identity(conn, "google", "s-more", ip="1.2.3.4", now=t0 + timedelta(hours=1, minutes=1))[1] is True
+    finally:
+        conn.close()
+
+
+def test_signup_limit_reaches_login_screen(app, idp):
+    codes = []
+    for n in range(control.SIGNUP_PER_HOUR + 1):
+        idp.sub = f"new-{n}"
+        with client(app) as c:
+            codes.append(login(c).headers["location"])
+    assert codes[:-1] == ["/"] * control.SIGNUP_PER_HOUR and codes[-1] == "/?login_error=limit"

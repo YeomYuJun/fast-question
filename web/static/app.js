@@ -1067,6 +1067,7 @@ const LOGIN_ERRORS = {
   state: "로그인 시간이 지났거나 다른 창에서 시작했다. 다시 로그인한다.",
   provider: "로그인 공급자의 응답을 확인하지 못했다. 다시 시도한다.",
   closed: "이 계정은 로그인할 수 없다.",
+  limit: "이 주소에서 한 시간 안에 만든 계정이 너무 많다. 한 시간 뒤 다시 시도한다.",
 };
 
 function showLogin(providers) {

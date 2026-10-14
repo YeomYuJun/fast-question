@@ -10,7 +10,8 @@
   ACCOUNT_KEY 에, 어느 쪽인지("session"/"token")를 AUTH_KIND_KEY 에 넣는다. 이 값을 넣는 곳은 이 미들웨어뿐이다.
 - 개인 토큰 관리(/api/account/tokens)와 탈퇴(/api/account/delete)는 브라우저 세션으로만 한다.
 - client secret 은 환경 변수 FQ_GITHUB_SECRET, FQ_GOOGLE_SECRET. client_id 와 secret 이 둘 다 있는 공급자만 켠다.
-로그인 실패는 /?login_error=<denied|state|provider|closed> 로 돌려보내고 화면이 문구를 보인다.
+로그인 실패는 /?login_error=<denied|state|provider|closed|limit> 로 돌려보내고 화면이 문구를 보인다.
+새 계정은 IP 당 한 시간에 5개까지 만든다(kb/control.py SIGNUP_PER_HOUR).
 """
 import base64
 import hashlib
@@ -242,7 +243,10 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return failed("provider")
         try:
             account_id, created = await run_in_threadpool(db, control.login_identity, p.name, sub, name,
-                                                          cfg.allowed_logins)
+                                                          cfg.allowed_logins, request.client.host if request.client else "?")
+        except control.SignupLimited:
+            log.warning("%s 가입 제한: 같은 IP 에서 한 시간에 %s개", p.name, control.SIGNUP_PER_HOUR)
+            return failed("limit")
         except control.LoginRefused:
             log.warning("%s 로그인 거부: 허용 목록에 없거나 탈퇴한 계정", p.name)
             return failed("closed")

@@ -25,6 +25,7 @@ LOGIN_STATE_TTL = timedelta(minutes=10)
 TOKEN_PREFIX = "fq_pat_"
 TOKEN_LIFETIME = timedelta(days=180)
 TOKEN_MAX = 10
+SIGNUP_PER_HOUR = 5
 
 ACCOUNT_DDL = f"""
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -121,14 +122,24 @@ CREATE TABLE IF NOT EXISTS oauth_token (
 CREATE INDEX IF NOT EXISTS oauth_token_grant ON oauth_token(grant_id);
 """
 
+# 계정을 새로 만든 IP 와 시각(IP 당 가입 수 제한). 하루 지난 행은 가입 때 지운다
+SIGNUP_DDL = """
+CREATE TABLE IF NOT EXISTS signup (ip TEXT NOT NULL, at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS signup_ip_at ON signup(ip, at);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
 
 class LoginRefused(Exception):
     """허용 목록(allowed_logins)에 없는 신원이거나 탈퇴한 계정이다."""
+
+
+class SignupLimited(LoginRefused):
+    """같은 IP 에서 한 시간 안에 SIGNUP_PER_HOUR 개 넘게 계정을 만들려 했다."""
 
 
 class TokenRefused(ValueError):
@@ -180,8 +191,11 @@ def account_providers(conn: sqlite3.Connection, account_id: int) -> list[str]:
 
 
 def login_identity(conn: sqlite3.Connection, provider: str, sub: str, display_name: str = "",
-                   allowed: frozenset[str] | None = None) -> tuple[int, bool]:
-    """신원의 계정 id 와 새로 만들었는지. allowed 가 비어 있지 않으면 "provider:sub" 가 그 안에 있어야 한다."""
+                   allowed: frozenset[str] | None = None, ip: str | None = None,
+                   now: datetime | None = None) -> tuple[int, bool]:
+    """신원의 계정 id 와 새로 만들었는지. allowed 가 비어 있지 않으면 "provider:sub" 가 그 안에 있어야 한다.
+    ip 를 주면 새 계정을 만들 때 그 IP 의 한 시간 가입 수를 SIGNUP_PER_HOUR 로 막는다(이미 있는 계정 로그인은 막지 않는다)."""
+    t = _now(now)
     if allowed and f"{provider}:{sub}" not in allowed:
         raise LoginRefused(f"{provider}:{sub}")
     with tx(conn):
@@ -191,6 +205,13 @@ def login_identity(conn: sqlite3.Connection, provider: str, sub: str, display_na
             if row["deleted_at"] is not None:
                 raise LoginRefused(f"{provider}:{sub}")
             return row["id"], False
+        if ip is not None:
+            conn.execute("DELETE FROM signup WHERE at < ?", (_iso(t - timedelta(days=1)),))
+            recent = conn.execute("SELECT count(*) FROM signup WHERE ip = ? AND at >= ?",
+                                  (ip, _iso(t - timedelta(hours=1)))).fetchone()[0]
+            if recent >= SIGNUP_PER_HOUR:
+                raise SignupLimited(ip)
+            conn.execute("INSERT INTO signup(ip, at) VALUES (?, ?)", (ip, _iso(t)))
         account_id = conn.execute("INSERT INTO account(display_name) VALUES (?)",
                                   (display_name[:100],)).lastrowid
         conn.execute("INSERT INTO identity(provider, provider_sub, account_id) VALUES (?, ?, ?)",
