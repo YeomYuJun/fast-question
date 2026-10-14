@@ -3,7 +3,8 @@
 계정 id 는 제어 DB(kb/control.py) account 표의 양의 정수만 받는다. 문자열을 받지 않아 경로 조각이 끼어들 수 없다.
 탈퇴한 계정 폴더는 deleted/<id>-<UTC 시각>/ 으로 옮긴다.
 """
-from datetime import datetime, timezone
+import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 KB_FILE = "kb.sqlite3"
@@ -45,3 +46,22 @@ def retire(data_dir: Path, account_id: int, now: datetime | None = None) -> Path
     dst.parent.mkdir(parents=True, exist_ok=True)
     src.replace(dst)
     return dst
+
+
+def purge_deleted(data_dir: Path, days: int = 30, now: datetime | None = None) -> list[str]:
+    """deleted/ 아래에서 옮긴 지 days 일이 지난 탈퇴 폴더를 지우고 지운 폴더 이름을 돌려준다."""
+    root = data_dir / "deleted"
+    if not root.is_dir():
+        return []
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+    gone = []
+    for d in sorted(root.iterdir()):
+        _, _, stamp = d.name.partition("-")
+        try:
+            moved = datetime.strptime(stamp, "%Y%m%dT%H%M%S%fZ").replace(tzinfo=timezone.utc)
+        except ValueError:  # 이 함수가 만든 이름이 아니면 건드리지 않는다
+            continue
+        if moved < cutoff and d.is_dir():
+            shutil.rmtree(d)
+            gone.append(d.name)
+    return gone

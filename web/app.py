@@ -179,6 +179,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                     log.exception("기본 가이드를 넣지 못했다: %s", db)
             return conn
 
+    if mcp is not None:
+        mcp.opener = open_kb  # MCP 로 처음 연결한 계정도 기본 가이드를 받는다
+
     def unauthorized() -> JSONResponse:
         return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
 

@@ -120,7 +120,7 @@ def test_full_flow_then_kb_search(cfg, app):
                                             "answer": "OAuth 토큰의 계정 DB 에 쓴다."})
     assert not err and res["item"]["created_by"] == "claude"
     err, found = call(app, access, "kb_search", {"query": "OAuth"})
-    assert not err and [h["id"] for h in found["hits"]] == [res["item"]["id"]]
+    assert not err and [h["id"] for h in found["hits"] if h["created_by"] != "system"] == [res["item"]["id"]]
     assert tenant.db_path_for(cfg.data_dir, account_id).exists()
 
 
@@ -319,7 +319,7 @@ def test_personal_token_and_oauth_token_share_mcp(cfg, app):
         assert mcp_status(c, pat) == 200
         _, tok = tokens(c)
         assert mcp_status(c, tok["access_token"]) == 200
-    assert call(app, pat, "kb_categories")[1]["categories"] == []
+    assert [c["name"] for c in call(app, pat, "kb_categories")[1]["categories"]] == ["fast-question"]  # 기본 가이드만
 
 
 def test_oauth_token_of_account_a_cannot_see_account_b(app, idp):
@@ -332,9 +332,11 @@ def test_oauth_token_of_account_a_cannot_see_account_b(app, idp):
     assert not call(app, a["access_token"], "kb_add_category", {"name": "이관"})[0]
     assert not call(app, a["access_token"], "kb_add", {"category": "이관", "question": "A 의 질문",
                                                        "answer": "A 의 답이다."})[0]
-    assert call(app, b["access_token"], "kb_search", {"query": "질문"})[1]["hits"] == []
-    assert call(app, b["access_token"], "kb_categories")[1]["categories"] == []
-    assert len(call(app, a["access_token"], "kb_search", {"query": "질문"})[1]["hits"]) == 1
+    hits = call(app, b["access_token"], "kb_search", {"query": "질문"})[1]["hits"]
+    assert [h for h in hits if h["created_by"] != "system"] == []  # 기본 가이드만
+    assert [c["name"] for c in call(app, b["access_token"], "kb_categories")[1]["categories"]] == ["fast-question"]
+    hits = call(app, a["access_token"], "kb_search", {"query": "질문"})[1]["hits"]
+    assert len([h for h in hits if h["created_by"] != "system"]) == 1
 
 
 def test_deleted_account_tokens_are_refused(cfg, app):

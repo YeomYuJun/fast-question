@@ -30,13 +30,15 @@ class RemoteMcp:
         self.cfg, self.analyzer = cfg, analyzer
         self.control_path = tenant.control_path(cfg.data_dir)
         self._app = None
+        # 사용자 DB 를 여는 함수. web/app.py 가 새 계정 DB 에 기본 가이드를 넣는 open_kb 로 바꿔 끼운다
+        self.opener = connect
 
     def open_store(self) -> Store:
         token = get_access_token()
         if token is None or not (token.subject or "").isdigit():
             raise ValueError("인증된 계정이 없다.")
         path = tenant.db_path_for(self.cfg.data_dir, int(token.subject))
-        return Store(connect(path), "claude", analyzer=self.analyzer, remote=True)
+        return Store(self.opener(path), "claude", analyzer=self.analyzer, remote=True)
 
     def build(self):
         url = self.cfg.public_url

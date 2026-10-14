@@ -52,6 +52,8 @@ docker compose -f deploy/compose.yaml up -d --build
 - 로그: 앱 로그는 표준 에러로 나가 `docker compose -f deploy/compose.yaml logs app` 로 본다. `/data/logs/web.log` 에도 남는다.
 - 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본).
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
+  하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트와 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
+- 앱은 Caddy 뒤에서만 받는다(compose 의 app 은 `expose` 만 한다). 요청·가입 제한이 실제 IP 로 걸리도록 원격 모드의 uvicorn 은 `X-Forwarded-For` 를 믿는다.
 
 ## 형태소 사용자 단어
 

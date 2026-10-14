@@ -60,7 +60,10 @@ def main() -> None:
              f"원격 모드 {cfg.public_url}, 데이터 {cfg.data_dir}" if cfg.mode == "remote" else f"DB {cfg.db_path}")
     seed_guide(cfg, log)
     # log_config=None: uvicorn 로그도 위 핸들러로 간다. 접근 로그는 warning 수준이라 남지 않는다
-    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning", log_config=None)
+    # 원격 모드는 역방향 프록시(Caddy) 뒤에서만 돈다(deploy/compose.yaml 의 app 은 expose 만 하고 밖으로 열지 않는다).
+    # 프록시가 넣은 X-Forwarded-For 로 실제 클라이언트 IP 를 써야 요청 제한·가입 제한이 IP 별로 걸린다
+    proxied = {"proxy_headers": True, "forwarded_allow_ips": "*"} if cfg.mode == "remote" else {}
+    uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning", log_config=None, **proxied)
 
 
 if __name__ == "__main__":

@@ -66,8 +66,9 @@ def test_accounts_are_isolated(cfg, app):
     _, b = new_token(cfg)
     seed(app, a)
     call(app, a, "kb_add", {"category": "이관", "question": "A 의 질문", "answer": "A 의 답이다."})
-    assert call(app, b, "kb_search", {"query": "질문"})[1]["hits"] == []
-    assert call(app, b, "kb_categories")[1]["categories"] == []
+    # 새 계정에는 기본 가이드(분류 fast-question)만 있다
+    assert [h for h in call(app, b, "kb_search", {"query": "질문"})[1]["hits"] if h["created_by"] != "system"] == []
+    assert [c["name"] for c in call(app, b, "kb_categories")[1]["categories"]] == ["fast-question"]
 
 
 def test_mcp_without_valid_token_is_401(cfg, app):

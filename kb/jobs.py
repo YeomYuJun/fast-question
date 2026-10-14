@@ -12,7 +12,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kb import s3backup, tenant
+from kb import oauth_store, s3backup, tenant
 from kb.config import Config
 from kb.control import connect_control
 from kb.db import NOW, connect, get_meta
@@ -21,6 +21,9 @@ from kb.store import Store
 
 log = logging.getLogger("fast-question.jobs")
 BACKUP_EVERY_HOURS = 24
+CLEANUP_EVERY_HOURS = 24
+EXPIRE_VERDICT_DAYS = 30  # 원격 모드: 사용자 PC 가 이만큼 판정하지 않은 근거는 unknown
+DELETED_KEEP_DAYS = 30  # 탈퇴 폴더(deleted/)를 지우기까지
 
 
 def backup(conn: sqlite3.Connection, backup_dir: Path, keep: int, today: date | None = None,
@@ -65,6 +68,36 @@ def _run(jobs: list, label: str = "") -> dict:
             log.exception("%s%s 실패", label, name)
             done[name] = {"error": f"{type(e).__name__}: {e}"}
     return done
+
+
+def _mark(conn: sqlite3.Connection, key: str) -> None:
+    conn.execute(f"INSERT INTO meta(key, value) VALUES (?, {NOW}) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                 (key,))
+
+
+def _expire_job(conn: sqlite3.Connection, now: datetime) -> list:
+    """원격 모드 사용자 DB: 오래 판정되지 않은 근거를 unknown 으로(하루 한 번)."""
+    if not _due(conn, "last_expire", CLEANUP_EVERY_HOURS, now):
+        return []
+
+    def job() -> dict:
+        n = Store(conn, "system", remote=True).expire_verdicts(EXPIRE_VERDICT_DAYS)
+        _mark(conn, "last_expire")
+        return {"unknown": n}
+    return [("expire", job)]
+
+
+def _cleanup_job(cfg: Config, conn: sqlite3.Connection, now: datetime) -> list:
+    """제어 DB: 1년 안 쓴 OAuth 클라이언트와 30일 지난 탈퇴 폴더를 지운다(하루 한 번)."""
+    if not _due(conn, "last_cleanup", CLEANUP_EVERY_HOURS, now):
+        return []
+
+    def job() -> dict:
+        out = {"oauth_clients": oauth_store.delete_idle_clients(conn),
+               "deleted_dirs": tenant.purge_deleted(cfg.data_dir, DELETED_KEEP_DAYS, now)}
+        _mark(conn, "last_cleanup")
+        return out
+    return [("cleanup", job)]
 
 
 def _reindex_job(conn: sqlite3.Connection, analyzer) -> list:
@@ -130,7 +163,7 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
             if _due(conn, "last_backup", BACKUP_EVERY_HOURS, now):
                 backup_dir = tenant.user_dir(cfg.data_dir, account_id) / "backup"
                 jobs.append(("backup", lambda: {"path": str(backup(conn, backup_dir, cfg.backup_keep))}))
-            result = _run(jobs + _reindex_job(conn, analyzer), label)
+            result = _run(jobs + _reindex_job(conn, analyzer) + _expire_job(conn, now), label)
             result.update(_run(uploader.job(result, lambda p, f: s3backup.user_key(p, account_id, f)), label))
             if result:
                 users[account_id] = result
@@ -149,6 +182,9 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
                     conn, cfg.data_dir / "backup", cfg.backup_keep, name="control"))})], "control ")
                 control.update(_run(uploader.job(control, s3backup.control_key), "control "))
                 done["control"] = control
+            cleaned = _run(_cleanup_job(cfg, conn, now), "control ")
+            if cleaned:
+                done.setdefault("control", {}).update(cleaned)
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001

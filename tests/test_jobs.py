@@ -181,7 +181,7 @@ def test_run_due_all_backs_up_each_user_and_control_db(tmp_path):
     done = run_due_all(cfg)
     assert set(done["users"]) == {1, 2}
     for acc in (1, 2):
-        assert set(done["users"][acc]) == {"backup"}  # 근거 재검증은 서버에서 돌지 않는다
+        assert set(done["users"][acc]) == {"backup", "expire"}  # 근거 재검증은 서버에서 돌지 않는다
         copies = list((tenant.user_dir(cfg.data_dir, acc) / "backup").glob("kb-*.sqlite3"))
         assert len(copies) == 1
         copy = sqlite3.connect(copies[0])
