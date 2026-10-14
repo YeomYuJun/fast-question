@@ -353,6 +353,9 @@ class Store:
             self._recompute_state(qa_id)
         return self.get_qa(qa_id)
 
+    def evidence_spec(self, evidence_id: int) -> dict:
+        return spec_of(self._evidence_row(evidence_id))
+
     def recapture_evidence(self, evidence_id: int, captured: dict | None = None) -> dict:
         """근거를 지금 상태로 다시 기록한다. git 근거는 현재 HEAD 기준이 된다.
         원격 모드는 로컬 프록시가 그 PC 에서 다시 캡처한 값(captured)을 받는다."""

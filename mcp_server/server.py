@@ -179,18 +179,20 @@ def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=
     def kb_evidence(action: str, id: int | None = None, evidence_id: int | None = None,
                     spec: dict | None = None) -> dict:
         """근거를 다룬다. action=add(id, spec), recapture(evidence_id: 근거를 다시 읽은 뒤 지금 상태로 재기록),
-        archive(evidence_id). 결과는 그 Q&A 전체다."""
+        archive(evidence_id). 결과는 그 Q&A 전체다. spec(evidence_id) 은 그 근거를 다시 캡처할 spec 만 돌려준다."""
         def go(s: Store):
             if action == "add":
                 if id is None or not spec:
                     raise KbError("add 에는 id 와 spec 이 필요하다.")
                 check_claude_qa(evidence=[spec])
                 return _detail(s.add_evidence(id, spec))
-            if action in ("recapture", "archive"):
+            if action in ("recapture", "archive", "spec"):
                 if evidence_id is None:
                     raise KbError(f"{action} 에는 evidence_id 가 필요하다.")
                 if action == "archive":
                     return _detail(s.archive_evidence(evidence_id))
+                if action == "spec":
+                    return {"spec": s.evidence_spec(evidence_id)}
                 return _detail(s.recapture_evidence(evidence_id, captured=(spec or {}).get("captured")))
             raise KbError(f"알 수 없는 근거 동작이다: {action}")
         return run(go)
