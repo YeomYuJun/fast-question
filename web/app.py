@@ -14,9 +14,12 @@ AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /
 import dataclasses
 import json
 import logging
+import os
 import re
 import sqlite3
+import tempfile
 import threading
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
@@ -27,6 +30,7 @@ from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware import Middleware
 from starlette.requests import Request
+from starlette.background import BackgroundTask
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
@@ -35,6 +39,7 @@ from kb import tenant
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
+from kb.dbcopy import copy_db
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
 from kb.jobs import run_due
@@ -43,7 +48,7 @@ from kb.store import Store
 from mcp_server.http import RemoteMcp
 from web import auth
 from web.auth import ACCOUNT_KEY
-from web.limits import RateLimit
+from web.limits import BodyLimit, RateLimit
 
 STATIC = Path(__file__).resolve().parent / "static"
 # 화면 파일은 매번 서버에 확인하게 한다(안 바뀌었으면 304). 헤더가 없으면 브라우저가 옛 app.js 를
@@ -237,6 +242,31 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         return Response(text, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
+    async def export_db(request: Request) -> Response:
+        """내 DB 전체를 SQLite 파일 하나로 내려준다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."""
+        db = db_for(request)
+        if db is None:
+            return unauthorized()
+
+        def work() -> str:
+            fd, tmp = tempfile.mkstemp(prefix="fq-export-", suffix=".sqlite3")
+            os.close(fd)
+            conn = connect(db)
+            try:
+                copy_db(conn, Path(tmp))
+            finally:
+                conn.close()
+            return tmp
+
+        try:
+            tmp = await run_in_threadpool(work)
+        except sqlite3.OperationalError as e:
+            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+                                 "code": "busy"}, status_code=503)
+        return FileResponse(tmp, media_type="application/vnd.sqlite3",
+                            filename=f"fast-question-{datetime.now():%Y%m%d}.sqlite3",
+                            background=BackgroundTask(os.unlink, tmp))
+
     def pid(request: Request, name: str = "id") -> int:
         return int(request.path_params[name])
 
@@ -277,6 +307,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
             pid(r), b["version"], name=b.get("name"), description=b.get("description"))), methods=["PATCH"]),
         Route("/api/export", export),
+        Route("/api/export/db", export_db),
         Route("/api/categories/{id:int}/impact", api(lambda s, r, b: s.category_impact(pid(r)))),
         Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
             pid(r), b["version"])), methods=["POST"]),
@@ -297,6 +328,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
+                      Middleware(BodyLimit),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0]),
                       Middleware(RateLimit)]
     else:

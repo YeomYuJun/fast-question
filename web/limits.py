@@ -1,4 +1,5 @@
-"""원격 모드 요청 제한. 프로세스 메모리의 토큰 버킷이다(인스턴스 1대 전제). 넘치면 429 와 Retry-After.
+"""원격 모드 요청 제한. RateLimit 은 프로세스 메모리의 토큰 버킷이다(인스턴스 1대 전제). 넘치면 429 와 Retry-After.
+BodyLimit 은 요청 본문을 1 MB(DB 가져오기 /api/import/db 는 200 MB)로 막고 넘치면 413 이다.
 
 - /mcp: 계정(또는 Bearer 토큰)당 분당 120
 - /register(OAuth 동적 클라이언트 등록): IP 당 분당 5
@@ -76,3 +77,49 @@ class RateLimit:
                     await resp(scope, receive, send)
                     return
         await self.app(scope, receive, send)
+
+
+class BodyLimit:
+    """요청 본문 크기 제한. 넘치면 413. 경로별로 더 큰 상한을 줄 수 있다(DB 가져오기 등)."""
+
+    def __init__(self, app, max_bytes: int = 1024 * 1024, overrides: dict[str, int] | None = None):
+        self.app, self.max_bytes = app, max_bytes
+        self.overrides = {"/api/import/db": 200 * 1024 * 1024, **(overrides or {})}
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = self.overrides.get(scope["path"], self.max_bytes)
+        too_big = JSONResponse({"error": f"요청 본문이 {limit // (1024 * 1024)} MB 를 넘는다.", "code": "too_large"},
+                               status_code=413)
+        for k, v in scope["headers"]:
+            if k == b"content-length" and v.isdigit() and int(v) > limit:
+                await too_big(scope, receive, send)
+                return
+        seen = 0
+        started = False
+
+        async def counted_receive():
+            nonlocal seen
+            msg = await receive()
+            if msg["type"] == "http.request":
+                seen += len(msg.get("body", b""))
+                if seen > limit:
+                    raise _TooLarge
+            return msg
+
+        async def tracked_send(msg):
+            nonlocal started
+            started = True
+            await send(msg)
+
+        try:
+            await self.app(scope, counted_receive, tracked_send)
+        except _TooLarge:
+            if not started:  # Content-Length 없이 보낸 본문(chunked)이 넘친 경우
+                await too_big(scope, receive, send)
+
+
+class _TooLarge(Exception):
+    pass
