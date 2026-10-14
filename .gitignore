@@ -8,3 +8,6 @@ __pycache__/
 .superpowers/
 .claude/
 design/
+deploy/.env
+deploy/aws.env
+deploy/config.json
