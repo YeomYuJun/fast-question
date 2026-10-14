@@ -1,6 +1,9 @@
 """원격 MCP(Streamable HTTP, <public_url>/mcp). 도구는 mcp_server/server.py 의 16개 그대로이고 쓰기 주체는 claude 다.
 
-Bearer 토큰의 계정이 DB 파일을 정한다(AccessToken.subject = 계정 id). 지금 받는 토큰은 개인 토큰(fq_pat_…)이다.
+Bearer 토큰의 계정이 DB 파일을 정한다(AccessToken.subject = 계정 id). 받는 토큰은 OAuth access token 과
+개인 토큰(fq_pat_…)이고, 둘 다 web/oauth_as.py 의 KbAuthProvider.load_access_token 이 확인한다. 같은 앱에 SDK 의
+OAuth 경로(/register /authorize /token /revoke, /.well-known/oauth-authorization-server)와
+/.well-known/oauth-protected-resource/mcp 가 있다.
 web/app.py 가 이 앱을 마지막 라우트로 붙인다. Mount 된 하위 앱의 lifespan 은 돌지 않으므로 세션 매니저는
 web/app.py 의 lifespan 이 RemoteMcp.running() 으로 시작한다. 세션 매니저는 한 번만 시작할 수 있어 lifespan 마다
 서버를 새로 만든다. 세션을 메모리에 두지 않는다(stateless_http).
@@ -9,36 +12,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from mcp.server.auth.middleware.auth_context import get_access_token
-from mcp.server.auth.provider import AccessToken
-from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.transport_security import TransportSecuritySettings
-from starlette.concurrency import run_in_threadpool
 
-from kb import control, tenant
+from kb import tenant
 from kb.config import Config
 from kb.db import connect
 from kb.store import Store
 from mcp_server.server import build_server
-
-SCOPE = "kb"
-
-
-class PersonalTokenVerifier:
-    def __init__(self, control_path: Path):
-        self.control_path = control_path
-
-    def _find(self, token: str) -> dict | None:
-        conn = control.connect_control(self.control_path)
-        try:
-            return control.token_account(conn, token)
-        finally:
-            conn.close()
-
-    async def verify_token(self, token: str) -> AccessToken | None:
-        found = await run_in_threadpool(self._find, token)
-        if found is None:
-            return None
-        return AccessToken(token=token, client_id="personal-token", scopes=[SCOPE], subject=str(found["account_id"]))
+from web.oauth_as import SCOPE, KbAuthProvider
 
 
 class RemoteMcp:
@@ -58,9 +40,13 @@ class RemoteMcp:
 
     def build(self):
         url = self.cfg.public_url
-        auth = AuthSettings(issuer_url=url, resource_server_url=f"{url}/mcp", required_scopes=[SCOPE])
+        auth = AuthSettings(
+            issuer_url=url, resource_server_url=f"{url}/mcp", required_scopes=[SCOPE],
+            client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=[SCOPE],
+                                                                  default_scopes=[SCOPE]),
+            revocation_options=RevocationOptions(enabled=True))
         server = build_server(self.open_store, remote=True, auth=auth,
-                              token_verifier=PersonalTokenVerifier(self.control_path))
+                              auth_server_provider=KbAuthProvider(self.control_path, url))
         host = url.split("://", 1)[1]
         security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=[host],
                                              allowed_origins=[url])

@@ -81,8 +81,48 @@ CREATE TABLE IF NOT EXISTS personal_token (
 CREATE INDEX IF NOT EXISTS personal_token_account ON personal_token(account_id);
 """
 
+# 원격 MCP OAuth(접근 함수는 kb/oauth_store.py). 시각은 SDK 모델과 같은 epoch 초다.
+# 코드·토큰은 sha256 만 둔다. 클라이언트 비밀값은 SDK 가 평문으로 비교해 info_json 에 그대로 있다.
+OAUTH_DDL = """
+CREATE TABLE IF NOT EXISTS oauth_client (
+    client_id TEXT PRIMARY KEY,
+    info_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_token_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS pending_auth (
+    id TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL REFERENCES oauth_client(client_id) ON DELETE CASCADE,
+    params_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_code (
+    hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL REFERENCES oauth_client(client_id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES account(id),
+    params_json TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    grant_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS oauth_token (
+    hash TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+    grant_id TEXT NOT NULL,
+    client_id TEXT NOT NULL REFERENCES oauth_client(client_id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES account(id),
+    scopes TEXT NOT NULL,
+    resource TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS oauth_token_grant ON oauth_token(grant_id);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 

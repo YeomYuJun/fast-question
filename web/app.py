@@ -46,7 +46,7 @@ from kb.jobs import run_due
 from kb.morph import Analyzer
 from kb.store import Store
 from mcp_server.http import RemoteMcp
-from web import auth
+from web import auth, oauth_as
 from web.auth import ACCOUNT_KEY
 from web.limits import BodyLimit, RateLimit
 
@@ -326,6 +326,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     if remote:
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
+        routes[1:1] = oauth_as.routes(auth.providers_from(cfg), control_file)  # /oauth/continue/<id>
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(BodyLimit),
