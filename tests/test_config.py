@@ -1,6 +1,8 @@
 import codecs
 import json
 
+import pytest
+
 from kb.config import ROOT, load_config
 
 
@@ -30,3 +32,38 @@ def test_absolute_path_kept(tmp_path):
     p.write_text(json.dumps({"db_path": str(target)}, ensure_ascii=False), encoding="utf-8")
 
     assert load_config(p).db_path == target
+
+
+def _write(tmp_path, body: dict):
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def test_mode_defaults_to_local(tmp_path):
+    cfg = load_config(tmp_path / "없음.json")
+
+    assert cfg.mode == "local"
+    assert cfg.public_url == ""
+    assert cfg.data_dir is None
+
+
+def test_remote_mode_reads_url_and_data_dir(tmp_path):
+    cfg = load_config(_write(tmp_path, {"mode": "remote", "public_url": "https://fq.example.com",
+                                        "data_dir": "srv/한글 데이터"}))
+
+    assert cfg.mode == "remote"
+    assert cfg.public_url == "https://fq.example.com"
+    assert cfg.data_dir == ROOT / "srv" / "한글 데이터"
+
+
+@pytest.mark.parametrize("body, needle", [
+    ({"mode": "cloud"}, "mode"),
+    ({"mode": "remote", "data_dir": "d"}, "public_url"),
+    ({"mode": "remote", "public_url": "fq.example.com", "data_dir": "d"}, "public_url"),
+    ({"mode": "remote", "public_url": "https://fq.example.com/kb", "data_dir": "d"}, "public_url"),
+    ({"mode": "remote", "public_url": "https://fq.example.com"}, "data_dir"),
+])
+def test_remote_mode_requires_valid_settings(tmp_path, body, needle):
+    with pytest.raises(ValueError, match=needle):
+        load_config(_write(tmp_path, body))

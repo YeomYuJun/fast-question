@@ -7,14 +7,15 @@ from typing import Iterator
 
 from kb.schema import BUMP, NOW, SCHEMA_VERSION, ddl
 
-__all__ = ["BUMP", "NOW", "connect", "tx", "get_meta", "set_meta"]
+__all__ = ["BUMP", "NOW", "connect", "open_db", "tx", "get_meta", "set_meta"]
 
 
 def _regexp(pattern: str, value: str | None) -> bool:
     return value is not None and re.search(pattern, value) is not None
 
 
-def connect(path: Path | str) -> sqlite3.Connection:
+def open_db(path: Path | str) -> sqlite3.Connection:
+    """연결 설정(WAL, 외래 키, 잠금 대기 5초)만 하고 스키마는 건드리지 않는다. 제어 DB(kb/control.py)도 쓴다."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     # isolation_level=None: 트랜잭션은 tx() 가 BEGIN IMMEDIATE 로 직접 연다
     conn = sqlite3.connect(str(path), timeout=5.0, isolation_level=None, check_same_thread=False)
@@ -22,6 +23,11 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
+
+
+def connect(path: Path | str) -> sqlite3.Connection:
+    conn = open_db(path)
     conn.create_function("regexp", 2, _regexp, deterministic=True)
     if _schema_version(conn) != SCHEMA_VERSION:
         conn.execute("BEGIN IMMEDIATE")

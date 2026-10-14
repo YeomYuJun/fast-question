@@ -33,7 +33,10 @@ def setup_logging(cfg: Config) -> None:
 
 
 def seed_guide(cfg: Config, log: logging.Logger) -> None:
-    """기본 사용 가이드를 넣거나 갱신한다. git pull 뒤 재시작하면 새 가이드가 반영된다. 실패해도 서버는 뜬다."""
+    """기본 사용 가이드를 넣거나 갱신한다. git pull 뒤 재시작하면 새 가이드가 반영된다. 실패해도 서버는 뜬다.
+    원격 모드는 넣지 않는다(가이드 근거가 이 서버의 파일 경로라 사용자에게 뜻이 없다)."""
+    if cfg.mode == "remote":
+        return
     from kb import guide
     from kb.db import connect
     from kb.store import Store
@@ -53,7 +56,8 @@ def main() -> None:
     cfg = load_config(ap.parse_args().config)
     setup_logging(cfg)
     log = logging.getLogger("fast-question.web")
-    log.info("시작: http://%s:%s, DB %s", cfg.host, cfg.port, cfg.db_path)
+    log.info("시작: http://%s:%s, %s", cfg.host, cfg.port,
+             f"원격 모드 {cfg.public_url}, 데이터 {cfg.data_dir}" if cfg.mode == "remote" else f"DB {cfg.db_path}")
     seed_guide(cfg, log)
     # log_config=None: uvicorn 로그도 위 핸들러로 간다. 접근 로그는 warning 수준이라 남지 않는다
     uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning", log_config=None)

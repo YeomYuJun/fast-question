@@ -5,6 +5,9 @@
 오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
 쓰기 잠금 대기 초과 503 으로 돌려준다.
 run_jobs 면 기동 직후와 10분마다 주기 작업(kb.jobs.run_due: 백업, 근거 재검증, 재색인)을 스레드에서 돌린다.
+
+원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 계정은 인증 계층이 ASGI scope 의
+ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 원격 모드는 단일 DB 주기 작업과 Kiwi 미리 띄우기를 하지 않는다.
 """
 import dataclasses
 import json
@@ -15,7 +18,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -25,7 +28,9 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from kb import tenant
 from kb.config import Config, load_config
+from kb.control import connect_control
 from kb.db import connect
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
@@ -38,6 +43,8 @@ STATIC = Path(__file__).resolve().parent / "static"
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
+# 인증 계층만 채우는 scope 키. 헤더·쿼리에서 계정을 읽는 경로는 없다
+ACCOUNT_KEY = "fq.account_id"
 log = logging.getLogger("fast-question.web")
 
 
@@ -49,7 +56,8 @@ class RevalidatedStaticFiles(StaticFiles):
 
 
 class SameOriginOnly:
-    """Host 가 허용 목록(127.0.0.1·localhost + 포트)이고, Origin 이 있으면 같은 출처인 요청만 받는다.
+    """Host 가 허용 목록(로컬 모드 127.0.0.1·localhost + 포트, 원격 모드 public_url 의 호스트)이고,
+    Origin 이 있으면 같은 출처인 요청만 받는다.
 
     다른 사이트가 사용자 브라우저로 보내는 요청(text/plain POST 는 사전 확인 없이 간다)과
     DNS 재바인딩으로 KB 를 읽거나 사용자 이름으로 항목을 심는 것을 막는다.
@@ -58,6 +66,7 @@ class SameOriginOnly:
     def __init__(self, app, hosts: set[str]):
         self.app = app
         self.hosts = hosts
+        self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받는다."
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
@@ -65,8 +74,7 @@ class SameOriginOnly:
             host = headers.get(b"host", "")
             origin = headers.get(b"origin")
             if host not in self.hosts or (origin is not None and origin.split("://", 1)[-1] not in self.hosts):
-                resp = JSONResponse({"error": "이 서버는 127.0.0.1·localhost 의 같은 출처 요청만 받는다."},
-                                    status_code=403)
+                resp = JSONResponse({"error": self.message}, status_code=403)
                 await resp(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -107,18 +115,33 @@ def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
                analyzer: Analyzer | None = None) -> Starlette:
     cfg = cfg or load_config()
-    path = Path(db_path or cfg.db_path)
+    remote = cfg.mode == "remote"
     analyzer = analyzer if analyzer is not None else Analyzer()
-    connect(path).close()  # 스키마 준비
+    if remote:
+        path = None
+        connect_control(tenant.control_path(cfg.data_dir)).close()  # 스키마 준비
+    else:
+        path = Path(db_path or cfg.db_path)
+        connect(path).close()  # 스키마 준비
 
-    def warm_up() -> None:  # Kiwi 첫 로드(약 2초)를 첫 검색이 떠안지 않게 미리 띄운다
-        conn = connect(path)
-        try:
-            analyzer.ready(conn)
-        finally:
-            conn.close()
+        def warm_up() -> None:  # Kiwi 첫 로드(약 2초)를 첫 검색이 떠안지 않게 미리 띄운다
+            conn = connect(path)
+            try:
+                analyzer.ready(conn)
+            finally:
+                conn.close()
 
-    threading.Thread(target=warm_up, name="kiwi-warmup", daemon=True).start()
+        threading.Thread(target=warm_up, name="kiwi-warmup", daemon=True).start()
+
+    def db_for(request: Request) -> Path | None:
+        """이 요청이 쓸 KB 파일. 원격 모드에서 인증 계층이 계정을 넣지 않았으면 None."""
+        if not remote:
+            return path
+        account_id = request.scope.get(ACCOUNT_KEY)
+        return None if account_id is None else tenant.db_path_for(cfg.data_dir, account_id)
+
+    def unauthorized() -> JSONResponse:
+        return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
 
     job_cfg = cfg if db_path is None else dataclasses.replace(cfg, db_path=path)
 
@@ -133,13 +156,16 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     @asynccontextmanager
     async def lifespan(_app):
         stop = threading.Event()
-        if run_jobs:
+        if run_jobs and not remote:
             threading.Thread(target=jobs_loop, args=(stop,), name="jobs", daemon=True).start()
         yield
         stop.set()
 
     def api(fn: Callable[[Store, Request, dict], object]):
         async def handler(request: Request) -> JSONResponse:
+            db = db_for(request)
+            if db is None:
+                return unauthorized()
             body: dict = {}
             if request.method in ("POST", "PATCH"):
                 raw = await request.body()
@@ -150,7 +176,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
 
             def work():
-                conn = connect(path)
+                conn = connect(db)
                 try:
                     return fn(Store(conn, "user", analyzer), request, body)
                 finally:
@@ -174,12 +200,15 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     async def export(request: Request) -> Response:
         """분류 하나를 Markdown 파일로 내려준다. 오류는 api() 와 같은 JSON 이다."""
+        db = db_for(request)
+        if db is None:
+            return unauthorized()
         raw = request.query_params.get("category", "")
         if not raw.isdigit():
             return JSONResponse({"error": "category 에 분류 id 가 필요하다."}, status_code=400)
 
         def work():
-            conn = connect(path)
+            conn = connect(db)
             try:
                 return export_markdown(Store(conn, "user", analyzer), int(raw))
             finally:
@@ -237,7 +266,10 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
         Mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static"),
     ]
-    hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
+    if remote:
+        hosts = {urlsplit(cfg.public_url).netloc.lower()}
+    else:
+        hosts = {f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"}
     app = Starlette(routes=routes, middleware=[Middleware(SameOriginOnly, hosts=hosts)], lifespan=lifespan)
     app.state.db_path = path
     app.state.analyzer = analyzer

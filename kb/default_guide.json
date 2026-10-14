@@ -161,7 +161,7 @@
     {
       "category": "운영",
       "question": "fast-question 설정 파일 config.json 의 키는?",
-      "answer": "저장소 루트의 config.json 이고, 상대 경로는 저장소 루트 기준이다.\n- db_path: DB 파일 (기본 data/kb.sqlite3)\n- host·port: 웹 주소 (기본 127.0.0.1, 8765)\n- backup_dir·backup_keep: 백업 폴더·보관 개수 (기본 data/backup, 14)\n- log_dir·log_keep_days: 로그 폴더·보관 일수 (기본 data/logs, 14)\n- recheck_interval_hours: 근거 재검증 주기 (기본 24)",
+      "answer": "저장소 루트의 config.json 이고, 상대 경로는 저장소 루트 기준이다.\n- db_path: DB 파일 (기본 data/kb.sqlite3)\n- host·port: 웹 주소 (기본 127.0.0.1, 8765)\n- backup_dir·backup_keep, log_dir·log_keep_days: 백업·로그 폴더와 보관 수 (기본 data/backup·14, data/logs·14)\n- recheck_interval_hours: 근거 재검증 주기 (기본 24)\n- mode·public_url·data_dir: 원격 서빙 설정 (기본 local. remote 면 주소와 사용자 DB 폴더가 필요하다)",
       "evidence": [
         {
           "kind": "auto",
