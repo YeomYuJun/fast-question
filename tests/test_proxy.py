@@ -131,7 +131,8 @@ def test_credentials_round_trip(tmp_path, monkeypatch):
     assert remote_mod.load_credentials() is None
     remote_mod.save_credentials("https://fq.example.com/", "fq_pat_abc")
     assert not path.read_bytes().startswith(codecs.BOM_UTF8)
-    assert remote_mod.load_credentials() == {"url": "https://fq.example.com", "token": "fq_pat_abc"}
+    cred = remote_mod.load_credentials()
+    assert (cred["url"], cred["token"]) == ("https://fq.example.com", "fq_pat_abc") and len(cred["device_id"]) == 36
     path.write_bytes(codecs.BOM_UTF8 + path.read_bytes())  # 메모장이 BOM 을 붙여 저장해도 읽는다
     assert remote_mod.load_credentials()["token"] == "fq_pat_abc"
     path.write_text('{"url": "https://fq.example.com", "token": "garbage"}', encoding="utf-8")

@@ -5,6 +5,8 @@
 - 근거 spec(kb_add, kb_add_many 항목, kb_evidence add)은 이 PC 에서 capture() 해 captured 로 붙인다(url·note 제외).
 - kb_add_many file= 은 이 PC 의 파일을 읽어 items 로 보낸다. 캡처에 실패한 항목은 그 항목만 오류로 돌려준다.
 - kb_evidence recapture 는 원격에서 근거 spec 을 받아 이 PC 에서 다시 캡처한 값을 보낸다.
+- 캡처값에는 이 PC 의 device_id 를 origin 으로 붙인다. kb_recheck 는 원격에서 이 PC 의 근거만 받아
+  (/api/evidence/check) 이 PC 에서 판정하고 /api/evidence/verdicts 로 보고한다.
 호출마다 MCP 세션을 새로 연다(원격은 세션을 메모리에 두지 않는다).
 """
 import json
@@ -21,15 +23,19 @@ from mcp.server.lowlevel.server import Server
 
 from kb.errors import KbError
 from kb.evidence import capture
+from kb.remote import judge
 from mcp_server.server import INSTRUCTIONS
 
 SERVER_KINDS = ("url", "note")  # 서버가 직접 만드는 근거
 
 
-def localize(spec):
+def localize(spec, origin: str = ""):
     if not isinstance(spec, dict) or (spec.get("kind") or "auto") in SERVER_KINDS:
         return spec
-    return {**spec, "captured": capture(spec)}
+    row = capture(spec)
+    if origin and row["captured_json"] is not None:
+        row["captured_json"] = json.dumps({**json.loads(row["captured_json"]), "origin": origin}, ensure_ascii=False)
+    return {**spec, "captured": row}
 
 
 def text_result(data, is_error: bool = False) -> types.CallToolResult:
@@ -38,8 +44,11 @@ def text_result(data, is_error: bool = False) -> types.CallToolResult:
 
 
 class Remote:
-    def __init__(self, url: str, token: str, http_client: Callable[[], httpx2.AsyncClient] | None = None):
-        self.endpoint = f"{url.rstrip('/')}/mcp"
+    def __init__(self, url: str, token: str, device_id: str = "",
+                 http_client: Callable[[], httpx2.AsyncClient] | None = None):
+        self.base = url.rstrip("/")
+        self.endpoint = f"{self.base}/mcp"
+        self.device_id = device_id
         self._http = http_client or (lambda: httpx2.AsyncClient(
             headers={"Authorization": f"Bearer {token}"}, timeout=httpx2.Timeout(30.0, read=300.0)))
 
@@ -58,7 +67,7 @@ class Remote:
             return (await c.list_tools()).tools
 
 
-def _prepare_many(args: dict) -> tuple[list, list[int], dict[int, str]]:
+def _prepare_many(args: dict, origin: str = "") -> tuple[list, list[int], dict[int, str]]:
     """(보낼 항목, 보낼 항목의 원래 번호, 이 PC 에서 실패한 항목 번호 → 오류)."""
     items = args.get("items")
     if args.get("file"):
@@ -68,7 +77,7 @@ def _prepare_many(args: dict) -> tuple[list, list[int], dict[int, str]]:
     for n, it in enumerate(items or []):
         try:
             if isinstance(it, dict) and it.get("evidence"):
-                it = {**it, "evidence": [localize(e) for e in it["evidence"]]}
+                it = {**it, "evidence": [localize(e, origin) for e in it["evidence"]]}
         except KbError as e:
             errors[n] = e.message
             continue
@@ -78,7 +87,7 @@ def _prepare_many(args: dict) -> tuple[list, list[int], dict[int, str]]:
 
 
 async def _add_many(remote: Remote, args: dict) -> types.CallToolResult:
-    send, index, errors = await anyio.to_thread.run_sync(_prepare_many, args)
+    send, index, errors = await anyio.to_thread.run_sync(_prepare_many, args, remote.device_id)
     results: list[dict] = []
     if send or not errors:  # 항목이 없으면 원격이 오류 문구를 만든다
         res = await remote.call("kb_add_many", {"items": send})
@@ -97,20 +106,38 @@ async def _recapture(remote: Remote, args: dict) -> types.CallToolResult:
     if got.is_error:
         return got
     spec = json.loads(got.content[0].text)["spec"]
-    local = await anyio.to_thread.run_sync(localize, spec)
+    local = await anyio.to_thread.run_sync(localize, spec, remote.device_id)
     extra = {"spec": {"captured": local["captured"]}} if "captured" in local else {}
     return await remote.call("kb_evidence", {"action": "recapture", "evidence_id": args.get("evidence_id"), **extra})
 
 
+async def _recheck(remote: Remote, args: dict) -> types.CallToolResult:
+    if not remote.device_id:
+        return text_result("credentials.json 에 device_id 가 없다. scripts/install.py --remote 로 다시 설치한다.", is_error=True)
+    params = {"origin": remote.device_id}
+    if args.get("id") is not None:
+        params["qa"] = str(args["id"])
+    async with remote._http() as h:
+        got = await h.get(f"{remote.base}/api/evidence/check", params=params)
+        got.raise_for_status()
+        results = await anyio.to_thread.run_sync(judge, got.json()["rows"])
+        sent = await h.post(f"{remote.base}/api/evidence/verdicts", json={"results": results})
+        sent.raise_for_status()
+    return text_result(sent.json())
+
+
 async def forward(remote: Remote, name: str, args: dict) -> types.CallToolResult:
+    if name == "kb_recheck":
+        return await _recheck(remote, args)
     if name == "kb_add_many":
         return await _add_many(remote, args)
     if name == "kb_evidence" and args.get("action") == "recapture":
         return await _recapture(remote, args)
     if name == "kb_add" and args.get("evidence"):
-        args = {**args, "evidence": await anyio.to_thread.run_sync(lambda: [localize(e) for e in args["evidence"]])}
+        args = {**args, "evidence": await anyio.to_thread.run_sync(
+            lambda: [localize(e, remote.device_id) for e in args["evidence"]])}
     if name == "kb_evidence" and args.get("action") == "add" and args.get("spec"):
-        args = {**args, "spec": await anyio.to_thread.run_sync(localize, args["spec"])}
+        args = {**args, "spec": await anyio.to_thread.run_sync(localize, args["spec"], remote.device_id)}
     return await remote.call(name, args)
 
 

@@ -145,4 +145,5 @@ def test_install_remote_checks_token_before_writing(tmp_path, monkeypatch):
     msgs = install.install_remote("https://fq.example.com/", "fq_pat_abc",
                                   _opener(200, {"account": {"id": 1, "display_name": "octo", "providers": ["github"]}}))
     assert "octo" in msgs[0]
-    assert load_credentials() == {"url": "https://fq.example.com", "token": "fq_pat_abc"}
+    cred = load_credentials()
+    assert (cred["url"], cred["token"]) == ("https://fq.example.com", "fq_pat_abc") and cred["device_id"]

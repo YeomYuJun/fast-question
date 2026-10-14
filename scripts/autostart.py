@@ -3,6 +3,8 @@
 OS 설정을 바꾸므로 사용자가 직접 실행한다. ONLOGON 작업 등록은 관리자 권한을 요구할 수 있다.
 사용: .venv\\Scripts\\python.exe scripts\\autostart.py --install | --remove | --show
 로그: data\\logs\\web.log (run_web.py 가 날짜별로 남긴다)
+원격 모드 로컬 검사기를 매일 09:00 에 돌리기(작업 fast-question-check):
+      .venv\\Scripts\\python.exe scripts\\autostart.py --check-install | --check-remove
 """
 import subprocess
 import sys
@@ -12,12 +14,20 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHONW = ROOT / ".venv" / "Scripts" / "pythonw.exe"
 ENTRY = ROOT / "run_web.py"
 TASK = "fast-question-web"
+CHECK_ENTRY = ROOT / "scripts" / "local_check.py"
+CHECK_TASK = "fast-question-check"
 USAGE = __doc__
 
 
 def install_args() -> list[str]:
     command = f'"{PYTHONW}" "{ENTRY}"'  # 경로에 공백이 있어도 되도록 둘 다 따옴표로 감싼다
     return ["schtasks", "/Create", "/TN", TASK, "/SC", "ONLOGON", "/RL", "LIMITED", "/TR", command, "/F"]
+
+
+def check_install_args() -> list[str]:
+    command = f'"{PYTHONW}" "{CHECK_ENTRY}"'
+    return ["schtasks", "/Create", "/TN", CHECK_TASK, "/SC", "DAILY", "/ST", "09:00", "/RL", "LIMITED",
+            "/TR", command, "/F"]
 
 
 def run(args: list[str]) -> int:
@@ -38,6 +48,10 @@ def main(argv: list[str]) -> int:
         return run(install_args())
     if argv == ["--remove"]:
         return run(["schtasks", "/Delete", "/TN", TASK, "/F"])
+    if argv == ["--check-install"]:
+        return run(check_install_args())
+    if argv == ["--check-remove"]:
+        return run(["schtasks", "/Delete", "/TN", CHECK_TASK, "/F"])
     if argv == ["--show"]:
         return run(["schtasks", "/Query", "/TN", TASK, "/V", "/FO", "LIST"])
     print(USAGE)

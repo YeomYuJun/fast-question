@@ -31,7 +31,7 @@ def main() -> None:
         cred = load_credentials()
         if cred is None:
             sys.exit(f"원격 자격 증명이 없거나 형식이 틀렸다: {credentials_path()} (scripts/install.py --remote 로 만든다)")
-        anyio.run(run_stdio, Remote(cred["url"], cred["token"]))
+        anyio.run(run_stdio, Remote(cred["url"], cred["token"], cred["device_id"]))
         return
     cfg = load_config(args.config)
     connect(cfg.db_path).close()  # 스키마 준비

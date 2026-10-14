@@ -400,6 +400,10 @@ class Store:
         rows = self.conn.execute(sql, params).fetchall()
         checker = Checker()
         judged = [(r, *checker.check(dict(r))) for r in rows]  # git·파일 판정은 트랜잭션 밖에서
+        return self._write_verdicts(judged, mark_recheck=qa_id is None)
+
+    def _write_verdicts(self, judged: list[tuple], mark_recheck: bool = False) -> list[dict]:
+        """(근거 행, 판정, 설명) 목록을 쓴다. 판정 변화는 system 주체로 남긴다."""
         results = []
         with self._writing() as c:
             for r, verdict, detail in judged:
@@ -414,10 +418,50 @@ class Store:
                                 "detail": detail, "changed": changed})
             for q in {r["qa_id"] for r, _, _ in judged}:
                 self._recompute_state(q, actor="system")
-            if qa_id is None:
+            if mark_recheck:
                 c.execute(f"INSERT INTO meta(key, value) VALUES ('last_recheck', {NOW}) "
                           "ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         return results
+
+    CHECKED_KINDS = ("file", "dir", "git", "githead")
+
+    def evidence_for_check(self, origin: str, qa_id: int | None = None) -> list[dict]:
+        """원격 모드: 이 PC(origin)가 캡처한 살아 있는 파일·폴더·git 근거. 로컬 검사기가 판정한다."""
+        sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
+               "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL AND e.kind IN ('file', 'dir', 'git', 'githead') "
+               "AND json_extract(e.captured_json, '$.origin') = ?")
+        params: tuple = (origin,)
+        if qa_id is not None:
+            sql += " AND e.qa_id = ?"
+            params += (qa_id,)
+        return [dict(r) for r in self.conn.execute(sql + " ORDER BY e.id", params)]
+
+    def apply_verdicts(self, results: list[dict]) -> list[dict]:
+        """로컬 검사기가 보낸 [{evidence_id, version, verdict, detail}] 을 recheck 와 같은 규칙으로 쓴다.
+        version 이 지금과 다른 판정(그사이 재기록됨)과 판정 대상이 아닌 근거는 쓰지 않는다."""
+        judged = []
+        for res in results:
+            verdict = res.get("verdict")
+            if verdict not in ("same", "changed", "unknown"):
+                raise ValidationError(f"판정은 same·changed·unknown 중 하나다: {verdict}")
+            row = self.conn.execute(f"SELECT {self.EV_COLS} FROM evidence WHERE id = ? AND deleted_at IS NULL",
+                                    (int(res["evidence_id"]),)).fetchone()
+            if row is None or row["kind"] not in self.CHECKED_KINDS:
+                continue
+            if row["version"] != int(res["version"]):
+                continue
+            detail = res.get("detail")
+            judged.append((row, verdict, None if detail is None else str(detail)[:500]))
+        return self._write_verdicts(judged)
+
+    def expire_verdicts(self, days: int = 30) -> int:
+        """원격 모드 주기 작업: days 일 넘게 사용자 PC 가 판정하지 않은 'same' 근거를 unknown 으로 바꾼다."""
+        rows = self.conn.execute(
+            f"SELECT {self.EV_COLS} FROM evidence WHERE deleted_at IS NULL AND verdict = 'same' "
+            "AND kind IN ('file', 'dir', 'git', 'githead') AND checked_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
+            (f"-{int(days)} days",)).fetchall()
+        detail = f"{days}일 넘게 사용자 PC 에서 판정하지 않았다"
+        return sum(r["changed"] for r in self._write_verdicts([(r, "unknown", detail) for r in rows]))
 
     def update_qa(self, id: int, version: int, *, question: str | None = None, answer: str | None = None,
                   category: int | str | None = None, evidence: list[dict] | None = None,
@@ -432,6 +476,9 @@ class Store:
             sets["category_id"] = self.resolve_category(category)
         if not sets and evidence is None:
             raise ValidationError("바꿀 값이 없다.")
+        keep: list[int] = []
+        if evidence is not None and self.remote:
+            evidence, keep = self._split_kept(id, evidence)
         captured = [self._capture(spec) for spec in evidence] if evidence is not None else None  # 쓰기 전에 모두 캡처
         sets["change_note"] = note
         steps = []
@@ -444,14 +491,31 @@ class Store:
                 steps.append(lambda c: c.execute("DELETE FROM qa_morph_fts WHERE rowid = ?", (id,)))
         if captured is not None:
             # 상태 재계산이 버전을 올리므로 버전을 검사하는 UPDATE 뒤, 같은 트랜잭션에서 바꾼다
-            steps.append(lambda c: self._replace_evidence(c, id, captured))
+            steps.append(lambda c: self._replace_evidence(c, id, captured, keep))
         self._update("qa", id, version, sets, lambda i: self._item(self._qa_row(i)),
                      after=lambda c: [step(c) for step in steps])
         return self.get_qa(id)
 
-    def _replace_evidence(self, c: sqlite3.Connection, qa_id: int, captured: list[dict]) -> None:
+    def _split_kept(self, qa_id: int, specs: list[dict]) -> tuple[list[dict], list[int]]:
+        """원격 모드 웹 편집: 근거 줄에 그대로 남은 파일·폴더·git 근거는 서버가 다시 캡처할 수 없으므로 기존 행을 둔다.
+        (경로 또는 저장소, anchor)가 같은 살아 있는 근거가 있으면 그 행을 유지 목록으로, 나머지 spec 은 그대로 돌려준다."""
+        rows = self.conn.execute("SELECT id, kind, path, repo, anchor FROM evidence WHERE qa_id = ? AND deleted_at IS NULL "
+                                 "AND kind NOT IN ('url', 'note')", (qa_id,)).fetchall()
+        existing = {((r["path"] or r["repo"]), r["anchor"] or None): r["id"] for r in rows}
+        rest, keep = [], []
+        for spec in specs:
+            key = (spec.get("path") or spec.get("repo"), spec.get("anchor") or None)
+            if "captured" not in spec and (spec.get("kind") or "auto") not in ("url", "note") and key in existing:
+                keep.append(existing.pop(key))
+            else:
+                rest.append(spec)
+        return rest, keep
+
+    def _replace_evidence(self, c: sqlite3.Connection, qa_id: int, captured: list[dict], keep: list[int] = ()) -> None:
+        marks = ",".join("?" * len(keep))
         c.execute(f"UPDATE evidence SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
-                  "WHERE qa_id = ? AND deleted_at IS NULL", (self.actor, self.actor, qa_id))
+                  f"WHERE qa_id = ? AND deleted_at IS NULL{f' AND id NOT IN ({marks})' if keep else ''}",
+                  (self.actor, self.actor, qa_id, *keep))
         for e in captured:
             self._insert_evidence(qa_id, e, "external" if e["kind"] in ("url", "note") else "same")
         self._recompute_state(qa_id)

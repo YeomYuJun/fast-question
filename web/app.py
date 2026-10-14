@@ -188,7 +188,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             def work():
                 conn = connect(db)
                 try:
-                    return fn(Store(conn, "user", analyzer), request, body)
+                    return fn(Store(conn, "user", analyzer, remote=remote), request, body)
                 finally:
                     conn.close()
 
@@ -220,7 +220,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         def work():
             conn = connect(db)
             try:
-                return export_markdown(Store(conn, "user", analyzer), int(raw))
+                return export_markdown(Store(conn, "user", analyzer, remote=remote), int(raw))
             finally:
                 conn.close()
 
@@ -247,6 +247,17 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         limit=int(qp.get("limit", 200)), relax=qp.get("relax") == "1",
                         since_hours=float(qp["since"]) if qp.get("since") else None)
 
+    def evidence_check(s: Store, r: Request, _):
+        """로컬 검사기(scripts/local_check.py, 로컬 프록시 kb_recheck)가 판정할 이 PC 의 근거."""
+        qa = r.query_params.get("qa")
+        return {"rows": s.evidence_for_check(r.query_params["origin"], int(qa) if qa else None)}
+
+    def verdicts(s: Store, _, b: dict):
+        results = s.apply_verdicts(list(b["results"]))
+        ids = sorted({x["qa_id"] for x in results})
+        return {"results": results, "items": [{"id": i["id"], "question": i["question"],
+                                               "evidence_state": i["evidence_state"]} for i in s.items(ids)]}
+
     def add_qa(s: Store, _, b: dict):
         res = s.add_qa(b["category"], b["question"], b["answer"], evidence=_evidence(b), force=bool(b.get("force")))
         if res["status"] == "created":
@@ -258,6 +269,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/projects", api(lambda s, r, b: s.project_sources())),
+        Route("/api/evidence/check", api(evidence_check)),
+        Route("/api/evidence/verdicts", api(verdicts), methods=["POST"]),
         Route("/api/categories", api(lambda s, r, b: s.add_category(
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
