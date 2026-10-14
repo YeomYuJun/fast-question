@@ -141,3 +141,90 @@ def test_hook_uses_running_web_server(tmp_path):
         srv.shutdown()
     assert seen["path"].startswith("/api/search?q=")
     assert res["hits"][0]["id"] == 9
+
+
+class FakeRemote:
+    """원격 서버 흉내: /api/search, /api/projects. 받은 요청의 경로와 Authorization 을 남긴다."""
+
+    def __init__(self, hits=None, names=None):
+        self.seen: list[tuple[str, str]] = []
+        outer = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                outer.seen.append((self.path, self.headers.get("Authorization", "")))
+                if self.path.startswith("/api/projects"):
+                    body = {"names": names or [], "roots": []}
+                else:
+                    body = {"hits": hits or [], "similar": []}
+                data = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.srv.shutdown()
+
+
+def _cred_file(tmp_path, url):
+    p = tmp_path / "home" / ".fast-question" / "credentials.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"url": url, "token": "fq_pat_test"}), encoding="utf-8")
+    return p
+
+
+def test_hook_uses_remote_server_with_token(tmp_path):
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")], names=["fast-question"])
+    try:
+        cred = _cred_file(tmp_path, remote.url)
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"db_path": str(_db_with_item(tmp_path))}), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
+                           input=json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?", "cwd": r"D:\fast-question"}).encode(),
+                           capture_output=True, timeout=60,
+                           env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": "C:\Windows",
+                                "FQ_CREDENTIALS": str(cred), "USERPROFILE": str(tmp_path / "home")})
+    finally:
+        remote.close()
+    text = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "#7" in text and f"{remote.url}/#qa/7" in text and "#1" not in text  # 로컬 DB 를 읽지 않는다
+    assert {auth for _, auth in remote.seen} == {"Bearer fq_pat_test"}
+    assert (tmp_path / "home" / ".fast-question" / "projects.json").exists()
+
+
+def test_hook_is_silent_when_remote_is_down(tmp_path):
+    cred = _cred_file(tmp_path, "http://127.0.0.1:1")
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"db_path": str(_db_with_item(tmp_path))}), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
+                       input=json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?"}).encode(),
+                       capture_output=True, timeout=60,
+                       env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": "C:\Windows", "FQ_CREDENTIALS": str(cred)})
+    assert r.returncode == 0 and r.stdout == b""
+
+
+def test_remote_projects_are_cached_for_a_day(tmp_path):
+    remote = FakeRemote(names=["fast-question"])
+    cache = tmp_path / "projects.json"
+    cred = {"url": remote.url, "token": "fq_pat_test"}
+    try:
+        assert ask_kb.remote_projects(cred, cache, now=1000.0)["names"] == ["fast-question"]
+        ask_kb.remote_projects(cred, cache, now=1000.0 + 3600)
+        assert len(remote.seen) == 1
+        ask_kb.remote_projects(cred, cache, now=1000.0 + 25 * 3600)
+        assert len(remote.seen) == 2
+    finally:
+        remote.close()
+    down = {"url": remote.url, "token": "fq_pat_test"}  # 서버가 꺼져도 옛 캐시를 쓴다
+    assert ask_kb.remote_projects(down, cache, now=1000.0 + 50 * 3600)["names"] == ["fast-question"]
+    other = {"url": "http://127.0.0.1:1", "token": "fq_pat_test"}  # 다른 서버의 캐시는 쓰지 않는다
+    assert ask_kb.remote_projects(other, cache, now=1000.0)["names"] == []
+    assert ask_kb.project_of(r"D:\fast-question\kb", None, {"names": ["fast-question"], "roots": []}) == "fast-question"

@@ -353,6 +353,13 @@ class Store:
             self._recompute_state(qa_id)
         return self.get_qa(qa_id)
 
+    def project_sources(self) -> dict:
+        """즉석 질문 훅의 프로젝트 판정 자료: 대분류 이름과 qa-harvest 로 구축한 경로."""
+        names = [r[0] for r in self.conn.execute(
+            "SELECT name FROM category WHERE parent_id IS NULL AND deleted_at IS NULL ORDER BY name")]
+        roots = [r[0][len("harvest:"):] for r in self.conn.execute("SELECT key FROM meta WHERE key LIKE 'harvest:%'")]
+        return {"names": names, "roots": roots}
+
     def evidence_spec(self, evidence_id: int) -> dict:
         return spec_of(self._evidence_row(evidence_id))
 

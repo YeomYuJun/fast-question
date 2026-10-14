@@ -5,6 +5,9 @@
   비슷한 항목이 없으면 아무것도 넣지 않는다.
 검색은 실행 중인 web 서버(/api/search, 형태소 계층 포함)를 먼저 쓰고, 꺼져 있으면 DB 를 직접 읽는다
 (Kiwi 를 띄우는 데 2.5초가 걸려 직접 읽을 때는 정확히 일치·동의어·비슷한 결과만 쓴다).
+원격 자격 증명(kb/remote.py, %USERPROFILE%\\.fast-question\\credentials.json)이 있으면 원격 서버의 /api/search 를
+개인 토큰으로 2초 제한으로 부르고, 프로젝트 판정 자료(/api/projects)는 하루에 한 번 받아 projects.json 에 둔다.
+원격 검색이 실패하면 아무것도 넣지 않는다(이 PC 에는 DB 가 없다).
 어떤 실패든 아무것도 출력하지 않고 0 으로 끝나 사용자 입력을 막지 않는다.
 
 설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다.
@@ -14,9 +17,10 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -28,6 +32,7 @@ MAX_CHARS = 300
 MAX_LINES = 4
 SHOW = 3
 WEB_TIMEOUT_S = 2.0
+PROJECTS_MAX_AGE_S = 24 * 3600
 
 _ASK_END = re.compile(
     r"(\?|？|까|까요|나요|니|냐|는지|인지|인가|인가요|는가|죠|지요|가요|뭐야|뭐지|뭔가|뭔데|뭐임|무엇인가)"
@@ -82,23 +87,61 @@ def lookup(query: str, cfg: Config) -> dict:
         return _from_db(query, cfg)
 
 
-def project_of(cwd: str, cfg: Config) -> str | None:
+def _get_remote(cred: dict, path: str) -> dict:
+    req = Request(cred["url"] + path, headers={"Authorization": f"Bearer {cred['token']}"})
+    with urlopen(req, timeout=WEB_TIMEOUT_S) as r:  # noqa: S310 - 자격 증명 파일의 https 주소만 연다
+        return json.loads(r.read().decode("utf-8"))
+
+
+def remote_lookup(query: str, cred: dict) -> dict:
+    return _get_remote(cred, "/api/search?" + urlencode({"q": query, "limit": SHOW}))
+
+
+def remote_projects(cred: dict, cache: Path | None = None, now: float | None = None) -> dict:
+    """대분류 이름·수확 경로. 하루 지난 캐시만 다시 받고, 받지 못하면 옛 캐시를 쓴다."""
+    from kb.remote import home
+    cache = cache or home() / "projects.json"
+    now = time.time() if now is None else now
+    try:
+        old = json.loads(cache.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        old = None
+    if old and old.get("url") == cred["url"] and now - old.get("fetched_at", 0) < PROJECTS_MAX_AGE_S:
+        return old
+    try:
+        got = _get_remote(cred, "/api/projects")
+    except Exception:  # noqa: BLE001 - 서버가 안 되면 옛 캐시(다른 서버 것이면 버림)
+        return old if old and old.get("url") == cred["url"] else {"names": [], "roots": []}
+    data = {"url": cred["url"], "fetched_at": now, "names": got.get("names", []), "roots": got.get("roots", [])}
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    return data
+
+
+def project_of(cwd: str, cfg: Config, sources: dict | None = None) -> str | None:
     """질문한 폴더(cwd)가 KB 에 있는 프로젝트면 그 이름을 돌려준다. 아니면 None.
 
     폴더 경로의 어느 단계 이름이 대분류 이름과 같거나, cwd 가 qa-harvest 로 구축한 경로 안이면 프로젝트다.
+    sources({"names", "roots"})가 없으면 로컬 DB 에서 읽는다.
     """
-    if not cwd or not cfg.db_path.exists():
+    if not cwd:
         return None
-    from kb.db import connect
+    if sources is None:
+        if not cfg.db_path.exists():
+            return None
+        from kb.db import connect
+        from kb.store import Store
+        conn = connect(cfg.db_path)
+        try:
+            sources = Store(conn, "system").project_sources()
+        finally:
+            conn.close()
+    names, roots = sources.get("names", []), sources.get("roots", [])
     norm = cwd.replace("\\", "/").rstrip("/").lower()
     parts = set(norm.split("/"))
-    conn = connect(cfg.db_path)
-    try:
-        names = [r[0] for r in conn.execute(
-            "SELECT name FROM category WHERE parent_id IS NULL AND deleted_at IS NULL ORDER BY name")]
-        roots = [r[0][len("harvest:"):] for r in conn.execute("SELECT key FROM meta WHERE key LIKE 'harvest:%'")]
-    finally:
-        conn.close()
     for name in names:
         if name.lower() in parts:
             return name
@@ -151,7 +194,14 @@ def main() -> int:
             return 0
         env = os.environ.get("FAST_QUESTION_CONFIG")
         cfg = load_config(Path(env) if env else None)
-        text = context(query, lookup(query, cfg), f"http://{cfg.host}:{cfg.port}", project_of(data.get("cwd", ""), cfg))
+        from kb.remote import load_credentials
+        cred = load_credentials()
+        if cred:
+            res = remote_lookup(query, cred)
+            project = project_of(data.get("cwd", ""), cfg, remote_projects(cred))
+            text = context(query, res, cred["url"], project)
+        else:
+            text = context(query, lookup(query, cfg), f"http://{cfg.host}:{cfg.port}", project_of(data.get("cwd", ""), cfg))
         if not text:
             return 0
         out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}

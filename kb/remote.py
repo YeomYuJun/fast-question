@@ -21,11 +21,11 @@ def credentials_path() -> Path:
 
 
 def load_credentials(path: Path | None = None) -> dict | None:
-    """{"url", "token"}. 파일이 없거나 형식이 틀리면 None."""
-    path = path or credentials_path()
+    """{"url", "token"}. 파일이 없거나 형식이 틀리거나 사용자 폴더를 모르면 None."""
     try:
+        path = path or credentials_path()
         data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):  # RuntimeError: 환경 변수가 없어 사용자 폴더를 모른다
         return None
     url, token = str(data.get("url", "")).rstrip("/"), str(data.get("token", ""))
     if not url.startswith(("https://", "http://")) or not token.startswith(TOKEN_PREFIX):

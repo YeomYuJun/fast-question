@@ -135,3 +135,9 @@ def test_seed_guide_skipped_in_remote_mode(cfg):
     run_web.seed_guide(cfg, logging.getLogger("test"))
 
     assert not cfg.db_path.exists()
+
+
+def test_projects_for_hook(app):
+    with client_for(app, 1) as c:
+        add_basics(c)
+        assert c.get("/api/projects").json() == {"names": ["이관"], "roots": []}

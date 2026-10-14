@@ -46,3 +46,9 @@ def load_sample(store, synonyms=True):
         for group in SYNONYM_GROUPS:
             store.dict_action("synonym_add", terms=group)
     return ids
+
+
+@pytest.fixture(autouse=True)
+def no_real_credentials(tmp_path_factory, monkeypatch):
+    """이 PC 에 원격 자격 증명이 있어도 테스트는 읽지 않는다(즉석 질문 훅·프록시가 원격으로 가지 않게)."""
+    monkeypatch.setenv("FQ_CREDENTIALS", str(tmp_path_factory.mktemp("cred") / "credentials.json"))

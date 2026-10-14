@@ -257,6 +257,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
+        Route("/api/projects", api(lambda s, r, b: s.project_sources())),
         Route("/api/categories", api(lambda s, r, b: s.add_category(
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
