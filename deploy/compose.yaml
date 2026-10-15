@@ -2,6 +2,13 @@
 # deploy/ 폴더에서 실행한다. config.json 은 config.example.json 을 복사해 만든다(git 에 올리지 않는다).
 # 비밀값은 같은 폴더의 .env 파일이나 셸 환경 변수로 넘긴다. AWS 키가 필요한 환경(인스턴스 역할이 없는 경우)은
 # aws.env 파일에 AWS_ACCESS_KEY_ID·AWS_SECRET_ACCESS_KEY 를 적는다(없으면 건너뛴다).
+# 컨테이너 표준 출력 로그는 서비스마다 10 MB × 3 개까지만 둔다(Docker 기본값은 상한이 없다)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
     build:
@@ -9,6 +16,7 @@ services:
       dockerfile: deploy/Dockerfile
     image: fast-question:latest
     restart: unless-stopped
+    logging: *logging
     environment:
       FQ_GITHUB_SECRET: ${FQ_GITHUB_SECRET:-}
       FQ_GOOGLE_SECRET: ${FQ_GOOGLE_SECRET:-}
@@ -25,6 +33,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - app
     environment:
