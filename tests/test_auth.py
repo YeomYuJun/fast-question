@@ -355,6 +355,19 @@ def test_signup_limit_per_ip(tmp_path):
         conn.close()
 
 
+def test_old_signup_ips_are_purged_without_new_signups(tmp_path):
+    conn = control.connect_control(tmp_path / "control.sqlite3")
+    t0 = datetime(2026, 10, 16, tzinfo=timezone.utc)
+    try:
+        # 가입은 그 시각 기준 하루 지난 기록을 지우므로 최근 것을 먼저 넣는다(오래된 기록이 남아 있게)
+        control.login_identity(conn, "google", "b", ip="5.6.7.8", now=t0 - timedelta(hours=2))
+        control.login_identity(conn, "google", "a", ip="1.2.3.4", now=t0 - timedelta(days=2))
+        assert control.purge_signups(conn, now=t0) == 1
+        assert [r[0] for r in conn.execute("SELECT ip FROM signup")] == ["5.6.7.8"]
+    finally:
+        conn.close()
+
+
 def test_signup_limit_reaches_login_screen(app, idp):
     codes = []
     for n in range(control.SIGNUP_PER_HOUR + 1):

@@ -12,7 +12,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kb import oauth_store, s3backup, tenant
+from kb import control, oauth_store, s3backup, tenant
 from kb.config import Config
 from kb.control import connect_control
 from kb.db import NOW, connect, get_meta
@@ -88,13 +88,15 @@ def _expire_job(conn: sqlite3.Connection, now: datetime) -> list:
 
 
 def _cleanup_job(cfg: Config, conn: sqlite3.Connection, now: datetime) -> list:
-    """제어 DB: 1년 안 쓴 OAuth 클라이언트와 30일 지난 탈퇴 폴더를 지운다(하루 한 번)."""
+    """제어 DB: 1년 안 쓴 OAuth 클라이언트, 30일 지난 탈퇴 폴더와 그 계정의 신원, 하루 지난 가입 IP 를 지운다(하루 한 번)."""
     if not _due(conn, "last_cleanup", CLEANUP_EVERY_HOURS, now):
         return []
 
     def job() -> dict:
         out = {"oauth_clients": oauth_store.delete_idle_clients(conn),
-               "deleted_dirs": tenant.purge_deleted(cfg.data_dir, DELETED_KEEP_DAYS, now)}
+               "deleted_dirs": tenant.purge_deleted(cfg.data_dir, DELETED_KEEP_DAYS, now),
+               "closed_accounts": control.purge_closed_accounts(conn, DELETED_KEEP_DAYS, now),
+               "signups": control.purge_signups(conn, now)}
         _mark(conn, "last_cleanup")
         return out
     return [("cleanup", job)]

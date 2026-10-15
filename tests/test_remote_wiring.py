@@ -39,6 +39,7 @@ def test_run_due_all_expires_and_cleans_once_a_day(cfg, tmp_path):
     first = run_due_all(cfg)
     assert first["users"][acc]["expire"] == {"unknown": 0}  # 방금 등록한 근거는 그대로
     assert first["control"]["cleanup"]["oauth_clients"] == 0
+    assert first["control"]["cleanup"]["closed_accounts"] == 0 and first["control"]["cleanup"]["signups"] == 0
     assert len(first["control"]["cleanup"]["deleted_dirs"]) == 1 and first["control"]["cleanup"]["deleted_dirs"][0].startswith("99-")
     second = run_due_all(cfg)
     assert "expire" not in second.get("users", {}).get(acc, {}) and "cleanup" not in second.get("control", {})

@@ -339,15 +339,34 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
 
 
 def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | None = None) -> None:
-    """탈퇴: 계정에 탈퇴 시각을 적고 세션·개인 토큰·OAuth 토큰·인가 코드를 모두 끊는다. 신원 행은 남아 다시 로그인하면 거부된다."""
+    """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드를 모두 지운다.
+    신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
     t = _iso(_now(now))
     with tx(conn):
-        conn.execute("UPDATE account SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL", (t, account_id))
-        conn.execute("DELETE FROM session WHERE account_id = ?", (account_id,))
-        conn.execute("UPDATE personal_token SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL",
+        conn.execute("UPDATE account SET deleted_at = ?, display_name = '' WHERE id = ? AND deleted_at IS NULL",
                      (t, account_id))
+        conn.execute("DELETE FROM session WHERE account_id = ?", (account_id,))
+        conn.execute("DELETE FROM personal_token WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM oauth_token WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM auth_code WHERE account_id = ?", (account_id,))
+
+
+def purge_closed_accounts(conn: sqlite3.Connection, days: int, now: datetime | None = None) -> int:
+    """탈퇴한 지 days 일이 지난 계정의 신원 행을 지운다(그 뒤 같은 공급자 계정은 새 계정으로 가입한다). 지운 계정 수.
+    계정 행은 번호·시각만 든 표지로 남긴다. 번호를 다시 쓰면 S3 의 옛 백업 경로(users/<id>/)와 섞인다."""
+    cutoff = _iso(_now(now) - timedelta(days=days))
+    with tx(conn):
+        ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT a.id FROM account a JOIN identity i ON i.account_id = a.id "
+            "WHERE a.deleted_at IS NOT NULL AND a.deleted_at < ?", (cutoff,))]
+        conn.executemany("DELETE FROM identity WHERE account_id = ?", [(i,) for i in ids])
+    return len(ids)
+
+
+def purge_signups(conn: sqlite3.Connection, now: datetime | None = None) -> int:
+    """하루 지난 가입 IP 기록을 지운다(가입 제한은 최근 한 시간만 본다). 주기 작업이 하루 한 번 부른다. 지운 행 수."""
+    with tx(conn):
+        return conn.execute("DELETE FROM signup WHERE at < ?", (_iso(_now(now) - timedelta(days=1)),)).rowcount
 
 
 def global_words(conn: sqlite3.Connection) -> list[tuple[str, str]]:

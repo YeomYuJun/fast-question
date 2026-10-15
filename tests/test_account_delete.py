@@ -1,4 +1,7 @@
 """탈퇴: 로그인·개인 토큰·OAuth 토큰이 모두 끊기고 사용자 폴더는 deleted/ 로 옮긴다."""
+from datetime import datetime, timedelta, timezone
+
+import pytest
 from starlette.testclient import TestClient
 
 from kb import control, tenant
@@ -36,5 +39,32 @@ def test_delete_account_cuts_every_access(cfg, app):
     try:
         assert conn.execute("SELECT count(*) FROM oauth_token WHERE account_id = ?", (acc,)).fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM session WHERE account_id = ?", (acc,)).fetchone()[0] == 0
+        # 표시 이름·토큰 기록은 바로 지운다. 신원은 폴더와 함께 30일 뒤 지운다(그 전에는 같은 계정 재가입 거부)
+        assert conn.execute("SELECT count(*) FROM personal_token WHERE account_id = ?", (acc,)).fetchone()[0] == 0
+        assert conn.execute("SELECT display_name FROM account WHERE id = ?", (acc,)).fetchone()[0] == ""
+        assert conn.execute("SELECT count(*) FROM identity WHERE account_id = ?", (acc,)).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_closed_account_identity_is_purged_after_30_days_then_can_sign_up_again(tmp_path):
+    conn = control.connect_control(tmp_path / "control.sqlite3")
+    t0 = datetime(2026, 10, 16, tzinfo=timezone.utc)
+    try:
+        old, _ = control.login_identity(conn, "github", "1", "octo")
+        recent, _ = control.login_identity(conn, "google", "g1")
+        control.delete_account(conn, old, now=t0 - timedelta(days=31))
+        control.delete_account(conn, recent, now=t0 - timedelta(days=1))
+
+        assert control.purge_closed_accounts(conn, 30, now=t0) == 1
+        assert conn.execute("SELECT count(*) FROM identity WHERE account_id = ?", (old,)).fetchone()[0] == 0
+        # 계정 행은 개인정보 없는 표지로 남긴다: 번호를 다시 쓰면 S3 의 옛 백업 경로(users/<id>/)와 섞인다
+        assert tuple(conn.execute("SELECT display_name, deleted_at IS NOT NULL FROM account WHERE id = ?",
+                                  (old,)).fetchone()) == ("", 1)
+        assert control.purge_closed_accounts(conn, 30, now=t0) == 0
+        with pytest.raises(control.LoginRefused):  # 30일이 안 된 탈퇴 계정은 그대로 막힌다
+            control.login_identity(conn, "google", "g1")
+        again, created = control.login_identity(conn, "github", "1", "octo")
+        assert created and again != old
     finally:
         conn.close()
