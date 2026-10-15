@@ -250,9 +250,31 @@ def test_code_expires_after_ten_minutes(cfg, app):
 def test_authorize_refuses_other_resource(app):
     with client(app) as c:
         client_id = register(c).json()["client_id"]
-        for resource in ("https://other.example/mcp", None):
+        for resource in ("https://other.example/mcp", f"{URL}/api"):
             q = query(authorize(c, client_id, auth.pkce()[1], resource=resource))
             assert q["error"] == "invalid_target" and q["state"] == "st-1"
+
+
+def test_missing_resource_is_filled_and_logged(cfg, app, caplog):
+    caplog.set_level("INFO", logger="fast-question.oauth")
+    with client(app) as c:
+        client_id = register(c).json()["client_id"]
+        verifier, challenge = auth.pkce()
+        r = authorize(c, client_id, challenge, resource=None)
+        assert r.status_code == 302 and urlsplit(r.headers["location"]).path.startswith("/oauth/continue/")
+        path = urlsplit(r.headers["location"]).path
+        assert login(c, "google", next_=path).headers["location"] == path
+        code = query(c.post(path, data={"decision": "approve"}, follow_redirects=False))["code"]
+        tok = exchange(c, client_id, code, verifier)
+        assert tok.status_code == 200, tok.text
+        assert mcp_status(c, tok.json()["access_token"]) == 200
+    conn = control_db(cfg)
+    try:
+        assert {row[0] for row in conn.execute("SELECT resource FROM oauth_token")} == {RESOURCE}
+    finally:
+        conn.close()
+    filled = [rec for rec in caplog.records if rec.name == "fast-question.oauth"]
+    assert len(filled) == 1 and client_id in filled[0].getMessage()
 
 
 def test_token_for_other_resource_is_401(cfg, app):

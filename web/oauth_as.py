@@ -7,12 +7,14 @@ redirect_uri 로, 거부하면 error=access_denied 로 보낸다 → /token 이 
 
 - redirect_uri 는 http://localhost:<포트>/callback, http://127.0.0.1:<포트>/callback, https://… 만 등록한다.
 - resource 는 <public_url>/mcp 여야 한다. /authorize 에서 다르면 invalid_target 으로 돌려보내고, /mcp 에서도
-  토큰의 resource 가 다르면 받지 않는다.
+  토큰의 resource 가 다르면 받지 않는다. 빠지면 <public_url>/mcp 로 채우고 로그를 남긴다. 토큰을 내는 보호 자원이
+  /mcp 하나뿐이라 채워도 토큰이 다른 곳에 쓰일 길이 없다. 보호 자원을 늘리면 빠진 경우도 거부로 돌린다.
 - MCPServer 는 provider 와 token_verifier 를 같이 받지 않아, load_access_token 이 개인 토큰(fq_pat_…)도 확인한다.
   개인 토큰과 OAuth 토큰이 같은 /mcp 에 붙는다. AccessToken.subject 는 계정 id 문자열이다.
 - 동의 화면은 클라이언트가 등록한 이름과 돌아갈 주소를 보인다. 누구나 클라이언트를 등록할 수 있어서다.
 """
 import html
+import logging
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
@@ -33,6 +35,8 @@ REDIRECT_MAX = 10
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 PROVIDER_LABELS = {"github": "GitHub", "google": "Google"}
 CONSENT = "Claude Code 가 당신의 KB 를 읽고 씁니다"
+
+log = logging.getLogger("fast-question.oauth")
 
 
 def allowed_redirect(uri: str) -> bool:
@@ -85,13 +89,18 @@ class KbAuthProvider:
         await self._run(oauth_store.put_client, client_info.client_id, raw)
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
-        if params.resource != self.resource:
+        resource = params.resource
+        if resource is None:
+            log.info("resource 없는 /authorize 를 %s 로 채움: client_id=%s client_name=%s",
+                     self.resource, client.client_id, client.client_name)
+            resource = self.resource
+        if resource != self.resource:
             raise AuthorizeError("invalid_target", f"resource 는 {self.resource} 여야 한다.")
         pending_id = await self._run(oauth_store.put_pending, client.client_id, {
             "scopes": params.scopes or [SCOPE], "code_challenge": params.code_challenge,
             "redirect_uri": str(params.redirect_uri),
             "redirect_uri_provided_explicitly": params.redirect_uri_provided_explicitly,
-            "resource": params.resource, "state": params.state})
+            "resource": resource, "state": params.state})
         return f"{self.public_url}/oauth/continue/{pending_id}"
 
     async def load_authorization_code(self, client: OAuthClientInformationFull, authorization_code: str):
