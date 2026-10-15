@@ -125,6 +125,7 @@
     {
       "category": "Claude 연동",
       "question": "fast-question 동의어나 고유명사를 검색에 추가하려면?",
+      "target": "local",
       "answer": "Claude 에게 요청해 MCP kb_dict 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: action=user_word_add (색인을 다시 만듦)",
       "evidence": [
         {
@@ -136,7 +137,15 @@
     },
     {
       "category": "Claude 연동",
+      "question": "fast-question 동의어나 고유명사를 검색에 추가하려면?",
+      "target": "remote",
+      "answer": "Claude 에게 요청해 MCP kb_dict 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: 서버 공용 사전이라 운영자가 넣음",
+      "evidence": []
+    },
+    {
+      "category": "Claude 연동",
       "question": "fast-question 의 Skill 이나 훅을 고친 뒤 설치본에 반영하려면?",
+      "target": "local",
       "answer": "저장소에서 .venv\\Scripts\\python.exe scripts\\install.py 를 실행한다.\n- Skill: ~/.claude/skills 로 복사\n- 훅: ~/.claude/settings.json 의 UserPromptSubmit 에 등록\n- 훅만 지우기: --remove-hook\n- MCP 서버는 Claude Code 를 다시 시작해야 새 코드로 뜸",
       "evidence": [
         {
@@ -147,8 +156,16 @@
       ]
     },
     {
+      "category": "Claude 연동",
+      "question": "fast-question 원격 서버에 Claude Code 를 연결하려면?",
+      "target": "remote",
+      "answer": "화면 상단 연결에서 토큰을 만들고, 그 아래 설치 명령을 저장소 폴더의 PowerShell 에서 실행한다.\n- 토큰은 PC 마다 하나, 값은 만들 때 한 번만 보임\n- 설치 명령이 Skill·즉석 질문 훅·MCP 서버를 등록\n- MCP 를 HTTP 로 직접 붙이면(claude mcp add --transport http) 파일 근거를 달 수 없음",
+      "evidence": []
+    },
+    {
       "category": "운영",
       "question": "fast-question 웹 화면을 띄우려면?",
+      "target": "local",
       "answer": "저장소에서 .venv\\Scripts\\python.exe run_web.py 를 실행하고 http://127.0.0.1:8765 를 연다.\n- 다른 DB: --config <config.json>\n- 로그온 때 자동으로 띄우기: scripts\\autostart.py --install",
       "evidence": [
         {
@@ -160,7 +177,15 @@
     },
     {
       "category": "운영",
+      "question": "fast-question 웹 화면을 띄우려면?",
+      "target": "remote",
+      "answer": "http://127.0.0.1:8765 를 열고 GitHub 또는 Google 계정으로 로그인한다.\n- 로그아웃: 화면 상단 계정 이름 옆",
+      "evidence": []
+    },
+    {
+      "category": "운영",
       "question": "fast-question 설정 파일 config.json 의 키는?",
+      "target": "local",
       "answer": "저장소 루트의 config.json 이고, 상대 경로는 저장소 루트 기준이다.\n- db_path·host·port: DB 파일과 웹 주소 (기본 data/kb.sqlite3, 127.0.0.1, 8765)\n- backup_dir·backup_keep, log_dir·log_keep_days: 백업·로그 폴더와 보관 수 (기본 data/backup·14, data/logs·14)\n- recheck_interval_hours: 근거 재검증 주기 (기본 24)\n- mode·public_url·data_dir·oauth·allowed_logins: 원격 서빙 설정 (기본 local)\n- backup_s3_bucket·backup_s3_prefix: 원격 백업 사본을 올릴 S3 위치 (기본 빈 값, 안 올림)",
       "evidence": [
         {
@@ -172,7 +197,15 @@
     },
     {
       "category": "운영",
+      "question": "fast-question 원격 계정의 데이터를 내려받거나 탈퇴하려면?",
+      "target": "remote",
+      "answer": "화면 상단 연결 패널에서 한다.\n- DB 파일 받기: 내 KB 전체를 SQLite 파일 하나로 받음(로컬 모드에서 그대로 열림)\n- 탈퇴: 패널 맨 아래에 확인 문구 탈퇴 를 넣고 누름. 이 계정의 로그인·토큰이 모두 끊김",
+      "evidence": []
+    },
+    {
+      "category": "운영",
       "question": "fast-question 백업은 언제 어디에 만들어지나?",
+      "target": "local",
       "answer": "웹 서버가 마지막 백업 뒤 24시간이 지나면 data/backup/kb-YYYYMMDD.sqlite3 를 만든다.\n- 만든 뒤 quick_check 로 사본을 검사\n- 최신 backup_keep 개(기본 14)만 남김",
       "evidence": [
         {
@@ -184,7 +217,15 @@
     },
     {
       "category": "운영",
+      "question": "fast-question 백업은 언제 어디에 만들어지나?",
+      "target": "remote",
+      "answer": "서버가 계정 DB 마다 마지막 백업 뒤 24시간이 지나면 서버 안에 사본을 만든다.\n- 최신 몇 개만 남김\n- 직접 보관할 사본은 연결 패널의 DB 파일 받기로 받음",
+      "evidence": []
+    },
+    {
+      "category": "운영",
       "question": "fast-question 근거 상태 stale 의 뜻은?",
+      "target": "local",
       "answer": "Q&A 에 단 근거 파일이 기록한 뒤에 바뀌었다는 뜻이다.\n- 웹 서버가 recheck_interval_hours(기본 24)마다 근거를 다시 판정\n- Claude 가 조회 중 stale 항목을 만나면 근거를 다시 읽고 답을 고침",
       "evidence": [
         {
@@ -193,6 +234,13 @@
           "anchor": "recheck"
         }
       ]
+    },
+    {
+      "category": "운영",
+      "question": "fast-question 근거 상태 stale 의 뜻은?",
+      "target": "remote",
+      "answer": "Q&A 에 단 근거 파일이 기록한 뒤에 바뀌었다는 뜻이다.\n- 서버는 파일을 읽지 못해, 근거를 등록한 PC 의 로컬 검사기가 판정해 보고\n- 매일 09:00 에 돌리기: scripts\\autostart.py --check-install\n- 30일 넘게 판정이 없으면 unknown 으로 바뀜",
+      "evidence": []
     },
     {
       "category": "화면",
