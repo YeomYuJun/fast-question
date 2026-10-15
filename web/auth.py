@@ -37,6 +37,8 @@ ACCOUNT_KEY = "fq.account_id"
 AUTH_KIND_KEY = "fq.auth"
 GOOGLE_DISCOVERY = "https://accounts.google.com/.well-known/openid-configuration"
 GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+# id_token 의 iat·exp 비교에 허용하는 시계 차이(초). 0 이면 Google 시계가 1초만 앞서도 iat 가 미래라 거부된다
+ID_TOKEN_LEEWAY_S = 60
 GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN = "https://github.com/login/oauth/access_token"
 GITHUB_USER = "https://api.github.com/user"
@@ -106,7 +108,8 @@ class Google:
         try:
             kid = jwt.get_unverified_header(id_token).get("kid", "")
             claims = jwt.decode(id_token, await self._key(kid), algorithms=["RS256"], audience=self.client_id,
-                                issuer=GOOGLE_ISSUERS, options={"require": ["exp", "iat", "iss", "aud", "sub"]})
+                                issuer=GOOGLE_ISSUERS, leeway=ID_TOKEN_LEEWAY_S,
+                                options={"require": ["exp", "iat", "iss", "aud", "sub"]})
         except jwt.PyJWTError as e:
             raise AuthError(f"id_token 검증 실패: {type(e).__name__}: {e}") from e
         return str(claims["sub"]), ""

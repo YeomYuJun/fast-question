@@ -178,7 +178,8 @@ def test_github_login_uses_numeric_id_and_login(app, idp):
 @pytest.mark.parametrize("bad", [
     {"aud": "someone-else"},
     {"iss": "https://evil.example"},
-    {"exp": int(time.time()) - 60},
+    {"exp": int(time.time()) - 300},
+    {"iat": int(time.time()) + 600},
     "other_key",
 ])
 def test_invalid_id_token_is_refused(cfg, app, idp, bad):
@@ -190,6 +191,15 @@ def test_invalid_id_token_is_refused(cfg, app, idp, bad):
         assert login(c).headers["location"] == "/?login_error=provider"
         assert c.get("/api/me").status_code == 401
     assert accounts(cfg) == 0
+
+
+def test_id_token_from_slightly_ahead_clock_is_accepted(cfg, app, idp):
+    """Google 시계가 이 서버보다 조금 앞서면 iat 가 미래다. 시간 동기화가 꺼진 PC 에서 1초 차이로 실패한 적이 있다."""
+    idp.claims = {"iat": int(time.time()) + 30}
+    with client(app) as c:
+        assert login(c).headers["location"] == "/"
+        assert c.get("/api/me").status_code == 200
+    assert accounts(cfg) == 1
 
 
 def test_state_must_come_from_same_browser_and_is_single_use(app):
