@@ -204,27 +204,40 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         finally:
             conn.close()
 
-    def failed(code: str) -> Response:
-        resp = RedirectResponse(f"/?login_error={code}", status_code=302)
+    def failed(code: str, kind: str = "login") -> Response:
+        resp = RedirectResponse(f"/?{kind}_error={code}", status_code=302)
         resp.delete_cookie(login_cookie, path="/", secure=secure, httponly=True, samesite="lax")
+        return resp
+
+    async def start(p, next_path: str, link_account: int | None = None, status: int = 302) -> Response:
+        verifier, challenge = pkce()
+        state = await run_in_threadpool(db, control.put_login_state, p.name, verifier, next_path)
+        if link_account is not None:
+            await run_in_threadpool(db, control.put_link_state, state, link_account)
+        try:
+            url = await p.authorize_url(state, challenge)
+        except (httpx.HTTPError, KeyError, ValueError) as e:
+            log.warning("%s 로그인 시작 실패: %s", p.name, e)
+            return failed("provider", "link" if link_account is not None else "login")
+        resp = RedirectResponse(url, status_code=status)
+        resp.set_cookie(login_cookie, state, max_age=int(control.LOGIN_STATE_TTL.total_seconds()), path="/",
+                        secure=secure, httponly=True, samesite="lax")
         return resp
 
     async def login(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
         if p is None:
             return JSONResponse({"error": "켜지지 않은 로그인 공급자다.", "code": "not_found"}, status_code=404)
-        verifier, challenge = pkce()
-        state = await run_in_threadpool(db, control.put_login_state, p.name, verifier,
-                                        safe_next(request.query_params.get("next")))
-        try:
-            url = await p.authorize_url(state, challenge)
-        except (httpx.HTTPError, KeyError, ValueError) as e:
-            log.warning("%s 로그인 시작 실패: %s", p.name, e)
-            return failed("provider")
-        resp = RedirectResponse(url, status_code=302)
-        resp.set_cookie(login_cookie, state, max_age=int(control.LOGIN_STATE_TTL.total_seconds()), path="/",
-                        secure=secure, httponly=True, samesite="lax")
-        return resp
+        return await start(p, safe_next(request.query_params.get("next")))
+
+    async def link(request: Request) -> Response:
+        """로그인 수단 추가(연결 패널의 폼 POST). 공급자 로그인이 끝나면 callback 이 이 계정에 신원을 붙인다."""
+        p = providers.get(request.path_params["provider"])
+        if p is None:
+            return JSONResponse({"error": "켜지지 않은 로그인 공급자다.", "code": "not_found"}, status_code=404)
+        if request.scope.get(AUTH_KIND_KEY) != "session":
+            return RedirectResponse("/?link_error=session", status_code=303)
+        return await start(p, "/", request.scope[ACCOUNT_KEY], 303)
 
     async def callback(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
@@ -237,13 +250,20 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         if not state or not hmac.compare_digest(state, request.cookies.get(login_cookie, "")):
             return failed("state")
         st = await run_in_threadpool(db, control.take_login_state, state, p.name)
+        link_account = await run_in_threadpool(db, control.take_link_state, state)
+        kind = "login" if link_account is None else "link"
         if st is None:
-            return failed("state")
+            return failed("state", kind)
+        if link_account is not None and (request.scope.get(AUTH_KIND_KEY) != "session"
+                                         or request.scope.get(ACCOUNT_KEY) != link_account):
+            return failed("state", kind)  # 시작한 계정의 세션이 끝났거나 바뀌었다
         try:
             sub, name = await p.identity(q.get("code", ""), st["verifier"])
         except (AuthError, httpx.HTTPError, KeyError, ValueError) as e:
             log.warning("%s 로그인 실패: %s", p.name, e)
-            return failed("provider")
+            return failed("provider", kind)
+        if link_account is not None:
+            return await linked(p.name, sub, link_account)
         try:
             account_id, created = await run_in_threadpool(db, control.login_identity, p.name, sub, name,
                                                           cfg.allowed_logins, request.client.host if request.client else "?")
@@ -261,6 +281,27 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         resp.delete_cookie(login_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         resp.set_cookie(session_cookie, token, max_age=int(control.SESSION_MAX.total_seconds()), path="/",
                         secure=secure, httponly=True, samesite="lax")
+        return resp
+
+    async def linked(provider: str, sub: str, account_id: int) -> Response:
+        try:
+            discarded = await run_in_threadpool(db, control.link_identity, account_id, provider, sub,
+                                                cfg.allowed_logins)
+        except control.LoginRefused:
+            log.warning("%s 로그인 수단 추가 거부: 허용 목록에 없다", provider)
+            return failed("closed", "link")
+        except control.LinkRefused:
+            return failed("exists", "link")
+        target = f"/?linked={provider}"
+        if discarded is not None:
+            if tenant.user_dir(cfg.data_dir, discarded).exists():
+                await run_in_threadpool(tenant.retire, cfg.data_dir, discarded)
+            log.info("로그인 수단 추가: 계정 %s 에 %s, 그 신원의 계정 %s 를 버림", account_id, provider, discarded)
+            target += "&discarded=1"
+        else:
+            log.info("로그인 수단 추가: 계정 %s 에 %s", account_id, provider)
+        resp = RedirectResponse(target, status_code=302)
+        resp.delete_cookie(login_cookie, path="/", secure=secure, httponly=True, samesite="lax")
         return resp
 
     async def logout(request: Request) -> Response:
@@ -281,7 +322,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return {**control.get_account(conn, account_id), "providers": control.account_providers(conn, account_id)}
 
         acc = await run_in_threadpool(db, read)
-        return JSONResponse({"mode": "remote", "account": {
+        return JSONResponse({"mode": "remote", "available": sorted(providers), "account": {
             "id": acc["id"], "display_name": acc["display_name"], "providers": acc["providers"]}})
 
     def need_session(request: Request) -> Response | None:
@@ -342,6 +383,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         Route("/api/account/delete", delete_account, methods=["POST"]),
         Route("/api/account/tokens/{id:int}", revoke, methods=["DELETE"]),
         Route("/auth/login/{provider}", login),
+        Route("/auth/link/{provider}", link, methods=["POST"]),
         Route("/auth/callback/{provider}", callback),
         Route("/auth/logout", logout, methods=["POST"]),
         Route("/api/me", me),

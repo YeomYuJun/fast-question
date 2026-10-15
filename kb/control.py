@@ -140,8 +140,16 @@ CREATE TABLE IF NOT EXISTS global_user_word (
 );
 """
 
+# 로그인 수단 추가: 이 state 의 로그인이 끝나면 새 세션 대신 이 계정에 신원을 붙인다(login_state 와 같이 10분 1회)
+LINK_DDL = """
+CREATE TABLE IF NOT EXISTS link_state (
+    state TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES account(id)
+);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
@@ -152,6 +160,10 @@ class LoginRefused(Exception):
 
 class SignupLimited(LoginRefused):
     """같은 IP 에서 한 시간 안에 SIGNUP_PER_HOUR 개 넘게 계정을 만들려 했다."""
+
+
+class LinkRefused(Exception):
+    """계정에 이미 같은 공급자의 다른 신원이 있다(공급자마다 하나)."""
 
 
 class TokenRefused(ValueError):
@@ -285,6 +297,50 @@ def take_login_state(conn: sqlite3.Connection, state: str, provider: str, now: d
     if row is None or row["provider"] != provider or row["created_at"] < _iso(t - LOGIN_STATE_TTL):
         return None
     return {"verifier": row["verifier"], "next": row["next"]}
+
+
+def put_link_state(conn: sqlite3.Connection, state: str, account_id: int) -> None:
+    """state(put_login_state 가 만든 것)의 로그인을 account_id 에 신원을 붙이는 데 쓴다고 적는다."""
+    with tx(conn):
+        conn.execute("DELETE FROM link_state WHERE state NOT IN (SELECT state FROM login_state)")
+        conn.execute("INSERT INTO link_state(state, account_id) VALUES (?, ?)", (state, account_id))
+
+
+def take_link_state(conn: sqlite3.Connection, state: str) -> int | None:
+    """로그인 수단 추가로 시작한 state 면 그 계정 id 를 돌려주고 지운다. 아니면 None."""
+    with tx(conn):
+        row = conn.execute("SELECT account_id FROM link_state WHERE state = ?", (state,)).fetchone()
+        conn.execute("DELETE FROM link_state WHERE state = ?", (state,))
+    return None if row is None else row[0]
+
+
+def link_identity(conn: sqlite3.Connection, account_id: int, provider: str, sub: str,
+                  allowed: frozenset[str] | None = None, now: datetime | None = None) -> int | None:
+    """신원을 account_id 에 붙인다. 그 신원이 있던 다른 계정에 남은 신원이 없으면 그 계정을 탈퇴시키고 그 id 를 돌려준다
+    (부르는 쪽이 사용자 폴더를 deleted/ 로 옮긴다). 버린 계정이 없으면 None."""
+    if allowed and f"{provider}:{sub}" not in allowed:
+        raise LoginRefused(f"{provider}:{sub}")
+    with tx(conn):
+        row = conn.execute("SELECT account_id FROM identity WHERE provider = ? AND provider_sub = ?",
+                           (provider, sub)).fetchone()
+        if row is not None and row[0] == account_id:
+            return None
+        if conn.execute("SELECT 1 FROM identity WHERE account_id = ? AND provider = ?",
+                        (account_id, provider)).fetchone():
+            raise LinkRefused(provider)
+        if row is None:
+            conn.execute("INSERT INTO identity(provider, provider_sub, account_id) VALUES (?, ?, ?)",
+                         (provider, sub, account_id))
+            return None
+        other = row[0]
+        conn.execute("UPDATE identity SET account_id = ? WHERE provider = ? AND provider_sub = ?",
+                     (account_id, provider, sub))
+        left = conn.execute("SELECT count(*) FROM identity WHERE account_id = ?", (other,)).fetchone()[0]
+        closed = conn.execute("SELECT deleted_at FROM account WHERE id = ?", (other,)).fetchone()[0]
+    if left or closed:
+        return None
+    delete_account(conn, other, now)
+    return other
 
 
 def create_personal_token(conn: sqlite3.Connection, account_id: int, name: str,

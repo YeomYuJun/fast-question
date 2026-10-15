@@ -1089,6 +1089,29 @@ function showLogin(providers) {
   $("#login").hidden = false;
 }
 
+// 로그인 수단 추가 결과(/auth/link 콜백이 붙인 쿼리)
+const LINK_ERRORS = {
+  session: "로그인한 상태에서 다시 시도한다.",
+  state: "시간이 지났거나 그 사이 로그아웃했다. 다시 시도한다.",
+  provider: "로그인 공급자의 응답을 확인하지 못했다. 다시 시도한다.",
+  closed: "이 계정은 추가할 수 없다.",
+  exists: "이 공급자의 다른 계정이 이미 연결되어 있다.",
+  denied: "로그인 수단 추가를 취소했다.",
+};
+
+function linkResult() {
+  const p = new URLSearchParams(location.search);
+  const ok = p.get("linked"), err = p.get("link_error"), dropped = p.get("discarded");
+  if (!ok && !err) return;
+  for (const k of ["linked", "link_error", "discarded"]) p.delete(k);
+  const rest = p.toString();
+  history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  if (err) toast(LINK_ERRORS[err] || "로그인 수단을 추가하지 못했다.", { err: true });
+  else toast(`${PROVIDERS[ok] || ok} 로그인을 추가했다.` + (dropped ? " 그 계정이 쓰던 DB 는 버렸다." : ""));
+}
+
+let me = null;  // 원격 모드 로그인 정보(/api/me)
+
 function showAccount(account) {
   const fallback = account.providers.map((n) => `${PROVIDERS[n] || n} 계정`).join(", ");
   $("#account-name").textContent = account.display_name || fallback;
@@ -1172,16 +1195,20 @@ async function renderConnect(made) {
     }
   } }, name, el("button", { class: "btn primary", type: "submit" }, "토큰 만들기"));
   const day = (iso) => (iso || "").slice(0, 10);
+  // 휴대폰, 태블릿(마우스 없이 터치만)에서는 Claude Code 를 돌릴 수 없어 토큰 만들기와 설치 명령을 빼고 안내만 둔다.
+  // 브라우저 이름(UA) 대신 입력 장치로 판단한다. Safari, Chrome, Edge, Firefox 모두 이 미디어 쿼리를 지원한다
+  const touchOnly = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
   fill($("#connect"),
     el("div", { class: "connect-head" }, el("span", { class: "label" }, "연결"),
       el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
-    el("p", { class: "connect-note" },
-      "이 PC 의 Claude Code 와 즉석 질문 훅을 이 서버에 붙인다. 토큰은 PC 마다 하나씩 만든다."),
+    el("p", { class: "connect-note" }, touchOnly
+      ? "Claude Code 연결(토큰 만들기, 설치 명령)은 Claude Code 를 쓰는 PC 의 브라우저에서 한다. 여기서는 토큰 폐기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있다."
+      : "이 PC 의 Claude Code 와 즉석 질문 훅을 이 서버에 붙인다. 토큰은 PC 마다 하나씩 만든다."),
     made ? el("div", { class: "token-made", role: "status" },
       el("p", {}, `토큰 "${made.name}" 을 만들었다. 이 값은 지금만 보인다.`),
       el("div", { class: "token-row" }, el("code", { class: "mono token-value" }, made.token),
         ibtn("cp", "copy", "토큰 복사", "토큰 복사", () => copy(made.token, "토큰을 복사했다.")))) : null,
-    form,
+    touchOnly ? null : form,
     tokens.length
       ? el("ul", { class: "token-list" }, tokens.map((t) => el("li", { class: "token-item" + (t.expired ? " expired" : "") },
         el("span", { class: "name" }, t.name),
@@ -1189,12 +1216,27 @@ async function renderConnect(made) {
           t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀"),
         ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
       : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다."),
-    installBlock(),
+    touchOnly ? null : installBlock(),
+    loginBlock(),
     el("div", { class: "connect-export" }, el("span", { class: "label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받는다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."),
       el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")),
     leaveForm());
   if (made) name.value = "";
+}
+
+// 로그인 수단: 지금 계정에 다른 공급자 로그인을 붙인다. 그 공급자 계정이 이미 쓰던 DB 는 버린다
+function loginBlock() {
+  const mine = me?.account?.providers || [];
+  const more = (me?.available || []).filter((n) => !mine.includes(n));
+  const label = (n) => PROVIDERS[n] || n;
+  return el("div", { class: "connect-login" }, el("span", { class: "label" }, "로그인 수단"),
+    el("p", { class: "connect-note" }, `지금 ${mine.map(label).join(" · ")} 로 로그인할 수 있다.`
+      + (more.length ? " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 DB 가 열린다. 추가하는 계정으로 이미 쓰던 DB 가 있으면 그 DB 는 버려진다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 DB 파일을 받는다." : "")),
+    more.length ? el("div", { class: "connect-form" }, more.map((n) =>
+      el("form", { method: "post", action: `/auth/link/${n}`, onsubmit: (ev) => {
+        if (!window.confirm(`${label(n)} 로그인을 이 계정에 추가한다.\n그 ${label(n)} 계정으로 쓰던 fast-question DB 가 있으면 버려진다(30일 뒤 삭제).\n추가하시겠습니까?`)) ev.preventDefault();
+      } }, el("button", { class: "btn", type: "submit" }, `${label(n)} 로그인 추가`)))) : null);
 }
 
 // 탈퇴: 확인 문구를 입력해야 버튼이 동작한다
@@ -1218,8 +1260,11 @@ function leaveForm() {
 // 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
 async function whoami() {
   try {
-    const me = await api("GET", "/api/me");
-    if (me.account) showAccount(me.account);
+    me = await api("GET", "/api/me");
+    if (me.account) {
+      showAccount(me.account);
+      linkResult();
+    }
     return true;
   } catch (e) {
     return e.status !== 401;  // 그 밖의 실패는 화면을 띄우고 각 요청의 오류로 보인다
