@@ -327,7 +327,8 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .token-item .meta { font-size: 11.5px; color: var(--faint); }
 .token-item.expired .name { color: var(--faint); }
 .connect-cmd { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: start; }
-.connect-cmd .label { grid-column: 1 / -1; }
+.connect-cmd .label, .connect-cmd .shell-tabs, .connect-cmd .connect-note { grid-column: 1 / -1; }
+.shell-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); }
 .connect-export { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
 .connect-export .btn:hover { text-decoration: none; }
 .connect-leave { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--line); }

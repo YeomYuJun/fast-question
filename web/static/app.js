@@ -1107,11 +1107,31 @@ async function logout() {
 }
 
 // ---------- 원격 모드 연결: 개인 토큰과 설치 명령 ----------
-function installCommand() {
-  return [
-    "# fast-question 저장소 폴더에서 PowerShell 로 실행한다. 토큰을 물으면 붙여 넣는다",
-    `.venv\\Scripts\\python.exe scripts\\install.py --remote ${location.origin}`,
-  ].join("\r\n");
+// 상자와 복사 내용은 명령 한 줄뿐이다(붙여 넣어 바로 실행되게). 안내는 상자 밖 문장으로 둔다.
+// Git Bash 는 \ 를 이스케이프로 읽어 / 로 쓴다. install.py 는 Windows 가상환경(.venv\Scripts)을 전제로 한다
+const INSTALL_SHELLS = [
+  { name: "PowerShell", cmd: (url) => `.venv\\Scripts\\python.exe scripts\\install.py --remote ${url}` },
+  { name: "cmd", cmd: (url) => `.venv\\Scripts\\python.exe scripts\\install.py --remote ${url}` },
+  { name: "Git Bash", cmd: (url) => `.venv/Scripts/python.exe scripts/install.py --remote ${url}` },
+];
+
+function installShell() {
+  return INSTALL_SHELLS.find((s) => s.name === store("fq-shell")) || INSTALL_SHELLS[0];
+}
+
+function installBlock() {
+  const shell = installShell();
+  const command = shell.cmd(location.origin);
+  const tabs = el("div", { class: "shell-tabs", role: "group", "aria-label": "셸" },
+    INSTALL_SHELLS.map((s) => el("button", { class: "chip" + (s === shell ? " on" : ""), type: "button",
+      "aria-pressed": String(s === shell), onclick: () => {
+        store("fq-shell", s.name);
+        $(".connect-cmd").replaceWith(installBlock());
+      } }, s.name)));
+  return el("div", { class: "connect-cmd" }, el("span", { class: "label" }, "설치 명령"), tabs,
+    el("p", { class: "connect-note" }, "fast-question 저장소 폴더에서 실행한다. 토큰을 물으면 위에서 만든 값을 붙여 넣는다."),
+    el("pre", { class: "mono" }, command),
+    ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(command, `${shell.name} 설치 명령을 복사했다.`)));
 }
 
 function openConnect(open) {
@@ -1169,9 +1189,7 @@ async function renderConnect(made) {
           t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀"),
         ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
       : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다."),
-    el("div", { class: "connect-cmd" }, el("span", { class: "label" }, "설치 명령 (PowerShell)"),
-      el("pre", { class: "mono" }, installCommand()),
-      ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(installCommand(), "설치 명령을 복사했다."))),
+    installBlock(),
     el("div", { class: "connect-export" }, el("span", { class: "label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받는다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."),
       el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")),

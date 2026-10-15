@@ -62,6 +62,21 @@ def test_page_has_csp_and_no_inline_code(client):
     assert "default-src 'self'" in client.get("/api/me").headers["content-security-policy"]
 
 
+def test_install_commands_cover_shells_without_comments():
+    """연결 패널의 설치 명령은 셸마다 따로 있고, 복사하는 내용은 명령 한 줄뿐이다(주석·안내는 상자 밖)."""
+    import re
+    from web.app import STATIC
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    m = re.search(r"const INSTALL_SHELLS = \[(.*?)\n\];", js, re.S)
+    assert m, "app.js 에 INSTALL_SHELLS 가 없다"
+    block = m.group(1)
+    assert re.findall(r'name: "([^"]+)"', block) == ["PowerShell", "cmd", "Git Bash"]
+    assert "#" not in block and "\\n" not in block
+    assert block.count(r".venv\\Scripts\\python.exe scripts\\install.py --remote ${url}") == 2
+    assert block.count(".venv/Scripts/python.exe scripts/install.py --remote ${url}") == 1
+    assert "installCommand()" not in js
+
+
 def test_app_css_uses_only_tokens():
     """색은 design 토큰 변수로만 쓴다(CLAUDE.md 화면 디자인 규칙)."""
     import re
