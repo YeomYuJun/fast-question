@@ -161,22 +161,7 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} - fast-question</title>
 <link rel="stylesheet" href="/static/tokens.css">
-<style>
-body {{ margin: 0; background: var(--bg); color: var(--ink); font: var(--text-answer); }}
-main {{ max-width: 28rem; margin: var(--space-12) auto; padding: var(--space-6); background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }}
-h1 {{ margin: 0 0 var(--space-4); font: var(--text-question-lg); }}
-p {{ margin: 0 0 var(--space-3); color: var(--muted); }}
-dl {{ margin: 0 0 var(--space-6); }}
-dt {{ font: var(--text-label); color: var(--faint); }}
-dd {{ margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-all; }}
-.actions {{ display: flex; gap: var(--space-2); flex-wrap: wrap; }}
-.btn {{ display: inline-block; padding: var(--space-2) var(--space-4); border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md); background: var(--surface); color: var(--ink); font: var(--text-question);
-  text-decoration: none; cursor: pointer; }}
-.btn:hover {{ border-color: var(--accent); }}
-.btn.primary {{ border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }}
-</style>
+<link rel="stylesheet" href="/static/oauth.css">
 </head>
 <body>
 <main>
@@ -186,9 +171,9 @@ dd {{ margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-
 </html>
 """
 # Referrer-Policy 는 same-origin 이다. no-referrer 면 Chrome 이 이 페이지의 승인 폼 POST 에 Origin: null 을 붙여
-# 같은 출처 검사(SameOriginOnly)가 거부한다. same-origin 도 다른 사이트(콜백 주소)에는 리퍼러를 보내지 않는다
-PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY",
-                "Content-Security-Policy": "frame-ancestors 'none'", "Referrer-Policy": "same-origin"}
+# 같은 출처 검사(SameOriginOnly)가 거부한다. same-origin 도 다른 사이트(콜백 주소)에는 리퍼러를 보내지 않는다.
+# Content-Security-Policy 는 모든 응답에 web/app.py 의 SecurityHeaders 가 붙인다
+PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin"}
 
 
 def page(title: str, body: str, status: int = 200) -> HTMLResponse:

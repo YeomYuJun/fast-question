@@ -33,6 +33,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.background import BackgroundTask
@@ -96,6 +97,31 @@ class SameOriginOnly:
                 await resp(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+
+# 화면은 외부 CDN·글꼴·인라인 스크립트/스타일을 쓰지 않는다(theme.js, oauth.css 로 뺐다). JS 가 element.style 로
+# 높이를 바꾸는 것은 CSP 가 막지 않는다. form-action 은 두지 않는다: 동의 화면 승인 뒤 303 으로 클라이언트 콜백
+# 주소(다른 출처)로 가는데 Chrome 은 폼 제출 뒤 리다이렉트에도 form-action 을 적용한다
+CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'"
+
+
+class SecurityHeaders:
+    """모든 HTTP 응답에 Content-Security-Policy 를 붙인다. 가장 바깥 미들웨어라 다른 미들웨어의 거부 응답에도 붙는다."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Content-Security-Policy"] = CSP
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def _qa_out(item: dict) -> dict:
@@ -377,14 +403,16 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             pid(r), b["version"], note=b.get("note")))), methods=["POST"]),
         Mount("/static", RevalidatedStaticFiles(directory=STATIC), name="static"),
     ]
-    middleware = [Middleware(SameOriginOnly, hosts={f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"})]
+    middleware = [Middleware(SecurityHeaders),
+                  Middleware(SameOriginOnly, hosts={f"127.0.0.1:{cfg.port}", f"localhost:{cfg.port}"})]
     if remote:
         control_file = tenant.control_path(cfg.data_dir)
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes[1:1] = oauth_as.routes(auth.providers_from(cfg), control_file)  # /oauth/continue/<id>
         routes.insert(1, importer.route(db_for, cfg.data_dir / "tmp", analyzer, user_db_lock))
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
-        middleware = [Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
+        middleware = [Middleware(SecurityHeaders),
+                      Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(BodyLimit),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0]),
                       Middleware(RateLimit)]

@@ -152,6 +152,24 @@ def test_login_page_without_session(app):
         assert CONSENT in c.get(path).text
 
 
+def test_oauth_pages_have_csp_and_no_inline_style(app):
+    import re
+    from web.app import STATIC
+    with client(app) as c:
+        _, _, path = pending(c)
+        pages = [c.get(path)]
+        login(c, next_=path)
+        pages.append(c.get(path))
+        assert CONSENT in pages[1].text
+        for page in pages:
+            csp = page.headers["content-security-policy"]
+            assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp
+            assert "<style" not in page.text and "/static/oauth.css" in page.text
+        assert c.get("/static/oauth.css").status_code == 200
+        assert "default-src 'self'" in c.get("/").headers["content-security-policy"]
+    assert re.findall(r"#[0-9a-fA-F]{3,8}", (STATIC / "oauth.css").read_text(encoding="utf-8")) == []
+
+
 def test_login_page_shows_only_enabled_providers(tmp_path, monkeypatch, idp, analyzer):
     monkeypatch.setenv("FQ_GOOGLE_SECRET", "g-secret")
     monkeypatch.delenv("FQ_GITHUB_SECRET", raising=False)

@@ -49,6 +49,19 @@ def test_index_lists_search_syntax(client):
         assert token in html, token
 
 
+def test_page_has_csp_and_no_inline_code(client):
+    """CSP default-src 'self' 아래에서 화면이 돌게 인라인 스크립트·스타일을 두지 않는다."""
+    import re
+    r = client.get("/")
+    assert "default-src 'self'" in r.headers["content-security-policy"]
+    assert "<style" not in r.text and " style=" not in r.text
+    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", r.text) == []
+    # 테마는 첫 그리기 전에 정한다: 스타일시트보다 먼저, defer 없이
+    assert r.text.index('<script src="/static/theme.js"></script>') < r.text.index("/static/tokens.css")
+    assert client.get("/static/theme.js").status_code == 200
+    assert "default-src 'self'" in client.get("/api/me").headers["content-security-policy"]
+
+
 def test_app_css_uses_only_tokens():
     """색은 design 토큰 변수로만 쓴다(CLAUDE.md 화면 디자인 규칙)."""
     import re

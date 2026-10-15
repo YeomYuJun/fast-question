@@ -4,15 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>fast-question</title>
-<script>
-// 테마는 그리기 전에 정한다. 저장값이 없으면 OS 설정을 따른다
-(function () {
-  var t = null;
-  try { t = localStorage.getItem("fq-theme"); } catch (e) { t = null; }
-  if (t !== "light" && t !== "dark") t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  document.documentElement.setAttribute("data-theme", t);
-})();
-</script>
+<script src="/static/theme.js"></script>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/static/app.css">
 </head>
