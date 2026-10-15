@@ -6,7 +6,7 @@
 |---|---|
 | `Dockerfile` | `python:3.12-slim`, `requirements.txt` + `requirements-server.txt`(boto3), 비루트 사용자 `fq`, 데이터 볼륨 `/data`, `python run_web.py --config /etc/fq/config.json` |
 | `compose.yaml` | `app`(8765, 컨테이너 안에서만 열림) + `caddy`(80·443, Let's Encrypt 인증서) |
-| `Caddyfile` | 도메인 자리표시자 `www.domain-example.com` → `app:8765` |
+| `Caddyfile` | `FQ_DOMAIN` → `app:8765`, `www.FQ_DOMAIN` → 본 주소로 넘김 |
 | `config.example.json` | 원격 모드 설정 예시. `config.json` 으로 복사해 고친다 |
 
 빌드 문맥은 저장소 루트이고 루트의 `.dockerignore` 가 `data`, `docs`, `tests`, `.venv` 등을 뺀다.
@@ -22,12 +22,12 @@
    ```
 
 2. `config.json` 에서 고칠 키
-   - `public_url`: `https://` + 실제 도메인. `Caddyfile` 의 도메인과 같아야 한다(다른 Host 의 요청은 403).
+   - `public_url`: `https://` + 실제 도메인. `deploy/.env` 의 `FQ_DOMAIN` 과 같아야 한다(다른 Host 의 요청은 403).
    - `oauth.github.client_id`, `oauth.google.client_id`: 로그인 공급자의 client id.
    - `allowed_logins`: 비어 있지 않으면 그 신원(`github:<숫자 id>`, `google:<sub>`)만 로그인한다.
    - `backup_s3_bucket`, `backup_s3_prefix`: 비어 있지 않으면 일별 백업 사본을 `s3://<bucket>/<prefix>users/<id>/kb-YYYYMMDD.sqlite3`, `<prefix>control/control-YYYYMMDD.sqlite3` 에 올린다.
    - `host`(`0.0.0.0`), `data_dir`(`/data`), `log_dir`(`/data/logs`)는 이미지 구조에 맞춘 값이라 그대로 둔다.
-3. `Caddyfile` 의 `www.domain-example.com` 을 실제 도메인으로 바꾼다.
+3. `deploy/.env` 에 `FQ_DOMAIN=<도메인>`(https:// 없이)을 적는다. Caddyfile 은 고치지 않는다(서버의 git pull 이 충돌하지 않게).
 4. 비밀값은 config 에 넣지 않는다. `compose.yaml` 이 다음 환경 변수를 컨테이너로 넘긴다. `deploy/.env` 파일(`이름=값` 한 줄씩)이나 셸 환경 변수로 준다.
    - `FQ_GITHUB_SECRET`, `FQ_GOOGLE_SECRET`: 로그인 공급자의 client secret
    - `AWS_DEFAULT_REGION`: S3 리전(기본 `ap-northeast-2`)

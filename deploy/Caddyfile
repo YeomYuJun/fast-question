@@ -1,6 +1,11 @@
-# www.domain-example.com 은 자리표시자다. 실제 도메인으로 바꾸고 config.json 의 public_url 호스트와 같게 둔다.
-# Caddy 가 Let's Encrypt 인증서를 받고 HTTP 를 HTTPS 로 넘긴다. Host 헤더는 그대로 app 에 전달된다.
-www.domain-example.com {
+# 도메인은 deploy/.env 의 FQ_DOMAIN(예: fast-question.com)이다. config.json 의 public_url 호스트와 같게 둔다.
+# Caddy 가 두 이름 모두 Let's Encrypt 인증서를 받고 HTTP 를 HTTPS 로 넘긴다. Host 헤더는 그대로 app 에 전달된다.
+# www 는 같은 경로의 본 주소로 넘긴다(app 은 public_url 의 Host 만 받는다).
+{$FQ_DOMAIN} {
 	header Strict-Transport-Security "max-age=31536000"
 	reverse_proxy app:8765
+}
+
+www.{$FQ_DOMAIN} {
+	redir https://{$FQ_DOMAIN}{uri} permanent
 }

@@ -27,6 +27,8 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+    environment:
+      FQ_DOMAIN: ${FQ_DOMAIN:?deploy/.env 에 FQ_DOMAIN(예 fast-question.com)을 적는다}
     ports:
       - "80:80"
       - "443:443"

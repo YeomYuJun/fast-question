@@ -11,3 +11,5 @@ design/
 deploy/.env
 deploy/aws.env
 deploy/config.json
+deploy/.env
+deploy/aws.env
