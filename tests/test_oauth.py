@@ -353,6 +353,19 @@ def test_revoke_ends_access_and_refresh(app, which):
         assert refresh(c, client_id, tok["refresh_token"]).status_code == 400
 
 
+def test_revoke_logs_field_names_only(app, caplog):
+    """실제 클라이언트가 /revoke 에 client_secret 을 보내는지 운영 로그로 확인한다. 값(토큰)은 남기지 않는다."""
+    caplog.set_level("INFO", logger="fast-question.oauth")
+    with client(app) as c:
+        client_id, tok = tokens(c)
+        assert c.post("/revoke", data={"token": tok["access_token"], "client_id": client_id}).status_code == 400
+        assert c.post("/revoke", data={"token": tok["access_token"], "client_id": client_id,
+                                       "client_secret": ""}).status_code == 200
+    lines = [r.getMessage() for r in caplog.records if r.name == "fast-question.oauth" and "/revoke" in r.getMessage()]
+    assert lines == ["/revoke 필드: client_id, token", "/revoke 필드: client_id, client_secret, token"]
+    assert not any(tok["access_token"] in r.getMessage() for r in caplog.records)
+
+
 def test_personal_token_and_oauth_token_share_mcp(cfg, app):
     _, pat = new_token(cfg)
     with client(app) as c:

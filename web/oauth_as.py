@@ -16,7 +16,7 @@ redirect_uri 로, 거부하면 error=access_denied 로 보낸다 → /token 이 
 import html
 import logging
 from pathlib import Path
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from mcp.server.auth.provider import (AccessToken, AuthorizationCode, AuthorizationParams, AuthorizeError,
                                       RefreshToken, RegistrationError, TokenError, construct_redirect_uri)
@@ -152,6 +152,31 @@ class KbAuthProvider:
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         await self._run(oauth_store.revoke, token.token)
+
+
+class RevokeFieldLog:
+    """/revoke 요청 본문의 필드 이름만 로그로 남긴다(값은 남기지 않는다). SDK(mcp 2.0.0)의 /revoke 는 client_secret 필드가
+    없으면 400 이라, 실제 클라이언트가 그 필드를 보내는지 운영에서 확인하려고 둔다. 본문은 그대로 SDK 에 넘긴다."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["path"] != "/revoke" or scope["method"] != "POST":
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+
+        async def receive_and_log():
+            message = await receive()
+            if message["type"] == "http.request":
+                body.extend(message.get("body", b""))
+                if not message.get("more_body") and len(body) <= CLIENT_JSON_MAX:
+                    names = sorted(parse_qs(body.decode("latin-1"), keep_blank_values=True))
+                    log.info("/revoke 필드: %s", ", ".join(names))
+            return message
+
+        await self.app(scope, receive_and_log, send)
 
 
 PAGE = """<!doctype html>

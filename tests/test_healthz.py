@@ -1,4 +1,5 @@
-"""/healthz: DB 연결, 데이터 디스크 여유 10% 이상, 형태소 분석기 켜짐. 하나라도 실패면 503. 인증 없이 열린다."""
+"""/healthz: DB 연결, 데이터 디스크 여유 20% 이상, 메모리 여유 15% 이상(읽을 수 있을 때), 형태소 분석기 켜짐.
+하나라도 실패면 503. 인증 없이 열린다. 외부 상태 검사(알람)가 이 응답을 본다."""
 import shutil
 from collections import namedtuple
 
@@ -32,6 +33,14 @@ def make_cfg(tmp_path, **kw) -> Config:
     return Config(**base)
 
 
+@pytest.fixture(autouse=True)
+def roomy_host(monkeypatch):
+    """검사를 돌리는 PC 의 디스크·메모리 상태와 무관하게 한다. 부족한 경우를 보는 테스트는 다시 덮어쓴다."""
+    import web.app
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: Usage(1000, 500, 500))
+    monkeypatch.setattr(web.app, "mem_available", lambda: 0.5)
+
+
 @pytest.fixture
 def remote_cfg(tmp_path):
     return make_cfg(tmp_path, host="0.0.0.0", mode="remote", public_url=URL, data_dir=tmp_path / "data")
@@ -45,7 +54,7 @@ def test_remote_healthz_ok_without_login_and_any_host(remote_cfg):
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["ok"] is True and body["db"] == "ok" and body["morph"] is True
-            assert 0 <= body["disk_free"] <= 1
+            assert body["disk_free"] == 0.5 and body["mem_available"] == 0.5
     with TestClient(app, base_url="http://127.0.0.1:8765") as c:
         assert c.get("/api/categories").status_code == 403  # 다른 경로의 Host 검사는 그대로다
     assert not (remote_cfg.data_dir / "users").exists()
@@ -66,6 +75,39 @@ def test_healthz_503_when_disk_is_nearly_full(remote_cfg, monkeypatch):
     with TestClient(app, base_url=URL) as c:
         r = c.get("/healthz")
     assert r.status_code == 503 and r.json()["disk_free"] == 0.05
+
+
+def test_healthz_503_when_disk_is_80_percent_used(remote_cfg, monkeypatch):
+    app = create_app(remote_cfg, run_jobs=False, analyzer=Analyzer(loader=_no_kiwi))
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: Usage(1000, 850, 150))
+    with TestClient(app, base_url=URL) as c:
+        r = c.get("/healthz")
+    assert r.status_code == 503 and r.json()["disk_free"] == 0.15
+
+
+def test_healthz_503_when_memory_is_85_percent_used(remote_cfg, monkeypatch):
+    import web.app
+    app = create_app(remote_cfg, run_jobs=False, analyzer=Analyzer(loader=_no_kiwi))
+    monkeypatch.setattr(web.app, "mem_available", lambda: 0.12)
+    with TestClient(app, base_url=URL) as c:
+        r = c.get("/healthz")
+    assert r.status_code == 503 and r.json()["mem_available"] == 0.12 and r.json()["ok"] is False
+
+
+def test_healthz_ignores_memory_it_cannot_read(remote_cfg, monkeypatch):
+    import web.app
+    app = create_app(remote_cfg, run_jobs=False, analyzer=Analyzer(loader=_no_kiwi))
+    monkeypatch.setattr(web.app, "mem_available", lambda: None)
+    with TestClient(app, base_url=URL) as c:
+        r = c.get("/healthz")
+    assert r.status_code == 200 and r.json()["mem_available"] is None
+
+
+def test_mem_available_reads_proc_meminfo():
+    import web.app
+    text = "MemTotal:        1951744 kB\nMemFree:          180000 kB\nMemAvailable:     390348 kB\n"
+    assert web.app.meminfo_available(text) == 0.2
+    assert web.app.meminfo_available("MemTotal: 10 kB\n") is None
 
 
 def test_healthz_503_when_control_db_fails(remote_cfg, monkeypatch):

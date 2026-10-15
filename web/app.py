@@ -61,9 +61,31 @@ STATIC = Path(__file__).resolve().parent / "static"
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
-HEALTH_DISK_MIN = 0.10
+# /healthz 기준. 외부 상태 검사가 503 을 알람으로 받는다(Lightsail 지표에는 메모리·디스크 사용률이 없다)
+HEALTH_DISK_MIN = 0.20  # 디스크 80% 사용
+HEALTH_MEM_MIN = 0.15  # 메모리 85% 사용. Kiwi 를 띄운 앱이 약 550 MiB 라 2 GB 서버에서 여유가 크지 않다
 HEALTH_PATH = "/healthz"
 log = logging.getLogger("fast-question.web")
+
+
+def meminfo_available(text: str) -> float | None:
+    """/proc/meminfo 내용에서 MemAvailable / MemTotal. 둘 중 하나라도 없으면 None."""
+    kb = {}
+    for line in text.splitlines():
+        name, _, rest = line.partition(":")
+        if name in ("MemTotal", "MemAvailable") and rest.split():
+            kb[name] = int(rest.split()[0])
+    if len(kb) < 2 or not kb["MemTotal"]:
+        return None
+    return round(kb["MemAvailable"] / kb["MemTotal"], 4)
+
+
+def mem_available() -> float | None:
+    """서버(호스트) 메모리 여유 비율. 컨테이너 안에서도 /proc/meminfo 는 호스트 값이다. Linux 가 아니면 None."""
+    try:
+        return meminfo_available(Path("/proc/meminfo").read_text(encoding="ascii"))
+    except OSError:
+        return None
 
 
 class RevalidatedStaticFiles(StaticFiles):
@@ -338,9 +360,11 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             out["disk_free"] = round(usage.free / usage.total, 4)
         except OSError as e:
             out["disk_free"], out["disk_error"] = None, f"{type(e).__name__}: {e}"
+        out["mem_available"] = mem_available()
         out["morph"] = bool(analyzer.enabled)
         out["ok"] = (out["db"] == "ok" and out["disk_free"] is not None
-                     and out["disk_free"] >= HEALTH_DISK_MIN and out["morph"])
+                     and out["disk_free"] >= HEALTH_DISK_MIN and out["morph"]
+                     and (out["mem_available"] is None or out["mem_available"] >= HEALTH_MEM_MIN))
         return out
 
     async def healthz(_request: Request) -> JSONResponse:
@@ -415,7 +439,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                       Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
                       Middleware(BodyLimit),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0]),
-                      Middleware(RateLimit)]
+                      Middleware(RateLimit),
+                      Middleware(oauth_as.RevokeFieldLog)]
     else:
         routes.insert(1, Route("/api/me", lambda r: JSONResponse({"mode": "local"})))
     app = Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
