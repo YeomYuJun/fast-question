@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-INVENTORY = Path(__file__).resolve().parent.parent / "skill" / "qa-harvest" / "inventory.py"
+INVENTORY = Path(__file__).resolve().parent.parent / "fq_client" / "inventory.py"
 
 
 def git(repo: Path, *args: str) -> str:

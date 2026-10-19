@@ -25,6 +25,7 @@ path = "fq_client/__init__.py"
 only-include = [
     "fq_client/__init__.py",
     "fq_client/cli.py",
+    "fq_client/inventory.py",
     "fq_client/lint_draft.py",
     "fq_client/login.py",
     "hooks/__init__.py",
@@ -46,6 +47,7 @@ only-include = [
     "pyproject.toml",
     "fq_client/__init__.py",
     "fq_client/cli.py",
+    "fq_client/inventory.py",
     "fq_client/lint_draft.py",
     "fq_client/login.py",
     "hooks/__init__.py",

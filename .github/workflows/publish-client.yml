@@ -1,0 +1,25 @@
+# PC 클라이언트 패키지(fast-question)를 PyPI 에 올린다. 태그 v<버전> 을 push 하면 돈다.
+# 버전은 fq_client/__init__.py 의 __version__ 하나이고, 태그와 다르면 올리지 않는다.
+# PyPI 인증은 Trusted Publishing(이 저장소·이 파일·환경 pypi 를 PyPI 프로젝트 설정에 등록)이라 비밀값이 없다.
+name: publish-client
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: 태그와 __version__ 대조
+        run: |
+          version=$(python3 -c "import re,pathlib; print(re.search(r'__version__ = \"(.+?)\"', pathlib.Path('fq_client/__init__.py').read_text()).group(1))")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "태그 $GITHUB_REF_NAME 와 __version__ $version 이 다르다"; exit 1; }
+      - run: uv build
+      - run: uv publish --trusted-publishing always

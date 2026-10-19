@@ -8,8 +8,8 @@ from pathlib import Path
 from tests.test_hook import FakeRemote, _cred_file, _db_with_item, _item
 
 ROOT = Path(__file__).resolve().parent.parent
-ENTRY_MODULES = ("fq_client.cli", "fq_client.lint_draft", "fq_client.login", "mcp_server.proxy", "hooks.ask_kb",
-                 "kb.remote")
+ENTRY_MODULES = ("fq_client.cli", "fq_client.inventory", "fq_client.lint_draft", "fq_client.login",
+                 "mcp_server.proxy", "hooks.ask_kb", "kb.remote")
 SERVER_MODULES = ("mcp_server.server", "kb.store", "kb.morph", "kb.control", "kb.db", "web")
 HEAVY_PACKAGES = ("kiwipiepy", "numpy", "boto3")  # 서버만 쓴다. starlette·jwt·cryptography 는 mcp 의 의존성이다
 

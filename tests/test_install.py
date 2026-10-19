@@ -59,20 +59,28 @@ def test_install_skills_copies_every_skill_folder(tmp_path):
     assert all("그대로" in m for m in install.install_skills(src, dst))
 
 
-def test_install_skills_fills_repo_path_in_md_only(tmp_path):
+def test_install_skills_fills_marks_in_md_only(tmp_path):
     src, dst, root = tmp_path / "skill", tmp_path / "dst", tmp_path / "repo dir"
     (src / "qa").mkdir(parents=True)
-    (src / "qa" / "SKILL.md").write_text(f'"{install.ROOT_MARK}/hooks/ask_kb.py"', encoding="utf-8")
-    (src / "qa" / "tool.py").write_text(install.ROOT_MARK, encoding="utf-8")
-    install.install_skills(src, dst, root)
-    assert (dst / "qa" / "SKILL.md").read_text(encoding="utf-8") == f'"{root.as_posix()}/hooks/ask_kb.py"'
-    assert (dst / "qa" / "tool.py").read_text(encoding="utf-8") == install.ROOT_MARK
-    assert all("그대로" in m for m in install.install_skills(src, dst, root))
+    (src / "qa" / "SKILL.md").write_text(f"{install.CLI_MARK} lint-draft x / {install.RULES_MARK}", encoding="utf-8")
+    (src / "qa" / "tool.py").write_text(install.CLI_MARK, encoding="utf-8")
+    marks = install.local_marks(root)
+    install.install_skills(src, dst, marks)
+    py, cli = (root / ".venv" / "Scripts" / "python.exe").as_posix(), (root / "fq_client" / "cli.py").as_posix()
+    assert (dst / "qa" / "SKILL.md").read_text(encoding="utf-8") == \
+        f'"{py}" "{cli}" lint-draft x / ~/.claude/skills/qa/rules.md'
+    assert (dst / "qa" / "tool.py").read_text(encoding="utf-8") == install.CLI_MARK
+    assert all("그대로" in m for m in install.install_skills(src, dst, marks))
+    assert "덮어씀" in install.install_skills(src, dst, {**marks, install.RULES_MARK: "다른 곳"})[0]
 
 
-def test_skill_sources_use_repo_path_mark_not_absolute_path():
-    for f in install.SKILLS_SRC.rglob("*.md"):
-        assert "fast-question/" not in f.read_text(encoding="utf-8").replace(install.ROOT_MARK, ""), f
+def test_skill_sources_use_marks_not_repo_paths():
+    texts = {f: f.read_text(encoding="utf-8") for f in install.SKILLS_SRC.rglob("*.md")}
+    for f, t in texts.items():
+        assert "fast-question/" not in t and ".venv" not in t and "{{FAST_QUESTION_" not in t, f
+    harvest = (install.SKILLS_SRC / "qa-harvest" / "SKILL.md").read_text(encoding="utf-8")
+    assert f"{install.CLI_MARK} inventory" in harvest and f"{install.CLI_MARK} lint-draft" in harvest
+    assert install.RULES_MARK in harvest
 
 
 def test_skill_files_have_no_control_characters():
@@ -82,19 +90,10 @@ def test_skill_files_have_no_control_characters():
         assert not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", f.read_text(encoding="utf-8")), f
 
 
-def test_install_skills_fills_screen_url(tmp_path):
-    src, dst = tmp_path / "skill", tmp_path / "dst"
-    (src / "qa").mkdir(parents=True)
-    (src / "qa" / "SKILL.md").write_text(f"화면 {install.URL_MARK}/#qa/1", encoding="utf-8")
-    install.install_skills(src, dst, url="https://fq.example.com/")
-    assert (dst / "qa" / "SKILL.md").read_text(encoding="utf-8") == "화면 https://fq.example.com/#qa/1"
-    assert "덮어씀" in install.install_skills(src, dst, url="http://127.0.0.1:8765")[0]
-
-
-def test_skill_sources_use_url_mark_not_local_address():
+def test_skill_sources_take_item_address_from_tool_results():
     texts = [f.read_text(encoding="utf-8") for f in install.SKILLS_SRC.rglob("SKILL.md")]
-    assert all("127.0.0.1:8765" not in t for t in texts)
-    assert sum(install.URL_MARK in t for t in texts) == 2
+    assert all("127.0.0.1:8765" not in t and "#qa/<id>" not in t for t in texts)
+    assert all("<결과의 url>" in t for t in texts)
 
 
 class FakeRun:

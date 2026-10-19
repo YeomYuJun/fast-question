@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fast-question": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "fast-question==0.1.0",
+        "fast-question",
+        "mcp"
+      ]
+    }
+  }
+}

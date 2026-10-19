@@ -5,10 +5,12 @@ config.json 의 DB 에 기본 사용 가이드(kb/default_guide.json)를 넣는�
 사용: .venv\\Scripts\\python.exe scripts\\install.py
 원격 서버 쓰기: .venv\\Scripts\\python.exe scripts\\install.py --remote https://<도메인>
   개인 토큰(fq_pat_…)을 표준 입력으로 받아 서버의 /api/me 로 확인한 뒤 %USERPROFILE%\\.fast-question\\credentials.json
-  에 쓰고, Skill 의 화면 주소를 그 서버로, MCP 를 로컬 프록시(run_mcp.py --remote)로 등록한다. 기본 가이드는 서버가 넣는다.
+  에 쓰고, MCP 를 로컬 프록시(run_mcp.py --remote)로 등록한다. 기본 가이드는 서버가 넣는다.
   로컬로 돌아가기: credentials.json 을 지우고 인자 없이 다시 실행한다(MCP 가 로컬로 다시 등록된다).
 훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
 되돌리기: 위 훅 지우기, claude mcp remove -s user fast-question, ~/.claude/skills 아래 qa·qa-harvest 폴더 삭제
+Claude Code 플러그인(plugin/fast-question, scripts/build_plugin.py)과 함께 설치하면 MCP·즉석 질문 훅·Skill 이
+두 벌 걸린다. 둘 중 하나만 쓴다.
 """
 import getpass
 import json
@@ -30,9 +32,15 @@ HOOK = ROOT / "hooks" / "ask_kb.py"
 HOOK_EVENT = "UserPromptSubmit"
 HOOK_TIMEOUT_S = 10
 NAME = "fast-question"
-ROOT_MARK = "{{FAST_QUESTION_ROOT}}"  # Skill 원본 md 에서 저장소 경로 자리. 설치할 때 실제 경로로 바꾼다
-URL_MARK = "{{FAST_QUESTION_URL}}"  # Skill 원본 md 에서 화면 주소 자리. 로컬 http://127.0.0.1:<포트> 또는 원격 서버 주소
-LOCAL_URL = "http://127.0.0.1:8765"
+# Skill 원본 md 의 자리표시. 설치 방식마다 값이 다르다(이 스크립트는 로컬 설치, scripts/build_plugin.py 는 플러그인)
+CLI_MARK = "{{FQ_CLI}}"  # PC 클라이언트 명령(fq_client/cli.py) 실행 방법
+RULES_MARK = "{{QA_RULES}}"  # qa Skill 의 rules.md 위치
+
+
+def local_marks(root: Path = ROOT) -> dict[str, str]:
+    """이 저장소의 가상환경 python 으로 fq_client/cli.py 를 부른다. rules.md 는 ~/.claude/skills/qa 에 복사된다."""
+    return {CLI_MARK: f'"{(root / ".venv" / "Scripts" / "python.exe").as_posix()}" "{(root / "fq_client" / "cli.py").as_posix()}"',
+            RULES_MARK: "~/.claude/skills/qa/rules.md"}
 
 
 def _files(top: Path) -> dict[str, bytes]:
@@ -40,21 +48,18 @@ def _files(top: Path) -> dict[str, bytes]:
             if p.is_file() and "__pycache__" not in p.parts}
 
 
-def _render(src: Path, root: Path, url: str = LOCAL_URL) -> dict[str, bytes]:
-    """Skill 원본의 md 에 적힌 ROOT_MARK 를 이 저장소의 실제 경로로, URL_MARK 를 화면 주소로 바꾼다."""
-    marks = [(ROOT_MARK.encode("utf-8"), root.as_posix().encode("utf-8")),
-             (URL_MARK.encode("utf-8"), url.rstrip("/").encode("utf-8"))]
-
+def render(src: Path, marks: dict[str, str]) -> dict[str, bytes]:
+    """Skill 폴더의 파일. md 에 적힌 자리표시를 marks 의 값으로 바꾼다."""
     def fill(data: bytes) -> bytes:
-        for mark, real in marks:
-            data = data.replace(mark, real)
+        for mark, real in marks.items():
+            data = data.replace(mark.encode("utf-8"), real.encode("utf-8"))
         return data
 
     return {rel: fill(data) if rel.endswith(".md") else data for rel, data in _files(src).items()}
 
 
-def install_skill(src: Path, dst: Path, root: Path = ROOT, url: str = LOCAL_URL) -> str:
-    files = _render(src, root, url)
+def install_skill(src: Path, dst: Path, marks: dict[str, str] | None = None) -> str:
+    files = render(src, local_marks() if marks is None else marks)
     existed = dst.exists()
     if existed:
         if _files(dst) == files:
@@ -66,9 +71,9 @@ def install_skill(src: Path, dst: Path, root: Path = ROOT, url: str = LOCAL_URL)
     return f"Skill 덮어씀(내용이 달랐다): {dst}" if existed else f"Skill 복사: {dst}"
 
 
-def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST, root: Path = ROOT,
-                   url: str = LOCAL_URL) -> list[str]:
-    return [install_skill(d, dst_root / d.name, root, url) for d in sorted(src_root.iterdir())
+def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST,
+                   marks: dict[str, str] | None = None) -> list[str]:
+    return [install_skill(d, dst_root / d.name, marks) for d in sorted(src_root.iterdir())
             if d.is_dir() and (d / "SKILL.md").exists()]
 
 
@@ -184,13 +189,6 @@ def install_remote(url: str, token: str, opener=urlopen) -> list[str]:
     return [f"토큰 확인: {who}", f"자격 증명: {save_credentials(url, token)}"]
 
 
-def local_url() -> str:
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from kb.config import load_config
-    return f"http://127.0.0.1:{load_config().port}"
-
-
 def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     if "--remove-hook" in argv:
@@ -211,12 +209,12 @@ def main(argv: list[str]) -> int:
         except (ValueError, OSError) as e:
             print(f"원격 설정 실패: {e}")
             return 1
-        for msg in install_skills(url=url):
+        for msg in install_skills():
             print(msg)
         print(register_mcp(remote=True))
         print(install_hook())
         return 0
-    for msg in install_skills(url=local_url()):
+    for msg in install_skills():
         print(msg)
     print(register_mcp())
     print(install_hook())

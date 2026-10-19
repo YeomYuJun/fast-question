@@ -1,0 +1,22 @@
+{
+  "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx",
+            "args": [
+              "--from",
+              "fast-question==0.1.0",
+              "fast-question",
+              "hook"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
