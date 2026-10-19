@@ -62,6 +62,23 @@ def test_page_has_csp_and_no_inline_code(client):
     assert "default-src 'self'" in client.get("/api/me").headers["content-security-policy"]
 
 
+def test_terms_and_privacy_pages(client):
+    """약관·처리방침은 정적 페이지다. 본 화면처럼 인라인 코드 없이 테마를 먼저 정하고, 서로 링크한다."""
+    import re
+    for path, title in (("/terms", "이용약관"), ("/privacy", "개인정보 처리방침")):
+        r = client.get(path)
+        assert r.status_code == 200 and "text/html" in r.headers["content-type"], path
+        assert r.headers["cache-control"] == "no-cache"
+        assert f"<h1>{title}</h1>" in r.text
+        assert f'href="{path}" aria-current="page"' in r.text
+        assert "<style" not in r.text and " style=" not in r.text
+        assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", r.text) == []
+        assert r.text.index('<script src="/static/theme.js"></script>') < r.text.index("/static/tokens.css")
+    assert "운영자는 장애 대응·백업 복구를 위해" in client.get("/privacy").text
+    for path in ("/static/doc.js", "/static/favicon.svg"):
+        assert client.get(path).status_code == 200, path
+
+
 def test_install_commands_cover_shells_without_comments():
     """연결 패널의 설치 명령은 셸마다 따로 있고, 복사하는 내용은 명령 한 줄뿐이다(주석·안내는 상자 밖)."""
     import re
@@ -75,6 +92,14 @@ def test_install_commands_cover_shells_without_comments():
     assert block.count(r".venv\\Scripts\\python.exe scripts\\install.py --remote ${url}") == 2
     assert block.count(".venv/Scripts/python.exe scripts/install.py --remote ${url}") == 1
     assert "installCommand()" not in js
+
+
+def test_one_line_connect_command():
+    """연결 패널 1단계는 설치 없는 원격 MCP 등록 한 줄이다(인증은 등록 뒤 Claude Code 의 /mcp 에서)."""
+    from web.app import STATIC
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert "const ONE_LINE = (url) => `claude mcp add --transport http -s user fast-question ${url}/mcp`;" in js
+    assert "ONE_LINE(location.origin)" in js
 
 
 def test_app_css_uses_only_tokens():

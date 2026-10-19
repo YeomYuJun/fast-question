@@ -402,6 +402,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     routes = [
         Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
+        # 약관·처리방침은 로그인 없이 연다(로그인 화면과 OAuth 로그인 카드가 링크한다)
+        Route("/terms", lambda r: FileResponse(STATIC / "terms.html", headers=NO_CACHE)),
+        Route("/privacy", lambda r: FileResponse(STATIC / "privacy.html", headers=NO_CACHE)),
         Route(HEALTH_PATH, healthz),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),

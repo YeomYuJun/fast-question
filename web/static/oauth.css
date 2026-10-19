@@ -1,15 +1,33 @@
 /* 원격 MCP OAuth 로그인·동의·끝 페이지(web/oauth_as.py). tokens.css 변수만 쓴다 */
-body { margin: 0; background: var(--bg); color: var(--ink); font: var(--text-answer); }
-main { max-width: 28rem; margin: var(--space-12) auto; padding: var(--space-6); background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); }
-h1 { margin: 0 0 var(--space-4); font: var(--text-question-lg); }
-p { margin: 0 0 var(--space-3); color: var(--muted); }
-dl { margin: 0 0 var(--space-6); }
-dt { font: var(--text-label); color: var(--faint); }
-dd { margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-all; }
-.actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-.btn { display: inline-block; padding: var(--space-2) var(--space-4); border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md); background: var(--surface); color: var(--ink); font: var(--text-question);
-  text-decoration: none; cursor: pointer; }
-.btn:hover { border-color: var(--accent); }
-.btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.55; }
+main {
+  max-width: 448px; margin: var(--space-12) auto; padding: var(--space-6); display: flex; flex-direction: column; gap: 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
+}
+@media (max-width: 480px) { main { margin: var(--space-12) var(--space-4); } }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+/* 상표 줄: 어느 사이트에 승인하는지 보이게 호스트를 오른쪽 끝에 둔다 */
+.brand { display: flex; align-items: center; gap: var(--space-2); padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.brand svg { flex: none; }
+.brand .name { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; }
+.brand .host { margin-left: auto; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 11.5px; color: var(--faint); }
+h1 { margin: 0; font: var(--text-question-lg); word-break: keep-all; }
+p { margin: 0; font-size: 13px; line-height: 21px; color: var(--muted); word-break: keep-all; }
+.logins { display: flex; flex-direction: column; gap: var(--space-2); }
+.none { padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); line-height: 20px; text-align: center; }
+.agree { padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; line-height: 19px; }
+dl { margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--surface-2); border-radius: var(--radius-md); }
+dl > div { display: flex; flex-direction: column; gap: 2px; }
+dt { font-size: 11px; line-height: 16px; font-weight: 600; color: var(--faint); }
+dd { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 18px; color: var(--ink); word-break: break-all; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.btn {
+  display: block; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--ink); font-family: inherit; font-size: 14px; line-height: 20px; font-weight: 600;
+  text-align: center; text-decoration: none; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); text-decoration: none; }
+.btn:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.actions .btn { flex: 1 1 140px; padding: 8px 12px; font-weight: 400; }
+.actions .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }

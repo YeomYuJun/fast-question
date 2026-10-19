@@ -165,6 +165,10 @@ def test_oauth_pages_have_csp_and_no_inline_style(app):
             csp = page.headers["content-security-policy"]
             assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp
             assert "<style" not in page.text and "/static/oauth.css" in page.text
+            # 본 화면에 저장한 테마를 따르고, 카드 상표 줄에 이 서버의 호스트를 보인다
+            assert page.text.index('<script src="/static/theme.js"></script>') < page.text.index("/static/tokens.css")
+            assert '<span class="host">fq.example.com</span>' in page.text
+        assert 'href="/terms"' in pages[0].text and 'href="/privacy"' in pages[0].text  # 로그인 카드의 약관 동의 줄
         assert c.get("/static/oauth.css").status_code == 200
         assert "default-src 'self'" in c.get("/").headers["content-security-policy"]
     assert re.findall(r"#[0-9a-fA-F]{3,8}", (STATIC / "oauth.css").read_text(encoding="utf-8")) == []

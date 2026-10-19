@@ -71,6 +71,8 @@ def test_unauthenticated_api_is_401(cfg, app):
             assert r.status_code == 401 and r.json()["code"] == "unauthorized", path
         assert c.post("/api/categories", json={"name": "이관"}).status_code == 401
         assert c.get("/").status_code == 200  # 화면은 로그인 전에도 뜬다
+        for path in ("/terms", "/privacy"):  # 로그인 화면이 링크하는 약관도 로그인 전에 열린다
+            assert c.get(path).status_code == 200, path
     assert not (cfg.data_dir / "users").exists()
 
 

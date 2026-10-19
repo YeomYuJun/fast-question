@@ -1063,11 +1063,11 @@ function setTheme(t, save) {
 // ---------- 원격 모드 로그인 ----------
 const PROVIDERS = { github: "GitHub", google: "Google" };
 const LOGIN_ERRORS = {
-  denied: "로그인을 취소했다.",
-  state: "로그인 시간이 지났거나 다른 창에서 시작했다. 다시 로그인한다.",
-  provider: "로그인 공급자의 응답을 확인하지 못했다. 다시 시도한다.",
-  closed: "이 계정은 로그인할 수 없다.",
-  limit: "이 주소에서 한 시간 안에 만든 계정이 너무 많다. 한 시간 뒤 다시 시도한다.",
+  denied: "로그인을 취소했습니다.",
+  state: "로그인 시간이 지났거나 다른 창에서 시작했습니다. 다시 로그인해 주세요.",
+  provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
+  closed: "이 계정은 로그인할 수 없습니다.",
+  limit: "이 주소에서 한 시간 안에 만든 계정이 너무 많습니다. 한 시간 뒤에 다시 시도해 주세요.",
 };
 
 function showLogin(providers) {
@@ -1081,11 +1081,12 @@ function showLogin(providers) {
   const next = encodeURIComponent(location.pathname + location.search + location.hash);
   fill($("#login-btns"), providers.map((name) =>
     el("a", { class: "btn login-btn", href: `/auth/login/${name}?next=${next}` }, `${PROVIDERS[name] || name} 로 로그인`)));
-  if (!providers.length) fill($("#login-btns"), el("p", { class: "login-note" }, "켜진 로그인 공급자가 없다."));
+  if (!providers.length) fill($("#login-btns"), el("p", { class: "login-none" }, "켜진 로그인 공급자가 없습니다."));
   $("#login-err").hidden = !code;
   $("#login-err").textContent = LOGIN_ERRORS[code] || "";
   for (const id of ["#app", "#toggle-side", "#new-btn", "#account"]) $(id).hidden = true;
   $(".keys").hidden = true;
+  document.body.classList.add("login-mode"); // 상단 로고·이름을 숨기고 테마 버튼만 남긴다
   $("#login").hidden = false;
 }
 
@@ -1138,8 +1139,22 @@ const INSTALL_SHELLS = [
   { name: "Git Bash", cmd: (url) => `.venv/Scripts/python.exe scripts/install.py --remote ${url}` },
 ];
 
+// 설치 없는 한 줄 연결. 등록한 뒤 Claude Code 의 /mcp 에서 브라우저로 로그인·승인한다(OAuth, web/oauth_as.py)
+const ONE_LINE = (url) => `claude mcp add --transport http -s user fast-question ${url}/mcp`;
+
 function installShell() {
   return INSTALL_SHELLS.find((s) => s.name === store("fq-shell")) || INSTALL_SHELLS[0];
+}
+
+function cmdBox(command, label, done) {
+  return el("div", { class: "cmd-box" }, el("pre", { class: "mono" }, command),
+    ibtn("cp", "copy", `${label} 복사`, `${label} 복사`, () => copy(command, done)));
+}
+
+// 번호 단계 하나. 번호는 장식이라 읽지 않는다
+function cnStep(n, title, ...body) {
+  return el("div", { class: "cn-step" }, el("span", { class: "cn-step-n", "aria-hidden": "true" }, n),
+    el("div", { class: "cn-step-body" }, el("span", { class: "cn-step-title" }, title), ...body));
 }
 
 function installBlock() {
@@ -1149,12 +1164,11 @@ function installBlock() {
     INSTALL_SHELLS.map((s) => el("button", { class: "chip" + (s === shell ? " on" : ""), type: "button",
       "aria-pressed": String(s === shell), onclick: () => {
         store("fq-shell", s.name);
-        $(".connect-cmd").replaceWith(installBlock());
+        $(".connect-install").replaceWith(installBlock());
       } }, s.name)));
-  return el("div", { class: "connect-cmd" }, el("span", { class: "label" }, "설치 명령"), tabs,
-    el("p", { class: "connect-note" }, "fast-question 저장소 폴더에서 실행한다. 토큰을 물으면 위에서 만든 값을 붙여 넣는다."),
-    el("pre", { class: "mono" }, command),
-    ibtn("cp", "copy", "설치 명령 복사", "설치 명령 복사", () => copy(command, `${shell.name} 설치 명령을 복사했다.`)));
+  return el("div", { class: "connect-install" }, tabs,
+    el("p", { class: "connect-note" }, "fast-question 저장소 폴더에서 실행합니다. 토큰을 물으면 위에서 만든 값을 붙여 넣습니다."),
+    cmdBox(command, "설치 명령", `${shell.name} 설치 명령을 복사했다.`));
 }
 
 function openConnect(open) {
@@ -1186,7 +1200,7 @@ async function renderConnect(made) {
   }
   const name = el("input", { class: "fld", "aria-label": "토큰 이름", placeholder: "PC 이름 (예: 회사 노트북)",
     maxlength: 60, autocomplete: "off" });
-  const form = el("form", { class: "connect-form", onsubmit: async (ev) => {
+  const form = el("form", { class: "cn-row", onsubmit: async (ev) => {
     ev.preventDefault();
     try {
       renderConnect(await api("POST", "/api/account/tokens", { name: name.value }));
@@ -1198,30 +1212,40 @@ async function renderConnect(made) {
   // 휴대폰, 태블릿(마우스 없이 터치만)에서는 Claude Code 를 돌릴 수 없어 토큰 만들기와 설치 명령을 빼고 안내만 둔다.
   // 브라우저 이름(UA) 대신 입력 장치로 판단한다. Safari, Chrome, Edge, Firefox 모두 이 미디어 쿼리를 지원한다
   const touchOnly = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+  const madeBox = made ? el("div", { class: "token-made", role: "status" },
+    el("p", {}, `토큰 "${made.name}" 을 만들었다. 이 값은 지금만 보인다.`),
+    el("div", { class: "token-row" }, el("code", { class: "mono token-value" }, made.token),
+      ibtn("cp", "copy", "토큰 복사", "토큰 복사", () => copy(made.token, "토큰을 복사했다.")))) : null;
+  const oneLine = ONE_LINE(location.origin);
   fill($("#connect"),
-    el("div", { class: "connect-head" }, el("span", { class: "label" }, "연결"),
+    el("div", { class: "cn-head" },
+      el("div", {}, el("h2", {}, "연결"),
+        el("p", { class: "connect-note" }, touchOnly
+          ? "Claude Code 연결(한 줄 연결, 토큰 만들기, 설치 명령)은 Claude Code 를 쓰는 PC 의 브라우저에서 한다. 여기서는 토큰 폐기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있다."
+          : "Claude Code 를 이 서버의 내 DB 에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Skill 과 즉석 질문 훅까지 이 PC 에 설치합니다.")),
       el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
-    el("p", { class: "connect-note" }, touchOnly
-      ? "Claude Code 연결(토큰 만들기, 설치 명령)은 Claude Code 를 쓰는 PC 의 브라우저에서 한다. 여기서는 토큰 폐기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있다."
-      : "이 PC 의 Claude Code 와 즉석 질문 훅을 이 서버에 붙인다. 토큰은 PC 마다 하나씩 만든다."),
-    made ? el("div", { class: "token-made", role: "status" },
-      el("p", {}, `토큰 "${made.name}" 을 만들었다. 이 값은 지금만 보인다.`),
-      el("div", { class: "token-row" }, el("code", { class: "mono token-value" }, made.token),
-        ibtn("cp", "copy", "토큰 복사", "토큰 복사", () => copy(made.token, "토큰을 복사했다.")))) : null,
-    touchOnly ? null : form,
-    tokens.length
-      ? el("ul", { class: "token-list" }, tokens.map((t) => el("li", { class: "token-item" + (t.expired ? " expired" : "") },
-        el("span", { class: "name" }, t.name),
-        el("span", { class: "meta mono", title: `만든 날 ${t.created_at}` },
-          t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀"),
-        ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
-      : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다."),
-    touchOnly ? null : installBlock(),
+    touchOnly ? null : el("div", { class: "cn-sec code" }, el("span", { class: "cn-label" }, "Claude Code 연결"),
+      cnStep("1", "한 줄로 연결",
+        el("p", { class: "connect-note" }, "설치 없이 터미널에서 아래 명령을 실행합니다. 그다음 Claude Code 에서 /mcp 를 열어 fast-question 을 고르고, 브라우저에서 로그인·승인합니다."),
+        cmdBox(oneLine, "연결 명령", "연결 명령을 복사했다.")),
+      cnStep("2", "PC 에 설치",
+        el("p", { class: "connect-note" }, "PC 마다 토큰을 하나 만들고 설치 명령을 실행합니다. 1단계로 등록한 fast-question 은 이 설치본으로 바뀝니다."),
+        form, madeBox, installBlock())),
+    el("div", { class: "cn-sec tokens" },
+      el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "만든 토큰"), el("span", { class: "cn-count" }, tokens.length)),
+      tokens.length
+        ? el("ul", { class: "token-list" }, tokens.map((t) => el("li", { class: "token-item" + (t.expired ? " expired" : "") },
+          el("div", { class: "tk" }, el("span", { class: "name" }, t.name),
+            el("span", { class: "meta mono", title: `만든 날 ${t.created_at}` },
+              t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀")),
+          ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
+        : el("p", { class: "connect-note" }, "아직 만든 토큰이 없다.")),
     loginBlock(),
-    el("div", { class: "connect-export" }, el("span", { class: "label" }, "내보내기"),
+    el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받는다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."),
-      el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기")),
-    leaveForm());
+      el("div", { class: "cn-row" }, el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기"))),
+    leaveForm(),
+    el("div", { class: "cn-foot" }, el("a", { href: "/terms" }, "이용약관"), el("a", { href: "/privacy" }, "개인정보 처리방침")));
   if (made) name.value = "";
 }
 
@@ -1230,10 +1254,10 @@ function loginBlock() {
   const mine = me?.account?.providers || [];
   const more = (me?.available || []).filter((n) => !mine.includes(n));
   const label = (n) => PROVIDERS[n] || n;
-  return el("div", { class: "connect-login" }, el("span", { class: "label" }, "로그인 수단"),
+  return el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "로그인 수단"),
     el("p", { class: "connect-note" }, `지금 ${mine.map(label).join(" · ")} 로 로그인할 수 있다.`
       + (more.length ? " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 DB 가 열린다. 추가하는 계정으로 이미 쓰던 DB 가 있으면 그 DB 는 버려진다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 DB 파일을 받는다." : "")),
-    more.length ? el("div", { class: "connect-form" }, more.map((n) =>
+    more.length ? el("div", { class: "cn-row" }, more.map((n) =>
       el("form", { method: "post", action: `/auth/link/${n}`, onsubmit: (ev) => {
         if (!window.confirm(`${label(n)} 로그인을 이 계정에 추가한다.\n그 ${label(n)} 계정으로 쓰던 fast-question DB 가 있으면 버려진다(30일 뒤 삭제).\n추가하시겠습니까?`)) ev.preventDefault();
       } }, el("button", { class: "btn", type: "submit" }, `${label(n)} 로그인 추가`)))) : null);
@@ -1242,7 +1266,7 @@ function loginBlock() {
 // 탈퇴: 확인 문구를 입력해야 버튼이 동작한다
 function leaveForm() {
   const word = el("input", { class: "fld", "aria-label": "탈퇴 확인 문구", placeholder: "탈퇴", autocomplete: "off" });
-  return el("form", { class: "connect-leave", onsubmit: async (ev) => {
+  return el("form", { class: "cn-sec", onsubmit: async (ev) => {
     ev.preventDefault();
     try {
       await api("POST", "/api/account/delete", { confirm: word.value.trim() });
@@ -1252,9 +1276,9 @@ function leaveForm() {
     }
     location.href = "/";
   } },
-  el("span", { class: "label" }, "탈퇴"),
+  el("span", { class: "cn-label" }, "탈퇴"),
   el("p", { class: "connect-note" }, "계정을 지운다. 이 계정의 로그인·토큰이 모두 끊기고 DB 를 더 열 수 없다. 먼저 DB 파일을 받아 둔다. 계속하려면 탈퇴 를 입력한다."),
-  el("div", { class: "connect-form" }, word, el("button", { class: "btn danger", type: "submit" }, "탈퇴")));
+  el("div", { class: "cn-row" }, word, el("button", { class: "btn danger", type: "submit" }, "탈퇴")));
 }
 
 // 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
