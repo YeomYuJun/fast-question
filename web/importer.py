@@ -1,11 +1,15 @@
 """로컬 DB 파일을 원격 사용자 DB 로 옮긴다(POST /api/import/db, 원격 모드). 쓰기 주체는 user 다.
+POST /api/import/db/plan 은 같은 파일을 받아 쓰기 없이 처리 방식과 건수만 돌려준다(dry_run: true).
 
 요청 본문은 SQLite 파일 그대로(application/octet-stream)이고 IMPORT_MAX_BYTES 까지 받는다. 사용자 PC 쪽은
 scripts/push_local.py 가 온라인 백업 사본을 만들어 개인 토큰으로 올린다. 브라우저 세션으로도 부를 수 있다.
 받은 파일은 integrity_check → meta.schema_version(이 서버와 같아야 한다) → 표 목록(kb/schema.py 와 같아야 한다)
 순서로 검사하고, 하나라도 틀리면 400 으로 거부하고 사용자 DB 를 건드리지 않는다.
+검사를 통과한 파일에서 system 이 만든 Q&A(올린 PC 의 로컬 기본 가이드)를 행째 지운다(kb.dbcopy.prune).
+로컬 가이드는 로컬 화면 주소와 저장소 파일 근거를 담고 있어 원격 계정에 맞지 않는다.
 - 사용자 DB 가 없거나 비었으면(system 이 아닌 주체가 만든 행이 없다. 기본 가이드만 있는 DB 도 여기에 든다)
-  SQLite 백업 API 로 파일 내용을 통째로 바꾼다. revision 이력까지 그대로 옮겨진다.
+  SQLite 백업 API 로 파일 내용을 통째로 바꾼다. revision 이력까지 그대로 옮겨진다. 바꾼 뒤 원격 기본 가이드
+  (guide_data)를 다시 넣는다.
 - 비어 있지 않으면 살아 있는 항목을 하나씩 add_qa 로 넣는다. 가져오기 전부터 있던 항목과 질문이 비슷하면
   (Store.similar 와 같은 기준) 넣지 않고 skipped 로 돌려준다. 근거는 파일의 캡처값을 그대로 넣고(Store(remote=True)
   의 captured 경로) 판정은 same 으로 시작한다. 보관한 항목, 관련 질문 연결, 사전(동의어·불용어·사용자 단어)은
@@ -28,8 +32,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from kb import guide
 from kb import search as search_mod
 from kb.db import BUMP, connect, tx
+from kb.dbcopy import prune
 from kb.errors import KbError
 from kb.evidence import ROW_KEYS, spec_of
 from kb.schema import SCHEMA_VERSION
@@ -111,7 +117,11 @@ def _stamp_origin(conn: sqlite3.Connection, origin: str) -> None:
                      "AND json_extract(captured_json, '$.origin') IS NULL", (origin,))
 
 
-def replace(db: Path, upload: Path, origin: str = "") -> dict:
+def _live_items(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT count(*) FROM qa WHERE deleted_at IS NULL").fetchone()[0]
+
+
+def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[], dict] | None = None) -> dict:
     src = sqlite3.connect(str(upload))
     dst = connect(db)
     try:
@@ -121,7 +131,9 @@ def replace(db: Path, upload: Path, origin: str = "") -> dict:
             dst.execute("DELETE FROM meta WHERE key = 'last_backup'")
         if origin:
             _stamp_origin(dst, origin)
-        items = dst.execute("SELECT count(*) FROM qa WHERE deleted_at IS NULL").fetchone()[0]
+        items = _live_items(dst)
+        if guide_data is not None:
+            guide.seed(Store(dst, "system"), guide_data())
     finally:
         dst.close()
         src.close()
@@ -163,24 +175,33 @@ def _evidence_specs(src: sqlite3.Connection, qa_id: int, origin: str = "") -> li
     return specs
 
 
+def _sort(src: sqlite3.Connection, conn: sqlite3.Connection) -> tuple[list, list]:
+    """올린 파일의 살아 있는 항목을 (넣을 행, 건너뛸 항목)으로 나눈다. 가져오기 전부터 있던 항목과 질문이
+    비슷하면 건너뛴다. 미리보기와 실제 병합이 같은 판정을 쓴다."""
+    before = [(r[0], r[1], bigrams(r[1])) for r in conn.execute("SELECT id, question FROM qa WHERE deleted_at IS NULL")]
+    rows, skipped = [], []
+    for r in src.execute("SELECT id, category_id, question, answer FROM qa WHERE deleted_at IS NULL ORDER BY id"):
+        target = bigrams(r["question"])
+        similar = sorted(((round(dice(target, b), 2), i, q) for i, q, b in before
+                          if dice(target, b) >= SIMILAR_MIN), reverse=True)[:5]
+        if similar:
+            skipped.append({"question": r["question"],
+                            "similar": [{"id": i, "question": q, "score": sc} for sc, i, q in similar]})
+        else:
+            rows.append(r)
+    return rows, skipped
+
+
 def merge(db: Path, upload: Path, analyzer=None, origin: str = "") -> dict:
     src = sqlite3.connect(str(upload))
     src.row_factory = sqlite3.Row
     conn = connect(db)
     try:
         s = Store(conn, "user", analyzer, remote=True)
-        before = [(r["id"], r["question"], bigrams(r["question"]))
-                  for r in conn.execute("SELECT id, question FROM qa WHERE deleted_at IS NULL")]
         cats = _category_paths(src)
-        added, skipped, failed = 0, [], []
-        for r in src.execute("SELECT id, category_id, question, answer FROM qa WHERE deleted_at IS NULL ORDER BY id"):
-            target = bigrams(r["question"])
-            similar = sorted(((round(dice(target, b), 2), i, q) for i, q, b in before
-                              if dice(target, b) >= SIMILAR_MIN), reverse=True)[:5]
-            if similar:
-                skipped.append({"question": r["question"],
-                                "similar": [{"id": i, "question": q, "score": sc} for sc, i, q in similar]})
-                continue
+        added, failed = 0, []
+        rows, skipped = _sort(src, conn)
+        for r in rows:
             try:
                 path = _ensure_category(s, *cats[r["category_id"]])
                 s.add_qa(path, r["question"], r["answer"], evidence=_evidence_specs(src, r["id"], origin),
@@ -194,27 +215,63 @@ def merge(db: Path, upload: Path, analyzer=None, origin: str = "") -> dict:
     return {"mode": "merged", "added": added, "skipped": skipped, "failed": failed}
 
 
-def run_import(db: Path, upload: Path, analyzer=None, lock=None, origin: str = "") -> dict:
+def _will_replace(db: Path) -> bool:
+    if not db.exists():
+        return True
+    conn = connect(db)
+    try:
+        return is_empty(conn)
+    finally:
+        conn.close()
+
+
+def run_import(db: Path, upload: Path, analyzer=None, lock=None, origin: str = "",
+               guide_data: Callable[[], dict] | None = None) -> dict:
     if origin and not ORIGIN_RE.fullmatch(origin):
         raise ImportRefused("origin 은 영문·숫자·- 64자 이하다.")
     validate(upload)
+    prune(upload)
     with lock or threading.Lock():
-        if not db.exists():
-            return replace(db, upload, origin)
+        if _will_replace(db):
+            return replace(db, upload, origin, guide_data)
+        return merge(db, upload, analyzer, origin)
+
+
+def plan(db: Path, upload: Path) -> dict:
+    """run_import 가 할 일을 쓰기 없이 돌려준다. 계정 DB 가 없으면 만들지 않는다(만들면 기본 가이드를 못 받는다)."""
+    validate(upload)
+    prune(upload)
+    src = sqlite3.connect(str(upload))
+    src.row_factory = sqlite3.Row
+    try:
+        if _will_replace(db):
+            return {"mode": "replaced", "items": _live_items(src), "dry_run": True}
         conn = connect(db)
         try:
-            empty = is_empty(conn)
+            rows, skipped = _sort(src, conn)
         finally:
             conn.close()
-        return replace(db, upload, origin) if empty else merge(db, upload, analyzer, origin)
+    finally:
+        src.close()
+    return {"mode": "merged", "added": len(rows), "skipped": skipped, "dry_run": True}
 
 
-def route(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer, lock) -> Route:
-    """db_for: 요청의 계정 DB 경로(로그인 전이면 None). tmp_root: 받은 파일을 잠시 둘 폴더(데이터 디스크 안)."""
-    return Route("/api/import/db", handler(db_for, tmp_root, analyzer, lock), methods=["POST"])
+def routes(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer, lock,
+           guide_data: Callable[[], dict] | None = None) -> list[Route]:
+    """db_for: 요청의 계정 DB 경로(로그인 전이면 None). tmp_root: 받은 파일을 잠시 둘 폴더(데이터 디스크 안).
+    guide_data: 통째로 바꾼 뒤 다시 넣을 원격 기본 가이드(kb.guide.load_remote)."""
+    def work(request: Request, db: Path, upload: Path) -> dict:
+        return run_import(db, upload, analyzer, lock, request.query_params.get("origin", ""), guide_data)
+
+    def preview(request: Request, db: Path, upload: Path) -> dict:
+        return plan(db, upload)
+
+    return [Route("/api/import/db", handler(db_for, tmp_root, work), methods=["POST"]),
+            Route("/api/import/db/plan", handler(db_for, tmp_root, preview), methods=["POST"])]
 
 
-def handler(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer, lock):
+def handler(db_for: Callable[[Request], Path | None], tmp_root: Path,
+            run: Callable[[Request, Path, Path], dict]):
     async def import_db(request: Request) -> JSONResponse:
         db = db_for(request)
         if db is None:
@@ -237,8 +294,7 @@ def handler(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer, 
                 return JSONResponse({"error": "요청 본문에 SQLite 파일이 없다.", "code": "invalid_db"},
                                     status_code=400)
             try:
-                result = await run_in_threadpool(run_import, db, upload, analyzer, lock,
-                                                 request.query_params.get("origin", ""))
+                result = await run_in_threadpool(run, request, db, upload)
             except ImportRefused as e:
                 return JSONResponse({"error": e.message, "code": e.code}, status_code=e.status)
             except sqlite3.OperationalError as e:

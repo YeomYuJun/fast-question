@@ -1,11 +1,14 @@
 """로컬 DB → 원격 사용자 DB 이전(POST /api/import/db)과 scripts/push_local.py."""
 import sqlite3
 
+import httpx
 import pytest
 
-from kb import control, tenant
+from kb import control, guide, tenant
 from kb.db import connect, set_meta
+from kb.dbcopy import prune
 from kb.store import Store
+from web.importer import validate
 from tests.test_remote_web import URL, analyzer, app, cfg, client_for  # noqa: F401 - 픽스처
 
 OCTET = {"Content-Type": "application/octet-stream"}
@@ -66,8 +69,38 @@ def test_import_replaces_db_that_has_only_system_rows(cfg, app, tmp_path):
     s.conn.close()
     body = snapshot(local_db(tmp_path), tmp_path / "upload.sqlite3")
     with client_for(app, 1) as c:
-        assert c.post("/api/import/db", content=body, headers=OCTET).json()["mode"] == "replaced"
-        assert [x["name"] for x in c.get("/api/categories").json()["categories"]] == ["이관"]
+        assert c.post("/api/import/db", content=body, headers=OCTET).json() == {"mode": "replaced", "items": 2}
+        names = [x["name"] for x in c.get("/api/categories").json()["categories"]]
+        assert "이관" in names and "fast-question" in names, "통째로 바꾼 뒤 원격 기본 가이드를 다시 넣는다"
+        assert c.get("/api/search", params={"q": "기본 가이드 질문"}).json()["hits"] == []
+    s = user_store(cfg, 1)
+    guide_n = s.conn.execute("SELECT count(*) FROM qa WHERE created_by = 'system' AND deleted_at IS NULL").fetchone()[0]
+    s.conn.close()
+    assert guide_n == len(guide.load_remote(URL)["items"])
+
+
+def with_local_guide(conn):
+    """로컬 기본 가이드(system 이 만든 항목)가 든 로컬 DB."""
+    s = Store(conn, "system")
+    s.add_category("fast-question")
+    s.add_category("화면", parent="fast-question")
+    s.add_qa("fast-question > 화면", "로컬 가이드 질문 127.0.0.1?", "로컬 화면 주소 안내다.")
+    return conn
+
+
+def test_import_never_takes_system_items_from_upload(cfg, app, tmp_path):
+    body = snapshot(with_local_guide(local_db(tmp_path)), tmp_path / "upload.sqlite3")
+    with client_for(app, 1) as c:
+        assert c.post("/api/import/db", content=body, headers=OCTET).json() == {"mode": "replaced", "items": 2}
+        assert c.get("/api/search", params={"q": "로컬 가이드 질문"}).json()["hits"] == []
+    s = user_store(cfg, 2)
+    s.add_category("기존")
+    s.add_qa("기존", "전혀 다른 기존 질문", "이미 있는 답이다.")
+    s.conn.close()
+    with client_for(app, 2) as c:
+        res = c.post("/api/import/db", content=body, headers=OCTET).json()
+        assert res["mode"] == "merged" and res["added"] == 2 and res["skipped"] == []
+        assert c.get("/api/search", params={"q": "로컬 가이드 질문"}).json()["hits"] == []
 
 
 def test_import_into_used_account_adds_items_and_skips_similar(cfg, app, tmp_path):
@@ -233,3 +266,161 @@ def test_replaced_db_is_backed_up_on_next_job_run(cfg, app, tmp_path):
     with client_for(app, 1) as c:
         assert c.post("/api/import/db", content=body, headers=OCTET).json()["mode"] == "replaced"
     assert "path" in run_due_all(cfg)["users"][1]["backup"], "서버 백업 기한은 로컬 기록을 따르지 않는다"
+
+
+SECRET = "사내전용비밀문구"
+
+
+def with_excluded_category(conn):
+    """올리지 않을 분류 `사내`(하위 분류, 보관한 항목, 다른 분류 항목과의 연결 포함)."""
+    s = Store(conn, "user")
+    s.add_category("사내")
+    s.add_category("하위", parent="사내")
+    a = s.add_qa("사내", f"{SECRET} 가 든 질문", f"{SECRET} 가 든 답이다.")["item"]
+    s.add_qa("사내 > 하위", "하위 분류 질문", f"하위 답 {SECRET}.")
+    gone = s.add_qa("사내", "보관한 사내 질문", f"보관한 답 {SECRET}.")["item"]
+    s.archive_qa(gone["id"], gone["version"])
+    kept = conn.execute("SELECT id FROM qa WHERE question = '체크섬은 어디서 계산하나'").fetchone()[0]
+    s.link(a["id"], kept)
+    return conn
+
+
+def triggers(conn):
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+
+def test_prune_removes_excluded_category_and_system_items_from_copy(tmp_path):
+    local = with_excluded_category(with_local_guide(local_db(tmp_path)))
+    path = tmp_path / "upload.sqlite3"
+    snapshot(local, path)
+    local.close()
+    assert SECRET.encode() in path.read_bytes()
+
+    assert prune(path, ["사내"]) == {"system": 1, "excluded": 3}
+    data = path.read_bytes()
+    assert SECRET.encode() not in data, "제외한 분류의 글자가 파일 어디에도(이력·검색 색인·빈 페이지) 남지 않는다"
+    assert "로컬 가이드 질문".encode() not in data
+    validate(path)
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("SELECT count(*) FROM qa_fts WHERE qa_fts MATCH ?", (f'"{SECRET}"',)).fetchone()[0] == 0
+        assert {r[0] for r in conn.execute("SELECT name FROM category")} == {"이관", "네트워크"}
+        assert conn.execute("SELECT count(*) FROM qa_link").fetchone()[0] == 0
+        fresh = connect(":memory:")
+        assert triggers(conn) == triggers(fresh), "지운 뒤 트리거를 되살린다(통째로 바꾸면 서버 DB 로 복사된다)"
+        fresh.close()
+    finally:
+        conn.close()
+
+
+def test_prune_keeps_system_category_that_holds_user_items(tmp_path):
+    local = with_local_guide(local_db(tmp_path))
+    Store(local, "user").add_qa("fast-question > 화면", "내가 쓴 화면 질문", "내가 쓴 답이다.")
+    path = tmp_path / "upload.sqlite3"
+    snapshot(local, path)
+    local.close()
+    assert prune(path) == {"system": 1, "excluded": 0}
+    conn = sqlite3.connect(path)
+    try:
+        assert {r[0] for r in conn.execute("SELECT name FROM category")} == {"이관", "네트워크", "fast-question", "화면"}
+    finally:
+        conn.close()
+
+
+def test_prune_rejects_unknown_category(tmp_path):
+    path = tmp_path / "upload.sqlite3"
+    snapshot(local_db(tmp_path), path)
+    with pytest.raises(ValueError, match="없는 분류"):
+        prune(path, ["없는 분류"])
+
+
+def test_plan_reports_replace_without_creating_db(cfg, app, tmp_path):
+    body = snapshot(with_local_guide(local_db(tmp_path)), tmp_path / "upload.sqlite3")
+    with client_for(app, 1) as c:
+        r = c.post("/api/import/db/plan", content=body, headers=OCTET)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"mode": "replaced", "items": 2, "dry_run": True}
+    assert not tenant.db_path_for(cfg.data_dir, 1).exists(), "미리보기는 계정 DB 를 만들지 않는다"
+
+
+def test_plan_matches_merge_and_writes_nothing(cfg, app, tmp_path):
+    s = user_store(cfg, 1)
+    s.add_category("기존")
+    s.add_qa("기존", "체크섬은 어디서 계산하나요", "이미 있는 답이다.")
+    s.conn.close()
+    db = tenant.db_path_for(cfg.data_dir, 1)
+    body = snapshot(local_db(tmp_path), tmp_path / "upload.sqlite3")
+    with client_for(app, 1) as c:
+        before = c.get("/api/search").json()["total"]
+        plan = c.post("/api/import/db/plan", content=body, headers=OCTET).json()
+        assert c.get("/api/search").json()["total"] == before
+        real = c.post("/api/import/db", content=body, headers=OCTET).json()
+    assert plan["dry_run"] is True and plan["mode"] == "merged"
+    assert plan["added"] == real["added"] == 1
+    assert plan["skipped"] == real["skipped"]
+    assert db.exists()
+
+
+def test_push_local_dry_run_uses_plan_and_writes_nothing(cfg, app, tmp_path, capsys):
+    import scripts.push_local as push
+
+    local_db(tmp_path).close()
+    acc, token = _token(cfg)
+    with client_for(app, None) as c:
+        assert push.main(["--db", str(tmp_path / "local.sqlite3"), "--dry-run"],
+                         creds={"url": URL, "token": token}, http=c) == 0
+    out = capsys.readouterr().out
+    assert "미리보기" in out and "통째로 바꾼다" in out and "2" in out
+    assert not tenant.db_path_for(cfg.data_dir, acc).exists()
+
+
+def test_push_local_dry_run_stops_when_server_has_no_plan(tmp_path, capsys):
+    import scripts.push_local as push
+
+    local_db(tmp_path).close()
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.path)
+        return httpx.Response(404, json={"error": "없는 경로"})
+
+    http = httpx.Client(transport=httpx.MockTransport(handle))
+    assert push.main(["--db", str(tmp_path / "local.sqlite3"), "--dry-run"],
+                     creds={"url": URL, "token": "fq_pat_x"}, http=http) == 1
+    assert seen == ["/api/import/db/plan"], "옛 서버에 실제 가져오기를 보내지 않는다"
+    assert "미리보기를 지원하지 않는다" in capsys.readouterr().err
+
+
+def test_push_local_excludes_category(cfg, app, tmp_path, capsys):
+    import scripts.push_local as push
+
+    with_excluded_category(with_local_guide(local_db(tmp_path))).close()
+    acc, token = _token(cfg)
+    auth = {"Authorization": f"Bearer {token}"}
+    with client_for(app, None) as c:
+        assert push.main(["--db", str(tmp_path / "local.sqlite3"), "--exclude-category", "사내"],
+                         creds={"url": URL, "token": token}, http=c) == 0
+        out = capsys.readouterr().out
+        assert "기본 가이드 1건" in out and "3건" in out
+        names = [x["name"] for x in c.get("/api/categories", headers=auth).json()["categories"]]
+    assert "사내" not in names and "이관" in names
+    assert SECRET.encode() not in tenant.db_path_for(cfg.data_dir, acc).read_bytes()
+
+
+def test_push_local_unknown_category_uploads_nothing(tmp_path, capsys):
+    import scripts.push_local as push
+
+    local_db(tmp_path).close()
+    seen = []
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(500)))
+    assert push.main(["--db", str(tmp_path / "local.sqlite3"), "--exclude-category", "없는 분류"],
+                     creds={"url": URL, "token": "fq_pat_x"}, http=http) == 1
+    assert seen == [] and "없는 분류" in capsys.readouterr().err
+
+
+def test_plan_accepts_db_larger_than_default_body_limit(cfg, app):
+    with client_for(app, 1) as c:
+        r = c.post("/api/import/db/plan", content=b"x" * (2 * 1024 * 1024), headers=OCTET)
+    assert r.status_code == 400 and r.json()["code"] == "invalid_db", "1 MB 기본 상한이 아니라 가져오기 상한을 쓴다"

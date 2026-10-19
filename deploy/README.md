@@ -72,9 +72,13 @@ docker compose -f deploy/compose.yaml exec app python scripts/global_words.py --
 사용자 PC(Windows)의 저장소 루트에서 PowerShell 로 실행한다. 서버 주소와 개인 토큰은 `%USERPROFILE%\.fast-question\credentials.json` 에서 읽는다.
 
 ```powershell
+.venv\Scripts\python.exe scripts\push_local.py --dry-run
 .venv\Scripts\python.exe scripts\push_local.py
+.venv\Scripts\python.exe scripts\push_local.py --exclude-category "회사 > 내부"
 ```
 
 - `data\kb.sqlite3`(또는 `--db <파일>`)의 온라인 백업 사본을 만들어 `POST /api/import/db` 로 올린다. 로컬 DB 는 바꾸지 않는다.
-- 서버의 내 DB 가 비어 있으면(기본 가이드만 있으면) 파일 내용을 통째로 바꾼다. 아니면 항목을 하나씩 넣고 이미 있는 항목과 비슷한 질문은 건너뛴 목록을 보여 준다.
+- 사본에서 로컬 기본 가이드(system 이 만든 항목)는 늘 지우고 올린다. `--exclude-category <분류>`(여러 번 가능, `대분류` 는 하위 분류 포함)로 준 분류도 지운다. 보관한 항목·이력·검색 색인까지 지우므로 그 내용은 서버로 가지 않는다.
+- `--dry-run` 은 `POST /api/import/db/plan` 으로 보내 서버가 할 일(통째로 바꾸기 / 하나씩 넣기)과 건수, 건너뛸 목록만 받는다. 서버에 쓰지 않는다.
+- 서버의 내 DB 가 비어 있으면(기본 가이드만 있으면) 파일 내용을 통째로 바꾸고 원격 기본 가이드를 다시 넣는다. 아니면 항목을 하나씩 넣고 이미 있는 항목과 비슷한 질문은 건너뛴 목록을 보여 준다.
 - 손상됐거나 스키마 버전·표 목록이 서버와 다른 파일은 거부한다. 상한은 200 MB 다.

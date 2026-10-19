@@ -4,7 +4,7 @@ seed() 는 빠진 항목을 넣고, 마지막으로 system 이 쓴 항목만 jso
 사람이나 Claude 가 고친 가이드 항목은 덮어쓰지 않는다. scripts/install.py 와 run_web.py 가 부른다.
 근거 경로는 저장소 루트 기준 상대 경로로 적고, 넣을 때 이 저장소의 절대 경로로 바꾼다.
 원격 모드는 load_remote() 를 쓴다. 서버의 파일 경로는 사용자에게 뜻이 없고 저장소가 공개되지 않아 근거 없이 넣고,
-답변의 로컬 화면 주소(LOCAL_URL)를 서버의 public_url 로 바꾼다. web/app.py 가 사용자 DB 를 처음 만들 때 1회 넣는다.
+답변의 로컬 화면 주소(LOCAL_URL)를 서버의 public_url 로 바꾼다. web/app.py 가 사용자 DB 를 처음 만들 때 1회, web/importer.py 가 DB 를 통째로 바꾼 뒤 다시 넣는다.
 항목의 target 이 "local" 이면 load() 에만, "remote" 면 load_remote() 에만 들어간다. 없으면 둘 다다.
 같은 질문을 두 모드에서 다르게 답할 때는 target 만 다른 항목 두 개를 둔다(DB 는 모드마다 따로다).
 """

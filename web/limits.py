@@ -1,5 +1,5 @@
 """원격 모드 요청 제한. RateLimit 은 프로세스 메모리의 토큰 버킷이다(인스턴스 1대 전제). 넘치면 429 와 Retry-After.
-BodyLimit 은 요청 본문을 1 MB(DB 가져오기 /api/import/db 는 200 MB)로 막고 넘치면 413 이다.
+BodyLimit 은 요청 본문을 1 MB(DB 가져오기 /api/import/db 와 미리보기 /api/import/db/plan 은 200 MB)로 막고 넘치면 413 이다.
 
 - /mcp: 계정(또는 Bearer 토큰)당 분당 120
 - /register(OAuth 동적 클라이언트 등록): IP 당 분당 5
@@ -84,7 +84,8 @@ class BodyLimit:
 
     def __init__(self, app, max_bytes: int = 1024 * 1024, overrides: dict[str, int] | None = None):
         self.app, self.max_bytes = app, max_bytes
-        self.overrides = {"/api/import/db": 200 * 1024 * 1024, **(overrides or {})}
+        db = 200 * 1024 * 1024
+        self.overrides = {"/api/import/db": db, "/api/import/db/plan": db, **(overrides or {})}
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
