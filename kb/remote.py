@@ -5,13 +5,14 @@
 이 파일이 있으면 즉석 질문 훅과 run_mcp.py --remote 가 원격 서버를 쓴다.
 device_id 는 이 PC 가 캡처한 근거에 origin 으로 붙고(captured_json 의 origin 키), 로컬 검사기는 자기 PC 의 근거만
 판정한다. 다른 PC 에서 등록한 근거는 이 PC 에 파일이 없어 "파일이 없어졌다" 로 잘못 판정되기 때문이다.
+PC 클라이언트 패키지(pyproject.toml)에 들어가는 모듈이라 표준 라이브러리 밖의 것과 서버 모듈(kb.control 등)을 import 하지 않는다.
 """
 import json
 import os
 import uuid
 from pathlib import Path
 
-from kb.control import TOKEN_PREFIX
+TOKEN_PREFIX = "fq_pat_"  # 개인 토큰 앞부분. 서버(kb/control.py)가 이 값을 가져다 쓴다
 
 
 def home() -> Path:

@@ -54,6 +54,11 @@ class Config:
     backup_s3_bucket: str = ""
     backup_s3_prefix: str = ""
 
+    @property
+    def web_url(self) -> str:
+        """웹 화면 주소. 원격 모드는 public_url, 로컬 모드는 http://127.0.0.1:<port>."""
+        return self.public_url if self.mode == "remote" else f"http://127.0.0.1:{self.port}"
+
 
 def _path(value: str) -> Path:
     p = Path(value)

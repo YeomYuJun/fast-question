@@ -59,6 +59,9 @@ def test_add_and_search_as_claude_in_own_db(cfg, app):
     err, found = call(app, token, "kb_search", {"query": "rename"})
     assert [h["id"] for h in found["hits"]] == [res["item"]["id"]]
     assert tenant.db_path_for(cfg.data_dir, acc).exists()
+    url = f"{URL}/#qa/{res['item']['id']}"
+    assert res["item"]["url"] == found["hits"][0]["url"] == url
+    assert call(app, token, "kb_get", {"id": res["item"]["id"]})[1]["url"] == url
 
 
 def test_accounts_are_isolated(cfg, app):

@@ -14,23 +14,13 @@ from kb import search as search_mod
 from kb.evidence import Checker, accept_captured, capture, overall_state, spec_of
 from kb.morph import write_index
 from kb.schema import AUDITED
-from kb.text import check_answer, check_name, check_question, clean
+from kb.text import SIMILAR_MIN, bigrams, check_answer, check_name, check_question, clean, dice
 
 Actor = Literal["user", "claude", "system"]
 ACTORS = ("user", "claude", "system")
-SIMILAR_MIN = 0.6
 
 QA_COLS = ("id, category_id, question, answer, evidence_state, "
            "deleted_at, created_at, created_by, updated_at, updated_by, version")
-
-
-def bigrams(text: str) -> set[str]:
-    s = "".join(text.lower().split())
-    return {s[i:i + 2] for i in range(len(s) - 1)} or ({s} if s else set())
-
-
-def dice(a: set[str], b: set[str]) -> float:
-    return 2 * len(a & b) / (len(a) + len(b)) if a and b else 0.0
 
 
 # 원격 모드 계정당 상한(삭제한 행 포함, 행이 남아 공간을 쓴다)

@@ -24,7 +24,7 @@ from mcp.server.lowlevel.server import Server
 from kb.errors import KbError
 from kb.evidence import capture
 from kb.remote import judge
-from mcp_server.server import INSTRUCTIONS
+from mcp_server.instructions import INSTRUCTIONS
 
 SERVER_KINDS = ("url", "note")  # 서버가 직접 만드는 근거
 
@@ -113,7 +113,8 @@ async def _recapture(remote: Remote, args: dict) -> types.CallToolResult:
 
 async def _recheck(remote: Remote, args: dict) -> types.CallToolResult:
     if not remote.device_id:
-        return text_result("credentials.json 에 device_id 가 없다. scripts/install.py --remote 로 다시 설치한다.", is_error=True)
+        return text_result("credentials.json 에 device_id 가 없다. fast-question login(저장소 설치는 "
+                           "scripts/install.py --remote)으로 다시 만든다.", is_error=True)
     params = {"origin": remote.device_id}
     if args.get("id") is not None:
         params["qa"] = str(args["id"])

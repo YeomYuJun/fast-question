@@ -12,6 +12,7 @@
 
 설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다.
 설정 파일: 환경 변수 FAST_QUESTION_CONFIG, 없으면 저장소의 config.json.
+PC 클라이언트 패키지(`fast-question hook`, fq_client/cli.py)는 main(remote_only=True) 로 원격 경로만 쓴다.
 """
 import json
 import os
@@ -121,11 +122,11 @@ def remote_projects(cred: dict, cache: Path | None = None, now: float | None = N
     return data
 
 
-def project_of(cwd: str, cfg: Config, sources: dict | None = None) -> str | None:
+def project_of(cwd: str, cfg: Config | None, sources: dict | None = None) -> str | None:
     """질문한 폴더(cwd)가 KB 에 있는 프로젝트면 그 이름을 돌려준다. 아니면 None.
 
     폴더 경로의 어느 단계 이름이 대분류 이름과 같거나, cwd 가 qa-harvest 로 구축한 경로 안이면 프로젝트다.
-    sources({"names", "roots"})가 없으면 로컬 DB 에서 읽는다.
+    sources({"names", "roots"})가 없으면 로컬 DB(cfg.db_path)에서 읽는다.
     """
     if not cwd:
         return None
@@ -182,7 +183,8 @@ def context(query: str, res: dict, base: str, project: str | None = None) -> str
     return "\n".join(lines)
 
 
-def main() -> int:
+def main(remote_only: bool = False) -> int:
+    """remote_only 는 PC 클라이언트(fq_client hook)다. 자격 증명이 없으면 로컬 설정·DB 를 읽지 않고 끝낸다."""
     try:
         raw = sys.stdin.buffer.read().decode("utf-8-sig")
         data = json.loads(raw) if raw.strip() else {}
@@ -192,15 +194,17 @@ def main() -> int:
         query = to_query(prompt)
         if not query:
             return 0
-        env = os.environ.get("FAST_QUESTION_CONFIG")
-        cfg = load_config(Path(env) if env else None)
         from kb.remote import load_credentials
         cred = load_credentials()
         if cred:
             res = remote_lookup(query, cred)
-            project = project_of(data.get("cwd", ""), cfg, remote_projects(cred))
+            project = project_of(data.get("cwd", ""), None, remote_projects(cred))
             text = context(query, res, cred["url"], project)
+        elif remote_only:
+            return 0
         else:
+            env = os.environ.get("FAST_QUESTION_CONFIG")
+            cfg = load_config(Path(env) if env else None)
             text = context(query, lookup(query, cfg), f"http://{cfg.host}:{cfg.port}", project_of(data.get("cwd", ""), cfg))
         if not text:
             return 0

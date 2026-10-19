@@ -13,3 +13,6 @@ deploy/aws.env
 deploy/config.json
 deploy/.env
 deploy/aws.env
+dist/
+build/
+*.egg-info/

@@ -7,6 +7,7 @@ DDL 전체의 sha256 이라 손으로 올리지 않는다. DDL 이 바뀐 뒤 �
 - 세션 쿠키 값은 256비트 난수이고 표에는 sha256 만 둔다. 비활동 30일 또는 생성 90일이 지나면 끝난다.
 - 로그인 상태(state, PKCE verifier)는 10분 안에 한 번만 쓸 수 있다.
 - 개인 토큰(fq_pat_…)은 훅·로컬 프록시가 Bearer 로 쓴다. 표에는 sha256 만 두고, 180일 뒤 끝난다. 계정당 살아 있는 토큰 10개.
+- PC 로그인 승인 코드(cli_grant)는 5분 안에 한 번만 개인 토큰으로 바꿀 수 있다(web/cli_login.py).
 - 형태소 사용자 단어는 원격 모드에서 서버 전역 사전(global_user_word) 하나다. Kiwi 가 프로세스에 하나라 사용자마다
   둘 수 없다. 운영자가 scripts/global_words.py 로 바꾸고, 분석기는 words_source() 로 이 표를 읽는다.
 세션·로그인 상태의 시각은 이 모듈이 UTC ISO 문자열로 넣고 비교한다(now 인자로 테스트한다).
@@ -18,13 +19,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kb.db import NOW, get_meta, open_db, tx
+from kb.remote import TOKEN_PREFIX
 
 PROVIDERS = ("github", "google")
 SESSION_IDLE = timedelta(days=30)
 SESSION_MAX = timedelta(days=90)
 SESSION_TOUCH = timedelta(hours=1)  # 마지막 사용 시각은 이만큼 지났을 때만 고친다(요청마다 쓰지 않는다)
 LOGIN_STATE_TTL = timedelta(minutes=10)
-TOKEN_PREFIX = "fq_pat_"
+CLI_GRANT_TTL = timedelta(minutes=5)
 TOKEN_LIFETIME = timedelta(days=180)
 TOKEN_MAX = 10
 SIGNUP_PER_HOUR = 5
@@ -148,8 +150,20 @@ CREATE TABLE IF NOT EXISTS link_state (
 );
 """
 
+# PC 클라이언트 로그인(web/cli_login.py): 브라우저에서 승인하면 1회용 코드를 PC 의 127.0.0.1 로 넘기고, PC 가 그 코드와
+# PKCE verifier 로 개인 토큰을 받는다. 코드는 sha256 만 두고 CLI_GRANT_TTL 안에 한 번만 쓴다
+CLI_GRANT_DDL = """
+CREATE TABLE IF NOT EXISTS cli_grant (
+    code_hash TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES account(id),
+    challenge TEXT NOT NULL,
+    device TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL, CLI_GRANT_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
@@ -395,7 +409,7 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
 
 
 def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | None = None) -> None:
-    """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드를 모두 지운다.
+    """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드·PC 로그인 승인 코드를 모두 지운다.
     신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
     t = _iso(_now(now))
     with tx(conn):
@@ -405,6 +419,31 @@ def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | No
         conn.execute("DELETE FROM personal_token WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM oauth_token WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM auth_code WHERE account_id = ?", (account_id,))
+        conn.execute("DELETE FROM cli_grant WHERE account_id = ?", (account_id,))
+
+
+def put_cli_grant(conn: sqlite3.Connection, account_id: int, challenge: str, device: str,
+                  now: datetime | None = None) -> str:
+    """PC 로그인 승인. 1회용 코드를 돌려준다(표에는 sha256 만). 끝난 승인은 이때 지운다."""
+    t = _now(now)
+    code = secrets.token_urlsafe(32)
+    with tx(conn):
+        conn.execute("DELETE FROM cli_grant WHERE created_at < ?", (_iso(t - CLI_GRANT_TTL),))
+        conn.execute("INSERT INTO cli_grant(code_hash, account_id, challenge, device, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (_hash(code), account_id, challenge, device, _iso(t)))
+    return code
+
+
+def take_cli_grant(conn: sqlite3.Connection, code: str, now: datetime | None = None) -> dict | None:
+    """코드를 지우고 {account_id, challenge, device} 를 돌려준다. 없거나 CLI_GRANT_TTL 이 지났으면 None."""
+    t = _now(now)
+    with tx(conn):
+        row = conn.execute("SELECT account_id, challenge, device, created_at FROM cli_grant WHERE code_hash = ?",
+                           (_hash(code),)).fetchone()
+        conn.execute("DELETE FROM cli_grant WHERE code_hash = ?", (_hash(code),))
+    if row is None or row["created_at"] < _iso(t - CLI_GRANT_TTL):
+        return None
+    return {"account_id": row["account_id"], "challenge": row["challenge"], "device": row["device"]}
 
 
 def purge_closed_accounts(conn: sqlite3.Connection, days: int, now: datetime | None = None) -> int:

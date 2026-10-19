@@ -7,6 +7,16 @@ QUESTION_MAX = 150
 ANSWER_MAX = 400
 ANSWER_MAX_LINES = 6  # 첫 줄 = 핵심 답, 나머지 = '- ' 항목 (kb.rules 가 양식을 본다)
 NAME_MAX = 60
+SIMILAR_MIN = 0.6  # 질문 2글자 조각 겹침(dice)이 이 값 이상이면 비슷한 질문이다
+
+
+def bigrams(text: str) -> set[str]:
+    s = "".join(text.lower().split())
+    return {s[i:i + 2] for i in range(len(s) - 1)} or ({s} if s else set())
+
+
+def dice(a: set[str], b: set[str]) -> float:
+    return 2 * len(a & b) / (len(a) + len(b)) if a and b else 0.0
 
 
 def clean(s: str) -> str:

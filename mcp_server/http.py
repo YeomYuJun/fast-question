@@ -47,7 +47,7 @@ class RemoteMcp:
             client_registration_options=ClientRegistrationOptions(enabled=True, valid_scopes=[SCOPE],
                                                                   default_scopes=[SCOPE]),
             revocation_options=RevocationOptions(enabled=True))
-        server = build_server(self.open_store, remote=True, auth=auth,
+        server = build_server(self.open_store, web_url=self.cfg.web_url, remote=True, auth=auth,
                               auth_server_provider=KbAuthProvider(self.control_path, url))
         host = url.split("://", 1)[1]
         security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=[host],

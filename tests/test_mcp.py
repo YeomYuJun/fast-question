@@ -10,6 +10,7 @@ from mcp_server.server import TOOLS, build_server, store_factory
 EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
                   "kb_archive", "kb_restore", "kb_rename_category", "kb_delete_category",
                   "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest"}
+WEB = "http://127.0.0.1:9999"
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def db(tmp_path):
 
 @pytest.fixture
 def server(db):
-    return build_server(store_factory(db, None))
+    return build_server(store_factory(db, None), web_url=WEB)
 
 
 def call(server, name, args=None):
@@ -53,6 +54,28 @@ def test_add_then_search_as_claude(server):
     assert found["hits"][0]["tier"] == "exact"
     assert "reviewed" not in found["hits"][0]
     assert "spans" not in found["hits"][0]
+
+
+def test_results_carry_web_address(server):
+    call(server, "kb_add_category", {"name": "이관"})
+    item = call(server, "kb_add", {"category": "이관", "question": ".part 를 쓰는 이유",
+                                   "answer": "다 쓴 뒤 rename 으로 확정한다."})[1]["item"]
+    url = f"{WEB}/#qa/{item['id']}"
+    assert item["url"] == url
+    assert call(server, "kb_get", {"id": item["id"]})[1]["url"] == url
+    assert call(server, "kb_search", {"query": "rename"})[1]["hits"][0]["url"] == url
+    err, updated = call(server, "kb_update", {"id": item["id"], "version": item["version"],
+                                              "answer": "다 쓴 뒤 rename 으로 이름을 확정한다."})
+    assert not err and updated["url"] == url
+
+    err, res = call(server, "kb_add", {"category": "이관", "question": ".part 를 쓰는 까닭",
+                                       "answer": "rename 으로 확정한다."})
+    assert res["status"] == "similar_found" and res["similar"][0]["url"] == url
+
+    many = call(server, "kb_add_many", {"items": [
+        {"category": "이관", "question": "PETRA 를 제거하는 이유", "answer": "대상 DB 에서 쓸 수 없다."}]})[1]
+    created = many["results"][0]
+    assert created["url"] == f"{WEB}/#qa/{created['id']}"
 
 
 def test_similar_question_reported(server):

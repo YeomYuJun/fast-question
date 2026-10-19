@@ -1,6 +1,7 @@
 """qa-harvest 초안(draft.json)을 적재 전에 검사한다. 문제가 0건이어야 kb_add_many 로 넣는다.
 
-사용: .venv\\Scripts\\python.exe scripts\\lint_draft.py "<draft.json>"
+사용: fast-question lint-draft "<draft.json>" (PC 클라이언트)
+      .venv\\Scripts\\python.exe fq_client\\lint_draft.py "<draft.json>" (저장소)
 출력: JSON {"count": 항목 수, "problems": [{"index", "question", "problems": [...]}]}. 문제가 있으면 종료 코드 1.
 
 검사
@@ -21,8 +22,7 @@ if str(ROOT) not in sys.path:
 
 from kb.errors import ValidationError  # noqa: E402
 from kb.rules import problems as rule_problems  # noqa: E402
-from kb.store import SIMILAR_MIN, bigrams, dice  # noqa: E402
-from kb.text import check_answer, check_question  # noqa: E402
+from kb.text import SIMILAR_MIN, bigrams, check_answer, check_question, dice  # noqa: E402
 
 PER_FILE_MAX = 5
 QUOTE_MAX = 300

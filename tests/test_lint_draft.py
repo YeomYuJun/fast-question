@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts import lint_draft
+from fq_client import lint_draft
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -40,8 +40,8 @@ def test_rules_problems_are_included():
 def test_cli_exit_code_and_utf8_sig(tmp_path):
     p = tmp_path / "draft.json"
     p.write_bytes(b"\xef\xbb\xbf" + json.dumps([_item()], ensure_ascii=False).encode("utf-8"))
-    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "lint_draft.py"), str(p)], capture_output=True, timeout=60)
+    r = subprocess.run([sys.executable, str(ROOT / "fq_client" / "lint_draft.py"), str(p)], capture_output=True, timeout=60)
     assert r.returncode == 0 and json.loads(r.stdout.decode("utf-8"))["problems"] == []
     p.write_text(json.dumps([_item(ask_when="")], ensure_ascii=False), encoding="utf-8")
-    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "lint_draft.py"), str(p)], capture_output=True, timeout=60)
+    r = subprocess.run([sys.executable, str(ROOT / "fq_client" / "lint_draft.py"), str(p)], capture_output=True, timeout=60)
     assert r.returncode == 1

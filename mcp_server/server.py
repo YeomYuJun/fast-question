@@ -2,6 +2,8 @@
 
 쓰기 주체는 open_store 가 돌려주는 Store 의 actor(run_mcp.py 에서 claude)로 고정된다.
 KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현재 값을 붙인다.
+web_url 은 웹 화면 주소(로컬 http://127.0.0.1:<port>, 원격 public_url)다. kb_add·kb_add_many(created)·kb_update·kb_get 결과와
+kb_search 의 hits·similar 항목에 그 Q&A 를 펼치는 주소 url = <web_url>/#qa/<id> 를 넣는다.
 remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고, 근거 재기록은
 로컬 프록시가 보낸 캡처값(spec.captured)을 쓴다. 근거·재검증·사전의 원격 제한은 Store(remote=True)가 건다.
 """
@@ -16,21 +18,7 @@ from kb.errors import ConflictError, KbError
 from kb.morph import reindex
 from kb.rules import check_claude_qa
 from kb.store import Store
-
-INSTRUCTIONS = """\
-fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분을 검토하지 않으므로 아래 양식을 지킨다. 규칙 원본은 ~/.claude/skills/qa/rules.md 다.
-- 질문은 한 줄(150자 이하)의 묻는 문장이다. 질문만 읽어도 대상이 식별되게 대상 이름을 넣고, 대상이 일반 명사면 시스템 이름을 붙인다.
-  답변은 400자·6줄 이하다. 첫 줄은 질문에 바로 답하는 1~2문장(120자 이하), 둘째 줄부터는 필요할 때만 "- " 로 시작하는 한 사실씩의 개조체 항목이다.
-  사실(지금 동작)만 쓰고 비유를 쓰지 않는다. 결정 경위·개발 이력, 확인하지 않은 추정, 진행 상태, 비밀값·개인정보·IP 주소는 넣지 않는다.
-  답변 양식, 금지 표현, 민감 정보는 kb_add·kb_update 가 검사해 위반이면 거부한다.
-- 지금 작업 중인 프로젝트와 무관한 평시 질문은 사용자가 /qa 로 요청할 때만 등록한다.
-- 분류는 kb_categories 를 보고 고른다. 맞는 것이 없으면 사용자에게 묻지 않고 kb_add_category 로 만든다(대분류 = 작업 주제, 중분류 = 대상 이름).
-- 로컬 파일에서 확인한 사실은 evidence 에 {"kind": "auto", "path": "<파일 절대경로>", "anchor": "<심볼이나 찾을 문자열>"} 를 단다.
-  일반 지식(k8s 개념, 수학 등)은 근거 없이 쓴다. 사람에게 확인한 사실은 {"kind": "note", "text": "누가 어떻게 확인"} 을 단다.
-- 등록 전에 kb_search 로 같은 질문이 있는지 본다. 있으면 kb_get 으로 version 을 읽고 kb_update 로 고친다.
-- kb_search 가 0건이면 표현을 바꿔 두 번까지 다시 검색한다(형태소·동의어로도 못 찾는 표현이 있다).
-- 분류 삭제(kb_delete_category)는 하위 분류와 Q&A 를 모두 함께 삭제한다. 먼저 confirm 없이 불러 받은 경고문을 사용자에게 보여 주고, 승인을 받은 뒤에만 confirm=true 로 부른다.
-"""
+from mcp_server.instructions import INSTRUCTIONS
 
 HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "matched", "evidence_state", "archived",
             "created_by", "updated_at", "version")
@@ -55,10 +43,20 @@ def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
     return lambda: Store(connect(db_path), "claude", analyzer=analyzer)
 
 
-def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=None,
+def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool = False, auth=None,
                  auth_server_provider=None) -> MCPServer:
     server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth,
                        auth_server_provider=auth_server_provider)
+    base = web_url.rstrip("/")
+
+    def link(qa_id: int) -> str:
+        return f"{base}/#qa/{qa_id}"
+
+    def hit(h: dict) -> dict:
+        return {**_hit(h), "url": link(h["id"])}
+
+    def detail(item: dict) -> dict:
+        return {**_detail(item), "url": link(item["id"])}
 
     def run(fn: Callable[[Store], Any]) -> Any:
         store = open_store()
@@ -90,14 +88,14 @@ def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=
                 res = s.search(query, regex=regex, **opts)
                 head = {"query": res["query"]}
             return {**head, "total": res["total"], "groups": res["groups"],
-                    "hits": [_hit(h) for h in res["hits"]], "similar": [_hit(h) for h in res["similar"]],
+                    "hits": [hit(h) for h in res["hits"]], "similar": [hit(h) for h in res["similar"]],
                     "morph": res["morph"]}
         return run(go)
 
     @server.tool()
     def kb_get(id: int) -> dict:
         """Q&A 한 건을 근거, 관련 질문, 최근 이력 5건과 함께 읽는다. 고치기 전에 version 을 여기서 읽는다."""
-        return run(lambda s: _detail(s.get_qa(id)))
+        return run(lambda s: detail(s.get_qa(id)))
 
     @server.tool()
     def kb_categories() -> dict:
@@ -120,8 +118,8 @@ def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=
             check_claude_qa(question, answer, evidence)
             res = s.add_qa(category, question, answer, evidence=evidence, links=links, force=force)
             if res["status"] == "similar_found":
-                return {"status": "similar_found", "similar": [_hit(i) for i in res["similar"]]}
-            return {"status": "created", "item": _detail(res["item"])}
+                return {"status": "similar_found", "similar": [hit(i) for i in res["similar"]]}
+            return {"status": "created", "item": detail(res["item"])}
         return run(go)
 
     @server.tool()
@@ -130,8 +128,8 @@ def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=
         """Q&A 를 고친다. version 은 kb_get 으로 읽은 값이다. 다르면 현재 값과 함께 거부된다."""
         def go(s: Store):
             check_claude_qa(question, answer)
-            return _detail(s.update_qa(id, version, question=question, answer=answer,
-                                       category=category, note=reason))
+            return detail(s.update_qa(id, version, question=question, answer=answer,
+                                      category=category, note=reason))
         return run(go)
 
     @server.tool()
@@ -261,7 +259,7 @@ def build_server(open_store: Callable[[], Store], *, remote: bool = False, auth=
                                     "similar": [{k: i[k] for k in ("id", "question", "answer")} for i in res["similar"]]})
                 else:
                     results.append({"index": n, "status": "created", "id": res["item"]["id"],
-                                    "question": res["item"]["question"]})
+                                    "question": res["item"]["question"], "url": link(res["item"]["id"])})
             return {"results": results, "created": sum(r["status"] == "created" for r in results)}
         return run(go)
 

@@ -35,7 +35,7 @@ def main() -> None:
         return
     cfg = load_config(args.config)
     connect(cfg.db_path).close()  # 스키마 준비
-    build_server(store_factory(cfg.db_path, Analyzer())).run("stdio")
+    build_server(store_factory(cfg.db_path, Analyzer()), web_url=cfg.web_url).run("stdio")
 
 
 if __name__ == "__main__":

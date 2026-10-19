@@ -86,3 +86,9 @@ def test_backup_s3_keys_default_empty_and_prefix_gets_slash(tmp_path):
     cfg = load_config(_write(tmp_path, {"backup_s3_bucket": "fq-backup", "backup_s3_prefix": "prod"}))
     assert cfg.backup_s3_bucket == "fq-backup" and cfg.backup_s3_prefix == "prod/"
     assert load_config(_write(tmp_path, {"backup_s3_prefix": "prod/"})).backup_s3_prefix == "prod/"
+
+
+def test_web_url_is_local_port_or_public_url(tmp_path):
+    assert load_config(_write(tmp_path, {"port": 9999})).web_url == "http://127.0.0.1:9999"
+    cfg = load_config(_write(tmp_path, {"mode": "remote", "public_url": "https://fq.example.com/", "data_dir": "d"}))
+    assert cfg.web_url == "https://fq.example.com"
