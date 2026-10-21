@@ -116,7 +116,7 @@
       "target": "local",
       "category": "Claude 연동",
       "question": "fast-question 에 프로젝트 폴더의 Q&A 를 한 번에 구축하려면?",
-      "answer": "Claude Code 에서 /qa-harvest <경로> 를 실행한다.\n- 한 번에 60건, 한 파일에서 5건까지 등록\n- 두 번째부터는 지난 구축 이후 바뀐 파일만 다룸\n- 대분류 이름은 대상 폴더 이름과 같게 지음",
+      "answer": "Claude Code 에서 /qa-harvest <경로> 를 실행한다.\n- 한 번에 60건, 한 파일에서 5건까지 등록\n- 두 번째부터는 지난 구축 이후 바뀐 파일만 다룸\n- 대분류 이름은 사용자가 정하지 않으면 대상 폴더 이름으로 지음",
       "evidence": [
         {
           "kind": "auto",
