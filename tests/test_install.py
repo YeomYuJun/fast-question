@@ -1,6 +1,8 @@
 import json
 import shlex
 
+import pytest
+
 from scripts import autostart, install
 
 OTHER = {"type": "command", "command": 'node "d:\\tools\\hooks\\other/inject.js"'}
@@ -121,6 +123,23 @@ def test_install_skills_fills_marks_in_md_only(tmp_path):
     assert (dst / "qa" / "tool.py").read_text(encoding="utf-8") == install.CLI_MARK
     assert all("그대로" in m for m in install.install_skills(src, dst, marks))
     assert "덮어씀" in install.install_skills(src, dst, {**marks, install.RULES_MARK: "다른 곳"})[0]
+
+
+def test_select_variant_keeps_only_that_block_and_drops_marker_lines():
+    src = b"a\r\n<!-- local -->\r\nL\r\n<!-- /local -->\r\n<!-- remote -->\nR\n<!-- /remote -->\nb\n"
+    assert install.select_variant(src, "local") == b"a\r\nL\r\nb\n"
+    assert install.select_variant(src, "remote") == b"a\r\nR\nb\n"
+    for bad in (b"<!-- local -->\nx\n", b"<!-- local -->\n<!-- /remote -->\n",
+                b"<!-- local -->\n<!-- remote -->\n<!-- /remote -->\n<!-- /local -->\n"):
+        with pytest.raises(ValueError):
+            install.select_variant(bad, "local")
+
+
+def test_local_render_of_skill_sources_has_no_remote_text():
+    for d in ("qa", "qa-harvest"):
+        for rel, data in install.render(install.SKILLS_SRC / d, install.local_marks()).items():
+            text = data.decode("utf-8")
+            assert "<!--" not in text and "커넥터" not in text, (d, rel)
 
 
 def test_skill_sources_use_marks_not_repo_paths():

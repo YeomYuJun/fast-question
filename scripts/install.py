@@ -24,6 +24,7 @@ Claude Code 플러그인(plugin/fast-question, scripts/build_plugin.py)과 함�
 import getpass
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -45,6 +46,7 @@ NAME = "fast-question"
 # Skill 원본 md 의 자리표시. 설치 방식마다 값이 다르다(이 스크립트는 로컬 설치, scripts/build_plugin.py 는 플러그인)
 CLI_MARK = "{{FQ_CLI}}"  # PC 클라이언트 명령(fq_client/cli.py) 실행 방법
 RULES_MARK = "{{QA_RULES}}"  # qa Skill 의 rules.md 위치
+VARIANT_LINE = re.compile(rb"<!-- (/?)(local|remote) -->")  # Skill 원본 md 의 설치 방식별 구간 표시(select_variant)
 
 
 def venv_python(root: Path | None = None) -> Path:
@@ -73,9 +75,34 @@ def _files(top: Path) -> dict[str, bytes]:
             if p.is_file() and "__pycache__" not in p.parts}
 
 
-def render(src: Path, marks: dict[str, str]) -> dict[str, bytes]:
-    """Skill 폴더의 파일. md 에 적힌 자리표시를 marks 의 값으로 바꾼다."""
+def select_variant(data: bytes, variant: str) -> bytes:
+    """md 의 `<!-- local -->`·`<!-- remote -->` 구간 중 variant 구간만 남긴다. 표시 줄은 지운다.
+    local 은 PC 에서 도는 Claude Code(이 스크립트, 플러그인), remote 는 원격 서버에 직접 붙는 claude.ai·Desktop 이다."""
+    out, block = [], None
+    for line in data.splitlines(keepends=True):
+        m = VARIANT_LINE.fullmatch(line.strip())
+        if m:
+            name = m.group(2).decode("ascii")
+            if m.group(1):
+                if block != name:
+                    raise ValueError(f"닫는 표시가 여는 표시와 다르다: {line.strip()!r}")
+                block = None
+            else:
+                if block is not None:
+                    raise ValueError(f"표시 구간 안에 다른 표시가 있다: {line.strip()!r}")
+                block = name
+            continue
+        if block is None or block == variant:
+            out.append(line)
+    if block is not None:
+        raise ValueError(f"닫히지 않은 표시 구간: <!-- {block} -->")
+    return b"".join(out)
+
+
+def render(src: Path, marks: dict[str, str], variant: str = "local") -> dict[str, bytes]:
+    """Skill 폴더의 파일. md 는 variant 구간만 남기고 자리표시를 marks 의 값으로 바꾼다."""
     def fill(data: bytes) -> bytes:
+        data = select_variant(data, variant)
         for mark, real in marks.items():
             data = data.replace(mark.encode("utf-8"), real.encode("utf-8"))
         return data

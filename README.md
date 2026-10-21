@@ -31,6 +31,18 @@ claude plugin install fast-question@fast-question
 
 MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question` 을 `uvx` 로 실행한다. 설치 뒤 아래 PC 로그인을 한 번 하고 Claude Code 를 다시 시작한다. 자세한 것은 [plugin/fast-question/README.md](plugin/fast-question/README.md).
 
+## claude.ai·Claude Desktop
+
+claude.ai 의 커스텀 커넥터로 `https://fast-question.com/mcp` 를 추가한다. 등록·검색 절차를 담은 qa Skill 은 저장소에서 파일로 만들어 Claude 에 올린다.
+
+```powershell
+.venv\Scripts\python.exe scripts\build_desktop_skill.py
+```
+
+- 결과는 `dist/qa.skill` 이다(zip, 안에 `qa/SKILL.md`·`qa/rules.md`).
+- `skill/qa` 원본에서 `<!-- remote -->` 구간을 남기고 `<!-- local -->` 구간을 뺀다. 원격 서버는 사용자 PC 의 파일을 읽지 못하므로 파일 근거·근거 재판정·즉석 질문 훅 절차가 빠진다.
+- qa-harvest 는 넣지 않는다. 사용자 PC 의 폴더와 PC 클라이언트 명령이 있어야 한다.
+
 ## PC 로그인
 
 플러그인의 MCP 와 훅은 개인 토큰으로 서버에 접속한다. 토큰은 브라우저 승인으로 받는다.

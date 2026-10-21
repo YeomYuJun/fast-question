@@ -23,7 +23,7 @@ def test_plugin_folder_matches_a_fresh_build():
 def test_plugin_has_no_marks_or_local_paths():
     for rel, data in build_plugin.plugin_files(f"fast-question=={__version__}").items():
         text = data.decode("utf-8")
-        assert "{{" not in text, rel
+        assert "{{" not in text and "<!--" not in text, rel
         assert not re.search(r"\b[A-Za-z]:[\\/]", text), rel  # 드라이브 경로(이 PC 의 저장소 위치)
 
 
