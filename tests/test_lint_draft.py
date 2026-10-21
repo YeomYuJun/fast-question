@@ -37,6 +37,13 @@ def test_rules_problems_are_included():
     assert any("결정 경위" in p for p in r["problems"])
 
 
+def test_secret_placeholder_passes_and_real_value_is_pointed():
+    ok = "docker login 에 --docker-password=<pw> 로 넘긴다."
+    assert lint_draft.lint([_item(answer=ok, quote="")]) == lint_draft.lint([_item(quote="")])
+    (r,) = lint_draft.lint([_item(answer="docker login 에 --docker-password=hunter2 로 넘긴다.", quote="")])
+    assert any("답변 1번째 줄에 비밀번호·토큰 값(password=hu…)" in p for p in r["problems"])
+
+
 def test_cli_exit_code_and_utf8_sig(tmp_path):
     p = tmp_path / "draft.json"
     p.write_bytes(b"\xef\xbb\xbf" + json.dumps([_item()], ensure_ascii=False).encode("utf-8"))

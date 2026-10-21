@@ -7,7 +7,7 @@ description: 사용자의 질문·답변 지식 DB(fast-question)에 Q&A 를 등
 
 fast-question 은 사용자가 작업 중 생긴 질문 한 줄과 짧은 답을 쌓는 DB 다. 도구 결과의 `url` 이 그 항목을 웹 화면에서 여는 주소다.
 도구는 MCP 서버 `fast-question` 의 `kb_*` 다. 도구가 목록에 없으면 사용자에게 `claude mcp list` 로 연결 상태를 확인해 달라고 하고 멈춘다.
-원격 서버에 로그인하지 않아 연결되지 않은 것이면 터미널에서 `uvx --from fast-question==0.1.2 fast-question login` 을 실행한 뒤 `/mcp` 로 다시 연결하게 한다.
+원격 서버에 로그인하지 않아 연결되지 않은 것이면 터미널에서 `uvx --from fast-question==0.1.3 fast-question login` 을 실행한 뒤 `/mcp` 로 다시 연결하게 한다.
 
 사람은 등록분을 검토하지 않는다. 등록은 아래 양식으로 Claude 가 끝까지 처리하고, 중간에 사용자에게 묻지 않는다.
 무엇을 넣고 무엇을 넣지 않는지, 질문·답변·분류·근거 양식은 이 폴더의 [rules.md](rules.md) 가 원본이다. 등록 전에 읽는다.

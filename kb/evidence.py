@@ -14,6 +14,7 @@ from kb.errors import ValidationError
 KINDS = ("auto", "file", "dir", "git", "githead", "url", "note")
 DIR_SKIP = {".git", "node_modules"}
 DIR_CAP = 50000
+BINARY_DOCS = {".xlsx", ".xls", ".xlsm", ".docx", ".doc", ".pptx", ".ppt", ".hwp", ".hwpx", ".pdf"}
 IS_WIN = os.name == "nt"
 # pythonw 로 뜬 web 이 git 을 부를 때 콘솔 창이 깜빡이지 않게 한다
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -117,6 +118,21 @@ def _exists(path: str | None) -> Path:
     return p.resolve()
 
 
+def _check_anchor(anchor: str | None, p: Path) -> None:
+    """anchor 가 파일 내용(UTF-8 바이트)에 없으면 등록을 거부한다. 판정(Checker)은 앵커를 상태에 쓰지 않는다."""
+    if not anchor:
+        return
+    try:
+        data = p.read_bytes()
+    except OSError:
+        raise ValidationError(f"앵커를 찾으려 했으나 파일을 읽지 못했다: {p}") from None
+    # 압축·이진 문서는 시트 이름·절 제목이 바이트로 드러나지 않는다(rules.md 가 이들에 시트·절 앵커를 쓰게 한다)
+    if p.suffix.lower() in BINARY_DOCS or b"\0" in data[:8192]:
+        return
+    if anchor.encode("utf-8") not in data:
+        raise ValidationError(f"앵커 '{anchor}' 가 {p.name} 에 없다. 파일에 있는 문자열을 그대로 쓴다.")
+
+
 def _row(kind, *, path=None, anchor=None, repo=None, commit_sha=None, paths=None, captured=None) -> dict:
     return {
         "kind": kind, "path": path, "anchor": anchor, "repo": repo, "commit_sha": commit_sha,
@@ -134,6 +150,9 @@ def _capture_git(repo_arg: str, paths: list[str], commit: str | None, anchor: st
         raise ValidationError(f"커밋을 찾지 못했다: {commit or 'HEAD'}")
     commit_sha = out.strip()
     specs = [rel_spec(s, top) for s in (paths or ["."])]
+    # 앵커는 경로 하나가 파일을 가리킬 때만 확인한다. 폴더·여러 경로·glob 은 어느 파일에서 찾을지 정할 수 없다
+    if len(specs) == 1 and not any(ch in specs[0] for ch in "*?") and (top / specs[0]).is_file():
+        _check_anchor(anchor, top / specs[0])
     match = spec_matcher(specs)
     diff = _nul_list(run_git(top, "diff", "--name-only", "--no-renames", "-z", commit_sha, "--"))
     untr = _nul_list(run_git(top, "ls-files", "-o", "--exclude-standard", "-z"))
@@ -163,6 +182,7 @@ def capture(spec: Mapping) -> dict:
         p = _exists(spec.get("path"))
         if not p.is_file():
             raise ValidationError(f"파일이 아니다: {p}")
+        _check_anchor(anchor, p)
         return _row("file", path=str(p), anchor=anchor, captured={"sha256": hash_file(p)})
     if kind == "dir":
         p = _exists(spec.get("path"))

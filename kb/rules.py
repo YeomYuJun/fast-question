@@ -28,7 +28,8 @@ _IPV4 = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.
 
 SENSITIVE = [
     ("비밀번호·토큰 값", re.compile(
-        r"(?i)(?:\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)|비밀번호|패스워드)\s*[:=]\s*\S+")),
+        r"(?i)(?:\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)|비밀번호|패스워드)\s*[:=]\s*"
+        r"(?P<val><[^<>\n]+>|\S+)")),
     ("개인 키", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("AWS 접근 키", re.compile(r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])")),
     ("JWT 토큰", re.compile(r"\beyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}")),
@@ -38,24 +39,52 @@ SENSITIVE = [
 ]
 
 
-def _has_ip(text: str) -> bool:
+# 값 자리에 <pw>, <your token> 처럼 꺾쇠로 감싼 자리표시자만 있으면 실제 값이 아니다
+_PLACEHOLDER = re.compile(r"<[^<>\n]+>")
+SHOW = 2  # 걸린 값에서 보여 주는 앞 글자 수. 나머지는 가린다
+
+
+def _ips(text: str):
     for m in _IPV4.finditer(text):
         parts = [int(p) for p in m.groups()]
         if max(parts) > 255 or parts[0] == 127 or parts == [0, 0, 0, 0]:
             continue  # 루프백·전체 바인딩 주소는 내부 망 값이 아니다
-        return True
-    return False
+        yield m
 
 
 def sentence_count(text: str) -> int:
     return len(_SENTENCE_END.findall(text.strip()))
 
 
-def _sensitive(text: str, where: str) -> list[str]:
-    kinds = [kind for kind, rx in SENSITIVE if rx.search(text)]
-    if _has_ip(text):
-        kinds.append("IP 주소")
-    return [f"{where}에 {k}이(가) 들어 있다. 값 대신 그 값이 적힌 위치(파일·시트)를 쓴다." for k in kinds]
+def _hits(line: str) -> list[tuple[str, str]]:
+    """한 줄에서 걸린 (종류, 앞 몇 글자만 남긴 값). 종류마다 첫 번째 것만 돌려준다."""
+    out = []
+    for kind, rx in SENSITIVE:
+        for m in rx.finditer(line):
+            val = m.groupdict().get("val")
+            if val is None:
+                out.append((kind, m.group(0)[:SHOW] + "…"))
+                break
+            nxt = line[m.end():m.end() + 1]
+            if _PLACEHOLDER.fullmatch(val) and not (nxt.isalnum() or nxt == "_"):
+                continue
+            out.append((kind, line[m.start():m.start("val")] + val[:SHOW] + "…"))
+            break
+    for m in _ips(line):
+        out.append(("IP 주소", m.group(1) + ".…"))
+        break
+    return out
+
+
+def _sensitive(text: str, where: str, numbered: bool = False) -> list[str]:
+    """numbered 면 위치에 줄 번호를 붙인다. 번호는 답변 양식 검사처럼 빈 줄을 빼고 센다."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    out = []
+    for i, ln in enumerate(lines, 1):
+        at = f"{where} {i}번째 줄" if numbered else where
+        out += [f"{at}에 {kind}({shown})이(가) 들어 있다. 값 대신 그 값이 적힌 위치(파일·시트)를 쓴다."
+                for kind, shown in _hits(ln)]
+    return out
 
 
 def _answer_form(answer: str) -> list[str]:
@@ -87,9 +116,9 @@ def problems(question: str | None = None, answer: str | None = None,
     if answer:
         out += _answer_form(answer)
         out += [f"답변에 {kind}이(가) 있다. {fix}" for kind, rx, fix in BANNED if rx.search(answer)]
-        out += _sensitive(answer, "답변")
+        out += _sensitive(answer, "답변", numbered=True)
     for e in evidence or []:
-        text = " ".join(str(e.get(k, "")) for k in ("text", "url"))
+        text = " ".join(str(e.get(k, "")) for k in ("text", "url", "anchor"))
         if text.strip():
             out += _sensitive(text, "근거")
     return out

@@ -195,3 +195,13 @@ def test_check_task_command():
     args = autostart.check_install_args()
     assert args[:5] == ["schtasks", "/Create", "/TN", "fast-question-check", "/SC"] and "DAILY" in args
     assert "local_check.py" in args[args.index("/TR") + 1]
+
+
+def test_proxy_capture_rejects_missing_anchor(tmp_path):
+    from kb.errors import ValidationError
+    from mcp_server.proxy import localize
+    f = tmp_path / "a.txt"
+    f.write_text("def foo(): pass\n", encoding="utf-8")
+    assert localize({"kind": "file", "path": str(f), "anchor": "def foo"})["captured"]["anchor"] == "def foo"
+    with pytest.raises(ValidationError, match="앵커 'def bar' 가 a.txt 에 없다"):
+        localize({"kind": "file", "path": str(f), "anchor": "def bar"})

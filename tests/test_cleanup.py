@@ -79,7 +79,7 @@ def test_duplicate_found_in_same_top_category_only(claude, conn):
 
 def test_duplicate_with_shared_evidence_uses_lower_threshold(claude, conn, tmp_path):
     f = tmp_path / "NasFileStorage.java"
-    f.write_text("class NasFileStorage { void write() {} }", encoding="utf-8")
+    f.write_text("class NasFileStorage { void write() {} void other() {} }", encoding="utf-8")
     q1, q2 = "NasFileStorage 쓰기 전 여유 공간 검사 이유", "NasFileStorage 임시 파일 경로 규칙"
     score = dice(bigrams(q1), bigrams(q2))
     assert 0.4 <= score < 0.6, score

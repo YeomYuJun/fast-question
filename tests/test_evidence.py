@@ -73,6 +73,30 @@ def test_git_path_tracks_only_its_paths(repo):
     assert verdict == "changed" and "NasFileStorage.java" in detail
 
 
+def test_capture_rejects_anchor_missing_from_file(base, repo):
+    f = base / "설정.txt"
+    f.write_text("시간 제한 timeout = 30\n", encoding="utf-8")
+    assert capture({"kind": "file", "path": str(f), "anchor": "시간 제한"})["anchor"] == "시간 제한"
+    with pytest.raises(ValidationError, match="앵커 'retry' 가 설정.txt 에 없다"):
+        capture({"kind": "file", "path": str(f), "anchor": "retry"})
+    target = repo / "src" / "NasFileStorage.java"
+    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없다"):
+        capture({"kind": "auto", "path": str(target), "anchor": "class Storage"})
+    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없다"):
+        capture({"kind": "git", "repo": str(repo), "paths": ["src/NasFileStorage.java"], "anchor": "class Storage"})
+
+
+def test_capture_skips_anchor_check_for_dir_and_many_paths(base, repo):
+    assert capture({"kind": "dir", "path": str(base), "anchor": "없는 문자열"})["kind"] == "dir"
+    xlsx = base / "목록.xlsx"
+    xlsx.write_bytes(b"PK\x03\x04\x14\x00compressed")
+    assert capture({"kind": "file", "path": str(xlsx), "anchor": "Sheet1"})["anchor"] == "Sheet1"
+    assert capture({"kind": "auto", "path": str(repo / "src"), "anchor": "없는 문자열"})["kind"] == "git"
+    assert capture({"kind": "git", "repo": str(repo), "paths": ["src/*.java"], "anchor": "없는 문자열"})["kind"] == "git"
+    assert capture({"kind": "git", "repo": str(repo), "paths": ["src/NasFileStorage.java", "src/Other.java"],
+                    "anchor": "없는 문자열"})["kind"] == "git"
+
+
 def test_changed_detail_says_whether_anchor_remains(base, repo):
     f = base / "설정.txt"
     f.write_text("timeout = 30\n", encoding="utf-8")
@@ -247,7 +271,7 @@ def test_parse_line(line, specs):
 def test_line_of_round_trips(conn, base):
     from kb.evidence import line_of, parse_line
     f = base / "근거 파일.txt"
-    f.write_text("v1", encoding="utf-8")
+    f.write_text("v1 anchor 1", encoding="utf-8")
     f = f.resolve()  # 저장되는 경로는 resolve 한 값이다(윈도우 임시 폴더는 8.3 짧은 이름일 수 있다)
     s = Store(conn, "user")
     s.add_category("이관")

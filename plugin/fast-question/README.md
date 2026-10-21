@@ -9,7 +9,7 @@
 - Skill `/fast-question:qa`(등록·검색), `/fast-question:qa-harvest`(프로젝트 폴더에서 Q&A 구축)
 - 즉석 질문 훅: 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다.
 
-MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question==0.1.2` 을 `uvx` 로 실행합니다.
+MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question==0.1.3` 을 `uvx` 로 실행합니다.
 
 ## 설치
 
@@ -21,7 +21,7 @@ MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question==0.1.2` �
    ```
 3. 로그인합니다. 브라우저에서 승인하면 개인 토큰이 `%USERPROFILE%\.fast-question\credentials.json` 에 저장됩니다.
    ```
-   uvx --from fast-question==0.1.2 fast-question login
+   uvx --from fast-question==0.1.3 fast-question login
    ```
 4. Claude Code 를 다시 시작합니다(이미 열려 있으면 `/mcp` 에서 `fast-question` 을 다시 연결합니다).
 
@@ -37,4 +37,4 @@ claude mcp add --transport http -s user fast-question https://fast-question.com/
 
 - 저장소의 `scripts/install.py` 로 설치한 적이 있으면 MCP·훅·Skill 이 두 벌 걸립니다. 둘 중 하나만 씁니다.
 - 플러그인은 원격 서버 전용입니다. 이 PC 의 로컬 DB 를 쓰려면 플러그인을 끄고(`claude plugin disable fast-question@fast-question`) 저장소의 `scripts/install.py` 로 설치합니다.
-- 다른 서버를 쓰려면 `uvx --from fast-question==0.1.2 fast-question login --url https://<주소>` 로 로그인합니다.
+- 다른 서버를 쓰려면 `uvx --from fast-question==0.1.3 fast-question login --url https://<주소>` 로 로그인합니다.

@@ -80,10 +80,37 @@ def test_harmless_values_pass(text):
     assert problems(answer=text) == []
 
 
+@pytest.mark.parametrize("text", [
+    "레지스트리 로그인은 --docker-password=<pw> 로 한다.",
+    "헤더는 token: <your token> 형식이다.",
+    '설정은 "password=<비밀번호>" 로 둔다.',
+])
+def test_secret_placeholders_pass(text):
+    assert problems(answer=text) == []
+
+
+def test_placeholder_followed_by_value_is_rejected():
+    assert any("비밀번호" in m for m in problems(answer="password=<pw>abc 로 한다."))
+
+
+def test_sensitive_message_points_line_and_masks_value():
+    msgs = problems(answer="로그인 방법은 아래와 같다.\n- 명령은 docker login --docker-password=hunter2 로 한다")
+    assert any(m.startswith("답변 2번째 줄에 비밀번호·토큰 값(password=hu…)") for m in msgs), msgs
+    assert not any("hunter2" in m for m in msgs)
+    (q,) = problems(question="10.1.1.1 서버는 무엇인가")
+    assert q.startswith("질문에 IP 주소(10.…)")
+    with pytest.raises(ValidationError) as e:
+        check_claude_qa(answer="담당은 hong@example.com 이다.")
+    assert "답변 1번째 줄에 이메일 주소(ho…)" in e.value.message and "example" not in e.value.message
+
+
 def test_question_and_note_evidence_are_checked():
     assert any("IP 주소" in m for m in problems(question="10.1.1.1 서버는 무엇인가"))
     assert any("이메일" in m for m in problems(evidence=[{"kind": "note", "text": "a@b.co 가 확인"}]))
     assert any("비밀번호" in m for m in problems(evidence=[{"kind": "url", "url": "https://x/?token=abc"}]))
+    ev = [{"kind": "auto", "path": "D:/repo/app.env", "anchor": "api_key=sk-live-123"}]
+    assert any(m.startswith("근거에 비밀번호·토큰 값(api_key=sk…)") for m in problems(evidence=ev))
+    assert problems(evidence=[{"kind": "auto", "path": "D:/repo/app.env", "anchor": "api_key=<key>"}]) == []
 
 
 def test_question_mark_is_not_required():
