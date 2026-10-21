@@ -52,3 +52,9 @@ def load_sample(store, synonyms=True):
 def no_real_credentials(tmp_path_factory, monkeypatch):
     """이 PC 에 원격 자격 증명이 있어도 테스트는 읽지 않는다(즉석 질문 훅·프록시가 원격으로 가지 않게)."""
     monkeypatch.setenv("FQ_CREDENTIALS", str(tmp_path_factory.mktemp("cred") / "credentials.json"))
+
+
+@pytest.fixture(autouse=True)
+def no_real_claude_config(tmp_path_factory, monkeypatch):
+    """테스트가 실수로 claude CLI 를 실제로 불러도 이 PC 의 사용자 설정(~/.claude.json 의 MCP 등록)을 바꾸지 않게 한다."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-config")))
