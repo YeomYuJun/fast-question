@@ -44,7 +44,7 @@ def _delete(conn: sqlite3.Connection, table: str, ids: set[int], col: str = "id"
 def prune(path: Path, exclude: list[str] | tuple[str, ...] = ()) -> dict:
     """사본 파일에서 system 이 만든 Q&A(기본 가이드)와 exclude 분류(하위 분류 포함)의 Q&A 를 지운다.
 
-    보관한 항목도 지운다. 그 Q&A 의 근거·연결·이력·검색 색인 행도 지운다. 비게 된 system 분류와 제외한 분류도
+    보관한 항목도 지운다. 그 Q&A 의 근거·연결·이력·검색 색인·정리 건 행도 지운다. 비게 된 system 분류와 제외한 분류도
     지운다. 물리 삭제를 막는 트리거를 잠시 지웠다가 kb.schema.ddl() 로 되살리고, 지운 내용이 빈 페이지에 남지
     않게 VACUUM 한다. 돌려주는 값: {"system": 지운 기본 가이드 수, "excluded": 제외한 분류에서 지운 Q&A 수}.
     exclude 의 분류가 없으면 ValueError 이고 파일을 바꾸지 않는다.
@@ -82,6 +82,8 @@ def prune(path: Path, exclude: list[str] | tuple[str, ...] = ()) -> dict:
                 conn.executemany("DELETE FROM revision WHERE table_name = ? AND row_id = ?", [(table, i) for i in ids])
             _delete(conn, "evidence", ev)
             _delete(conn, "qa_link", links)
+            _delete(conn, "cleanup_finding", drop_qa, "qa_id")
+            _delete(conn, "cleanup_finding", drop_qa, "other_qa_id")
             _delete(conn, "qa", drop_qa)
             _delete(conn, "qa_fts", drop_qa, "rowid")
             _delete(conn, "qa_morph_fts", drop_qa, "rowid")

@@ -1,6 +1,6 @@
 {
   "name": "fast-question",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "fast-question 지식 DB 연결: 원격 서버 MCP(파일 근거를 이 PC 에서 캡처), qa·qa-harvest Skill, 질문하면 KB 를 먼저 찾아 주는 즉석 질문 훅",
   "author": {
     "name": "YeomYuJun"

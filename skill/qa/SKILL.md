@@ -48,6 +48,19 @@ fast-question 은 사용자가 작업 중 생긴 질문 한 줄과 짧은 답을
    - 답이 틀렸으면 `kb_update` 로 고친다.
    - 그다음(답이 맞았어도) `kb_evidence` action=recapture 로 근거를 지금 상태로 다시 기록한다.
    - 고친 항목은 등록과 같은 형식으로 한 줄씩 보고한다.
+5. 결과에 `cleanup` 표시가 붙은 항목(정리 대상)이 있으면 사용자에게 넘기지 않고 아래 "정리" 절차로 그 항목을 처리한다.
+
+## 정리 ("qa 정리해", 검색 결과의 `cleanup` 표시)
+
+주기 작업이 하루 한 번 정리 대상을 찾아 둔다. 찾기만 하고 고치지 않는다. 고치는 것은 Claude 이고 사용자에게 묻지 않는다.
+
+1. `kb_cleanup_list` 로 목록을 받는다(`rule` 로 거를 수 있다). 항목마다 `item`(고칠 항목)이 있고, 중복이면 `other`(먼저 등록된 항목)가 있다.
+2. 규칙별로 처리한다.
+   - `duplicate`(질문이 비슷한 항목): 두 항목을 비교한다. 같은 사실을 묻는 질문이면 답이 더 정확한 쪽으로 `kb_update` 해 합치고, 나머지는 `kb_archive` 한 뒤 `kb_cleanup_resolve` resolution=fixed. 다른 사실이면 필요할 때 `kb_link` 로 잇고 resolution=kept, `note` 에 무엇이 다른지 적는다.
+   - `rule_violation`(지금 형식 규칙 위반): `detail` 의 위반 내용대로 `kb_update` 로 고친 뒤 resolution=fixed. 원문 인용처럼 규칙이 잘못 걸린 경우만 kept.
+   - `evidence_stale`·`evidence_unknown`(근거 상태): 조회 4번과 "근거 재확인" 2번대로 처리한다. 근거를 다시 기록하면 목록에서 빠지므로 resolve 하지 않는다(`id` 가 null 이다).
+3. fixed 는 조건을 다시 확인해 아직 걸리면 거부된다. 거부 메시지대로 더 고친다. kept 로 닫은 건은 그 항목의 질문·답이 바뀌기 전까지 다시 올라오지 않는다.
+4. 처리한 항목마다 한 줄씩 보고한다. 형식: `정리: <질문> <결과의 url> (<한 일>)`.
 
 ## 즉석 질문 (턴 문맥에 `[fast-question 지식 DB]` 안내가 붙은 경우)
 

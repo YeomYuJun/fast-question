@@ -58,6 +58,8 @@ docker compose -f deploy/compose.yaml up -d --build
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
   배포로 기본 가이드(`kb/default_guide.json`)가 바뀌면 사용자 DB 마다 한 번 다시 넣는다. 사용자나 Claude 가 고친 가이드 항목은 그대로 둔다.
   하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트, 등록하고 하루 안에 토큰을 받지 않은 OAuth 클라이언트, 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
+  하루 한 번 사용자 DB 마다 정리 대상(질문이 비슷한 항목, 지금 형식 규칙에 어긋나는 Claude 등록분)을 찾아 `cleanup_finding` 표에 둔다. 항목은 고치지 않는다. 처리는 Claude 가 MCP `kb_cleanup_list`·`kb_cleanup_resolve` 로 한다.
+  사용자 DB 의 첫 탐지는 전부를 비교해 2만 건에 약 20초 CPU 를 쓰고, 그 뒤로는 바뀐 항목만 본다.
 - 계정당 상한: Q&A 20,000건, 분류 500개, 근거 100,000행(삭제한 것 포함), DB 파일 200 MB(보관·복원·연결 끊기 외의 쓰기를 막는다), 개인 토큰 10개. OAuth 연결은 20개이고, 넘으면 가장 오래 안 쓴 연결을 끊는다.
 - 앱은 Caddy 뒤에서만 받는다(compose 의 app 은 `expose` 만 한다). 요청·가입 제한이 실제 IP 로 걸리도록 원격 모드의 uvicorn 은 `X-Forwarded-For` 를 믿는다.
 

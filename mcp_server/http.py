@@ -1,4 +1,4 @@
-"""원격 MCP(Streamable HTTP, <public_url>/mcp). 도구는 mcp_server/server.py 의 16개 그대로이고 쓰기 주체는 claude 다.
+"""원격 MCP(Streamable HTTP, <public_url>/mcp). 도구는 mcp_server/server.py 의 18개 그대로이고 쓰기 주체는 claude 다.
 
 Bearer 토큰의 계정이 DB 파일을 정한다(AccessToken.subject = 계정 id). 받는 토큰은 OAuth access token 과
 개인 토큰(fq_pat_…)이고, 둘 다 web/oauth_as.py 의 KbAuthProvider.load_access_token 이 확인한다. 같은 앱에 SDK 의

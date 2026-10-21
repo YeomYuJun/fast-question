@@ -63,7 +63,7 @@ def test_run_due_runs_overdue_jobs_and_skips_fresh(tmp_path):
     assert run_due(cfg) == {}  # 방금 돌았으므로 건너뛴다
 
     later = datetime.now(timezone.utc) + timedelta(hours=25)
-    assert set(run_due(cfg, now=later)) == {"backup", "recheck"}
+    assert set(run_due(cfg, now=later)) == {"backup", "recheck", "cleanup_scan"}
     conn.close()
 
 
@@ -181,7 +181,7 @@ def test_run_due_all_backs_up_each_user_and_control_db(tmp_path):
     done = run_due_all(cfg)
     assert set(done["users"]) == {1, 2}
     for acc in (1, 2):
-        assert set(done["users"][acc]) == {"backup", "guide", "expire"}  # 근거 재검증은 서버에서 돌지 않는다
+        assert set(done["users"][acc]) == {"backup", "guide", "expire", "cleanup_scan"}  # 근거 재검증은 서버에서 돌지 않는다
         copies = list((tenant.user_dir(cfg.data_dir, acc) / "backup").glob("kb-*.sqlite3"))
         assert len(copies) == 1
         copy = sqlite3.connect(copies[0])

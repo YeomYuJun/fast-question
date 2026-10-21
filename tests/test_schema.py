@@ -185,7 +185,7 @@ def test_stopwords_seeded_once(tmp_path):
     c = connect(path)
     words = sorted(r[0] for r in c.execute("SELECT word FROM stopword"))
     assert words == ["경우", "때"]
-    assert get_meta(c, "schema_version") == "3"
+    assert get_meta(c, "schema_version") == "4"
     c.close()
 
 
@@ -196,7 +196,7 @@ def test_connect_existing_db_takes_no_write_lock(tmp_path):
     t0 = time.perf_counter()
     c = connect(path)
     assert time.perf_counter() - t0 < 1.0
-    assert get_meta(c, "schema_version") == "3"
+    assert get_meta(c, "schema_version") == "4"
     holder.execute("ROLLBACK")
     c.close()
     holder.close()
@@ -288,7 +288,7 @@ def test_old_answer_line_check_relaxed_on_connect(tmp_path):
         add_qa(c, cid, a="1\n2\n3\n4\n5\n6\n7")
     add_qa(c, cid, a="1\n2\n3\n4\n5\n6")
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert get_meta(c, "schema_version") == "3"
+    assert get_meta(c, "schema_version") == "4"
     c.close()
 
 
@@ -299,6 +299,6 @@ def test_old_schema_triggers_replaced_on_connect(tmp_path):
     set_meta(c, "schema_version", "1")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "3"
+    assert get_meta(c, "schema_version") == "4"
     assert c.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'qa_insert_guard'").fetchone()[0] == 1
     c.close()

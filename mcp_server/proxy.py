@@ -1,6 +1,6 @@
 """로컬 프록시 MCP(stdio). Claude Code 가 `run_mcp.py --remote` 로 띄우고, 원격 <url>/mcp 를 개인 토큰으로 부른다.
 
-도구 목록은 원격 서버의 것을 그대로 내보낸다(같은 16개 이름·인자). 호출은 그대로 넘기되, 사용자 PC 에서만 할 수
+도구 목록은 원격 서버의 것을 그대로 내보낸다(같은 18개 이름·인자). 호출은 그대로 넘기되, 사용자 PC 에서만 할 수
 있는 일을 여기서 먼저 한다.
 - 근거 spec(kb_add, kb_add_many 항목, kb_evidence add)은 이 PC 에서 capture() 해 captured 로 붙인다(url·note 제외).
 - kb_add_many file= 은 이 PC 의 파일을 읽어 items 로 보낸다. 캡처에 실패한 항목은 그 항목만 오류로 돌려준다.

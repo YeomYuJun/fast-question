@@ -9,7 +9,8 @@ from mcp_server.server import TOOLS, build_server, store_factory
 
 EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
                   "kb_archive", "kb_restore", "kb_rename_category", "kb_delete_category",
-                  "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest"}
+                  "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest",
+                  "kb_cleanup_list", "kb_cleanup_resolve"}
 WEB = "http://127.0.0.1:9999"
 
 

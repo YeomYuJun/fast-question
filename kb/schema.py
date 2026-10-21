@@ -11,7 +11,7 @@
 
 import re
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 BUMP = f"version = version + 1, updated_at = {NOW}"
 ACTORS = "('user','claude','system')"
@@ -164,6 +164,28 @@ END;
 
 -- 형태소 색인은 앱이 쓴다. ver 는 그 행을 분석한 분석기 버전이다
 CREATE VIRTUAL TABLE IF NOT EXISTS qa_morph_fts USING fts5(body, ver UNINDEXED, tokenize = 'unicode61');
+
+-- 정리 탐지 결과(kb/cleanup.py). 감사 표가 아니다: 탐지가 매일 돌고, 실제 수정은 qa 의 이력에 남는다.
+-- content_hash 는 탐지 시점의 질문·답(중복이면 두 항목 모두)이다. kept 로 닫힌 건은 이 값이 같으면 다시 만들지 않는다
+CREATE TABLE IF NOT EXISTS cleanup_finding (
+    id INTEGER PRIMARY KEY,
+    qa_id INTEGER NOT NULL REFERENCES qa(id),
+    other_qa_id INTEGER REFERENCES qa(id),
+    rule TEXT NOT NULL CONSTRAINT cleanup_finding_rule CHECK (rule IN ('duplicate','rule_violation')),
+    detail TEXT NOT NULL DEFAULT '',
+    qa_version INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    found_at TEXT NOT NULL DEFAULT ({NOW}),
+    resolved_at TEXT,
+    resolution TEXT CONSTRAINT cleanup_finding_resolution
+        CHECK (resolution IS NULL OR resolution IN ('fixed','kept','gone')),
+    resolved_by TEXT CHECK (resolved_by IS NULL OR resolved_by IN {ACTORS}),
+    note TEXT,
+    CONSTRAINT cleanup_finding_resolved CHECK ((resolved_at IS NULL) = (resolution IS NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS cleanup_finding_open_uq
+    ON cleanup_finding(qa_id, rule, ifnull(other_qa_id, 0)) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS cleanup_finding_qa ON cleanup_finding(qa_id);
 """
 
 SEED = """

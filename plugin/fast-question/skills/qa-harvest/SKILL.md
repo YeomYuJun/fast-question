@@ -27,7 +27,7 @@ description: 프로젝트 폴더(소스·git 이력·문서·설정·정책 파�
 ## 1. 목록 (결정적)
 
 ```
-uvx --from fast-question==0.1.0 fast-question inventory "<경로1>" "<경로2>" --out "<스크래치>/inventory.json"
+uvx --from fast-question==0.1.1 fast-question inventory "<경로1>" "<경로2>" --out "<스크래치>/inventory.json"
 ```
 
 - 증분 모드면 지난 record 를 `<스크래치>/since.json` 으로 저장하고 `--since "<스크래치>/since.json"` 을 더한다.
@@ -87,7 +87,7 @@ uvx --from fast-question==0.1.0 fast-question inventory "<경로1>" "<경로2>" 
 
 1. 기계 검사. 문제가 0건이 될 때까지 고치고 다시 돌린다. 0건이 아니면 6단계로 가지 않는다.
    ```
-   uvx --from fast-question==0.1.0 fast-question lint-draft "<스크래치>/draft.json"
+   uvx --from fast-question==0.1.1 fast-question lint-draft "<스크래치>/draft.json"
    ```
    등록 검사(길이, 답변 양식, 결정 경위·추정 표현, 민감 정보), `quote`·`ask_when` 유무, quote 의 식별자가 답에 있는지, 초안 안의 비슷한 질문, 파일당 5건을 본다.
 2. 자기 검사. 항목마다 아래에 모두 "예" 여야 남긴다. 하나라도 "아니오" 면 고치거나 버린다.

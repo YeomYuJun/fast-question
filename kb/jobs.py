@@ -5,6 +5,7 @@
 로컬 모드는 run_due 가 cfg.db_path 하나를 맡는다. 원격 모드는 run_due_all 이 사용자 DB(kb/tenant.py)마다
 백업(users/<id>/backup/), 기본 가이드 갱신(서버의 가이드가 그 DB 의 meta guide_hash 와 다를 때), 재색인을 하고, 제어 DB 를 data_dir/backup/control-YYYYMMDD.sqlite3 로 백업한다.
 원격 모드는 근거 재검증을 하지 않는다(근거 파일은 사용자 PC 에 있다). 한 사용자의 실패가 다른 사용자를 막지 않는다.
+정리 탐지(kb/cleanup.py, meta last_cleanup_scan)는 두 모드 모두 DB 마다 하루 한 번 돈다. 탐지만 하고 Q&A 는 고치지 않는다.
 backup_s3_bucket 이 있으면 그 주기에 만든 백업 사본을 S3 에 올린다(kb/s3backup.py). 업로드 실패는 백업을 되돌리지 않는다.
 """
 import copy
@@ -13,7 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kb import control, guide, oauth_store, s3backup, tenant
+from kb import cleanup, control, guide, oauth_store, s3backup, tenant
 from kb.config import Config
 from kb.control import connect_control
 from kb.db import NOW, connect, get_meta, set_meta
@@ -115,6 +116,18 @@ def _cleanup_job(cfg: Config, conn: sqlite3.Connection, now: datetime) -> list:
     return [("cleanup", job)]
 
 
+def _cleanup_scan_job(conn: sqlite3.Connection, now: datetime) -> list:
+    """사용자 DB: 정리 대상 탐지(하루 한 번). 처리는 Claude 가 MCP 로 한다."""
+    if not _due(conn, "last_cleanup_scan", CLEANUP_EVERY_HOURS, now):
+        return []
+
+    def job() -> dict:
+        out = cleanup.scan(conn)
+        _mark(conn, "last_cleanup_scan")
+        return out
+    return [("cleanup_scan", job)]
+
+
 def _reindex_job(conn: sqlite3.Connection, analyzer) -> list:
     if analyzer is not None and analyzer.enabled and pending_count(conn, analyzer):
         return [("reindex", lambda: reindex(conn, analyzer) if analyzer.ready(conn) else 0)]
@@ -134,7 +147,7 @@ def run_due(cfg: Config, analyzer=None, now: datetime | None = None) -> dict:
                 results = Store(conn, "system", analyzer).recheck()
                 return {"checked": len(results), "changed": sum(r["changed"] for r in results)}
             jobs.append(("recheck", recheck))
-        return _run(jobs + _reindex_job(conn, analyzer))
+        return _run(jobs + _reindex_job(conn, analyzer) + _cleanup_scan_job(conn, now))
     finally:
         conn.close()
 
@@ -185,7 +198,8 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
                 backup_dir = tenant.user_dir(cfg.data_dir, account_id) / "backup"
                 jobs.append(("backup", lambda: {"path": str(backup(conn, backup_dir, cfg.backup_keep))}))
             jobs += _guide_job(conn, remote_guide, analyzer)
-            result = _run(jobs + _reindex_job(conn, analyzer) + _expire_job(conn, now), label)
+            result = _run(jobs + _reindex_job(conn, analyzer) + _expire_job(conn, now)
+                          + _cleanup_scan_job(conn, now), label)
             result.update(_run(uploader.job(result, lambda p, f: s3backup.user_key(p, account_id, f)), label))
             if result:
                 users[account_id] = result

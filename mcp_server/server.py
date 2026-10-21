@@ -4,6 +4,7 @@
 KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현재 값을 붙인다.
 web_url 은 웹 화면 주소(로컬 http://127.0.0.1:<port>, 원격 public_url)다. kb_add·kb_add_many(created)·kb_update·kb_get 결과와
 kb_search 의 hits·similar 항목에 그 Q&A 를 펼치는 주소 url = <web_url>/#qa/<id> 를 넣는다.
+kb_search 의 hits 중 열린 정리 건(kb/cleanup.py)이 있는 항목에는 cleanup = [규칙 이름] 을 붙인다.
 remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고, 근거 재기록은
 로컬 프록시가 보낸 캡처값(spec.captured)을 쓴다. 근거·재검증·사전의 원격 제한은 Store(remote=True)가 건다.
 """
@@ -13,6 +14,7 @@ from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 
+from kb import cleanup
 from kb.db import connect
 from kb.errors import ConflictError, KbError
 from kb.morph import reindex
@@ -87,8 +89,10 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             else:
                 res = s.search(query, regex=regex, **opts)
                 head = {"query": res["query"]}
+            marks = cleanup.open_rules(s.conn, [h["id"] for h in res["hits"]])
+            hits = [{**hit(h), "cleanup": marks[h["id"]]} if h["id"] in marks else hit(h) for h in res["hits"]]
             return {**head, "total": res["total"], "groups": res["groups"],
-                    "hits": [hit(h) for h in res["hits"]], "similar": [hit(h) for h in res["similar"]],
+                    "hits": hits, "similar": [hit(h) for h in res["similar"]],
                     "morph": res["morph"]}
         return run(go)
 
@@ -280,9 +284,32 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             raise KbError(f"알 수 없는 수확 기록 동작이다: {action}")
         return run(go)
 
+    @server.tool()
+    def kb_cleanup_list(rule: str | None = None, limit: int = 20) -> dict:
+        """정리할 항목 목록. 주기 작업이 하루 한 번 찾아 둔 건과 근거 상태가 나쁜 항목이다.
+        rule 은 duplicate(질문이 비슷한 항목. other 가 먼저 등록된 쪽), rule_violation(지금 형식 규칙 위반),
+        evidence_stale(근거 파일이 기록 뒤에 바뀜), evidence_unknown(근거를 판정하지 못함)이다.
+        duplicate·rule_violation 은 고치거나 보관한 뒤 kb_cleanup_resolve 로 닫는다. 근거 건(id 가 null)은 근거를
+        다시 기록하면 목록에서 빠진다."""
+        def go(s: Store):
+            res = cleanup.open_list(s, rule=rule, limit=limit)
+            for f in res["findings"]:
+                for k in ("item", "other"):
+                    if f.get(k):
+                        f[k] = {**f[k], "url": link(f[k]["id"])}
+            return res
+        return run(go)
+
+    @server.tool()
+    def kb_cleanup_resolve(finding_id: int, resolution: str, note: str | None = None) -> dict:
+        """정리 건을 닫는다. resolution=fixed: 항목을 고치거나 보관했다(조건을 다시 확인해 아직 걸리면 거부한다).
+        kept: 확인해 보니 문제가 아니다(그 항목의 질문·답이 바뀌기 전까지 다시 올라오지 않는다). note 에 판단 근거를 적는다."""
+        return run(lambda s: cleanup.resolve(s, finding_id, resolution, note))
+
     return server
 
 
 ADD_MANY_MAX = 100
 TOOLS = ("kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update", "kb_archive",
-         "kb_restore", "kb_rename_category", "kb_delete_category", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest")
+         "kb_restore", "kb_rename_category", "kb_delete_category", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest",
+         "kb_cleanup_list", "kb_cleanup_resolve")

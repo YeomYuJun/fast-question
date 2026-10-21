@@ -2,4 +2,4 @@
 
 패키지 정의는 저장소 루트의 pyproject.toml 이다. 버전은 이 값 하나이고 pyproject 와 플러그인 생성 스크립트가 읽는다.
 """
-__version__ = "0.1.0"
+__version__ = "0.1.1"

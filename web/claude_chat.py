@@ -35,7 +35,7 @@ DEFAULT_MODEL = MODELS[0]
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5"}  # 거부(refusal) 때 서버가 다른 모델로 다시 돈다
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 ALLOWED_TOOLS = ("kb_search", "kb_get", "kb_categories", "kb_add", "kb_update", "kb_archive", "kb_restore", "kb_link",
-                 "kb_add_category", "kb_rename_category")
+                 "kb_add_category", "kb_rename_category", "kb_cleanup_list", "kb_cleanup_resolve")
 MAX_TURNS = 20
 MAX_TOKENS = 16000
 MAX_MESSAGES = 200

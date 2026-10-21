@@ -14,6 +14,7 @@ fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분
   일반 지식(k8s 개념, 수학 등)은 근거 없이 쓴다. 사람에게 확인한 사실은 {"kind": "note", "text": "누가 어떻게 확인"} 을 단다.
 - 등록 전에 kb_search 로 같은 질문이 있는지 본다. 있으면 kb_get 으로 version 을 읽고 kb_update 로 고친다.
 - kb_search 가 0건이면 표현을 바꿔 두 번까지 다시 검색한다(형태소·동의어로도 못 찾는 표현이 있다).
+- kb_search 결과에 cleanup(정리 대상) 표시가 붙은 항목은 사용자에게 묻지 않고 그 자리에서 정리한다. kb_cleanup_list 로 내용을 보고, 고치거나 보관한 뒤 kb_cleanup_resolve 로 닫는다.
 - 분류 삭제(kb_delete_category)는 하위 분류와 Q&A 를 모두 함께 삭제한다. 먼저 confirm 없이 불러 받은 경고문을 사용자에게 보여 주고, 승인을 받은 뒤에만 confirm=true 로 부른다.
 - 등록·수정·조회한 Q&A 를 사용자에게 알릴 때는 결과의 url(웹 화면에서 그 항목을 여는 주소)을 함께 보여 준다.
 """
