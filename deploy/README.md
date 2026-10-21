@@ -63,6 +63,35 @@ docker compose -f deploy/compose.yaml up -d --build
 - 계정당 상한: Q&A 20,000건, 분류 500개, 근거 100,000행(삭제한 것 포함), DB 파일 200 MB(보관·복원·연결 끊기 외의 쓰기를 막는다), 개인 토큰 10개. OAuth 연결은 20개이고, 넘으면 가장 오래 안 쓴 연결을 끊는다.
 - 앱은 Caddy 뒤에서만 받는다(compose 의 app 은 `expose` 만 한다). 요청·가입 제한이 실제 IP 로 걸리도록 원격 모드의 uvicorn 은 `X-Forwarded-For` 를 믿는다.
 
+## 자동 배포 (GitHub Actions)
+
+main 에 push 하면 `.github/workflows/deploy.yml` 이 테스트를 돌리고, 통과하면 SSH 로 서버의 `deploy/deploy.sh` 를 실행한다. Actions 화면의 deploy → Run workflow 로 손으로도 돌린다.
+
+`deploy/deploy.sh` 가 하는 일
+- 저장소를 `origin/main` 으로 맞춘다(`git fetch` + `reset --hard`). `git clean` 은 하지 않아 `deploy/config.json`·`.env`·`aws.env` 는 그대로다.
+- `docker compose -f deploy/compose.yaml up -d --build` 로 다시 띄운다.
+- 컨테이너 안에서 `/healthz` 가 200 이 될 때까지 3분 기다린다. 넘으면 앱 로그 50줄을 내고 실패한다.
+- 손으로 배포할 때도 저장소 루트에서 `sh deploy/deploy.sh` 를 실행한다.
+
+처음 한 번 하는 설정(서버 bash, 저장소는 `~/fast-question`)
+
+```bash
+cd ~/fast-question && git fetch origin && git checkout -B main origin/main
+ssh-keygen -t ed25519 -N "" -C fq-github-deploy -f ~/.ssh/fq_deploy
+printf 'command="sh %s/fast-question/deploy/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding %s\n' "$HOME" "$(cat ~/.ssh/fq_deploy.pub)" >> ~/.ssh/authorized_keys
+echo "DEPLOY_HOST: $(whoami)@<도메인>"
+echo "DEPLOY_KNOWN_HOSTS: <도메인> $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+cat ~/.ssh/fq_deploy
+```
+
+- 이 키는 강제 명령으로 등록되어, 무엇을 보내든 `deploy/deploy.sh` 만 실행한다(셸·포트 전달 없음).
+- GitHub 저장소 Settings → Environments 에 `production` 을 만들고 secret 세 개를 넣는다.
+  - `DEPLOY_HOST`: 위에 출력된 `사용자@도메인`
+  - `DEPLOY_KNOWN_HOSTS`: 위에 출력된 한 줄(`<도메인>` 을 실제 도메인으로)
+  - `DEPLOY_SSH_KEY`: `cat ~/.ssh/fq_deploy` 출력 전체
+- secret 을 넣은 뒤 서버의 개인키 `~/.ssh/fq_deploy` 는 지운다(`rm ~/.ssh/fq_deploy`). 공개키와 authorized_keys 줄은 남긴다.
+- 키를 바꾸거나 끊으려면 authorized_keys 에서 `fq-github-deploy` 줄을 지운다.
+
 ## 형태소 사용자 단어
 
 원격 모드의 Kiwi 사용자 단어는 서버 전역 사전 하나다(제어 DB 의 `global_user_word` 표). 사용자가 MCP `kb_dict` 로 바꾸는 것은 거부된다. 운영자가 컨테이너 안에서 바꾼다.

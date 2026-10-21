@@ -1,0 +1,45 @@
+# main 에 push 하면 테스트를 돌리고, 통과하면 서버에서 deploy/deploy.sh 를 실행한다. Actions 화면에서 손으로도 돌린다.
+# SSH 키는 서버 authorized_keys 에 강제 명령(command="sh …/deploy/deploy.sh")으로 등록한 배포 전용 키라, 무엇을 보내든 배포만 한다.
+# 비밀값은 환경 production 의 secret 이다: DEPLOY_HOST(사용자@주소), DEPLOY_SSH_KEY(개인키), DEPLOY_KNOWN_HOSTS(서버 호스트 키 줄).
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-server.txt
+      - run: python -m pytest -q
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: 서버에서 deploy/deploy.sh 실행
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "production 환경에 DEPLOY_HOST secret 이 없어 배포를 건너뛴다(deploy/README.md 자동 배포 절)"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o BatchMode=yes "$DEPLOY_HOST" deploy
