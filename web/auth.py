@@ -8,7 +8,8 @@
 - 세션 쿠키: Secure(https 일 때, 이름 앞에 __Host-) · HttpOnly · SameSite=Lax · Path=/. 값은 kb/control.py 세션.
 - AccountAuth 는 살아 있는 세션 쿠키 또는 `Authorization: Bearer fq_pat_…`(개인 토큰)의 계정 id 를 scope 의
   ACCOUNT_KEY 에, 어느 쪽인지("session"/"token")를 AUTH_KIND_KEY 에 넣는다. 이 값을 넣는 곳은 이 미들웨어뿐이다.
-- 개인 토큰 관리(/api/account/tokens)와 탈퇴(/api/account/delete)는 브라우저 세션으로만 한다.
+- 개인 토큰 관리(/api/account/tokens), 연결된 앱 목록·끊기(/api/account/apps, kb/oauth_store.py),
+  탈퇴(/api/account/delete)는 브라우저 세션으로만 한다.
 - client secret 은 환경 변수 FQ_GITHUB_SECRET, FQ_GOOGLE_SECRET. client_id 와 secret 이 둘 다 있는 공급자만 켠다.
 로그인 실패는 /?login_error=<denied|state|provider|closed|limit> 로 돌려보내고 화면이 문구를 보인다.
 새 계정은 IP 당 한 시간에 5개까지 만든다(kb/control.py SIGNUP_PER_HOUR).
@@ -30,7 +31,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from kb import control, tenant
+from kb import control, oauth_store, tenant
 from kb.config import Config
 
 ACCOUNT_KEY = "fq.account_id"
@@ -355,6 +356,21 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return JSONResponse({"error": "토큰을 찾지 못했다.", "code": "not_found"}, status_code=404)
         return JSONResponse({"ok": True})
 
+    async def apps(request: Request) -> Response:
+        if (denied := need_session(request)) is not None:
+            return denied
+        return JSONResponse({"apps": await run_in_threadpool(db, oauth_store.list_connections, request.scope[ACCOUNT_KEY])})
+
+    async def disconnect(request: Request) -> Response:
+        """그 계정의 그 연결만 끊는다. 다른 계정의 client_id 면 지울 것이 없어 404 다."""
+        if (denied := need_session(request)) is not None:
+            return denied
+        account_id, client_id = request.scope[ACCOUNT_KEY], request.path_params["client_id"]
+        if not await run_in_threadpool(db, oauth_store.disconnect, account_id, client_id):
+            return JSONResponse({"error": "연결을 찾지 못했습니다.", "code": "not_found"}, status_code=404)
+        log.info("연결 끊기: 계정 %s", account_id)
+        return JSONResponse({"ok": True})
+
     async def delete_account(request: Request) -> Response:
         """탈퇴. 확인 문구("탈퇴")를 받아야 한다. 사용자 폴더는 data_dir/deleted/ 로 옮긴다(30일 뒤 지우는 것은 주기 작업)."""
         if (denied := need_session(request)) is not None:
@@ -382,6 +398,8 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         Route("/api/account/tokens", tokens, methods=["GET", "POST"]),
         Route("/api/account/delete", delete_account, methods=["POST"]),
         Route("/api/account/tokens/{id:int}", revoke, methods=["DELETE"]),
+        Route("/api/account/apps", apps),
+        Route("/api/account/apps/{client_id}", disconnect, methods=["DELETE"]),
         Route("/auth/login/{provider}", login),
         Route("/auth/link/{provider}", link, methods=["POST"]),
         Route("/auth/callback/{provider}", callback),

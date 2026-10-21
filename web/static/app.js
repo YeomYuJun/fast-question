@@ -1174,13 +1174,50 @@ async function revokeToken(t) {
   renderConnect();
 }
 
-async function renderConnect() {
-  let tokens = [];
+// 연결된 앱: OAuth 로 승인한 연결(한 줄 연결, claude.ai 커넥터). 다시 연결할 때마다 클라이언트가 새로 등록되어
+// 이름이 같은 줄이 생기므로 연결한 시각까지 보인다
+const appName = (a) => a.name || "이름 없는 앱";
+const stamp = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+async function disconnectApp(a) {
+  if (!window.confirm(`${stamp(a.connected_at)} 에 연결한 "${appName(a)}" 의 연결을 끊습니다. 그 앱은 다시 연결해야 이 DB 를 쓸 수 있습니다.\n끊으시겠습니까?`)) return;
   try {
-    tokens = (await api("GET", "/api/account/tokens")).tokens;
+    await api("DELETE", `/api/account/apps/${encodeURIComponent(a.client_id)}`);
   } catch (e) {
     toast(e.message, { err: true });
+    return;
   }
+  toast("연결을 끊었습니다.");
+  renderConnect();
+}
+
+function appsBlock(apps) {
+  return el("div", { class: "cn-sec tokens" },
+    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "연결된 앱"), el("span", { class: "cn-count" }, apps.length)),
+    apps.length
+      ? el("ul", { class: "token-list" }, apps.map((a) => el("li", { class: "token-item" },
+        el("div", { class: "tk" }, el("span", { class: "name" }, appName(a)),
+          el("span", { class: "meta mono", title: `연결 ${a.connected_at} · 마지막 사용 ${a.last_used_at}` },
+            el("span", { class: "nw" }, `연결 ${stamp(a.connected_at)}`), " · ",
+            el("span", { class: "nw" }, `마지막 사용 ${stamp(a.last_used_at)}`))),
+        el("button", { class: "btn small", type: "button", "aria-label": `${stamp(a.connected_at)} 에 연결한 ${appName(a)} 연결 끊기`,
+          onclick: () => disconnectApp(a) }, "끊기"))))
+      : el("p", { class: "connect-note" }, "브라우저에서 승인한 연결(한 줄 연결, claude.ai 커넥터)이 없습니다."));
+}
+
+async function renderConnect() {
+  let tokens = [];
+  let apps = [];
+  const [tk, ap] = await Promise.allSettled([api("GET", "/api/account/tokens"), api("GET", "/api/account/apps")]);
+  if (tk.status === "fulfilled") tokens = tk.value.tokens;
+  else toast(tk.reason.message, { err: true });
+  if (ap.status === "fulfilled") apps = ap.value.apps;
+  else if (tk.status === "fulfilled") toast(ap.reason.message, { err: true });
   const day = (iso) => (iso || "").slice(0, 10);
   // 휴대폰, 태블릿(마우스 없이 터치만)에서는 Claude Code 를 돌릴 수 없어 연결 명령을 빼고 안내만 둔다.
   // 브라우저 이름(UA) 대신 입력 장치로 판단한다. Safari, Chrome, Edge, Firefox 모두 이 미디어 쿼리를 지원한다
@@ -1191,7 +1228,7 @@ async function renderConnect() {
     el("div", { class: "cn-head" },
       el("div", {}, el("h2", {}, "연결"),
         el("p", { class: "connect-note" }, touchOnly
-          ? "Claude Code 연결(한 줄 연결, 플러그인 설치)은 Claude Code 를 쓰는 PC 의 브라우저에서 합니다. 여기서는 토큰 폐기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있습니다."
+          ? "Claude Code 연결(한 줄 연결, 플러그인 설치)은 Claude Code 를 쓰는 PC 의 브라우저에서 합니다. 여기서는 토큰 폐기, 연결 끊기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있습니다."
           : "Claude Code 를 이 서버의 내 DB 에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Skill 과 즉석 질문 훅까지 이 PC 에 설치합니다.")),
       el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
     touchOnly ? null : el("div", { class: "cn-sec code" }, el("span", { class: "cn-label" }, "Claude Code 연결"),
@@ -1213,6 +1250,7 @@ async function renderConnect() {
               t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀")),
           ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
         : el("p", { class: "connect-note" }, "아직 만든 토큰이 없습니다.")),
+    appsBlock(apps),
     loginBlock(),
     el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 config.json 의 db_path 로 그대로 열립니다."),

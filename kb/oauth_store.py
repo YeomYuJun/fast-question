@@ -11,6 +11,10 @@
 - 토큰: access 1시간, refresh 30일. 한 번의 승인에서 나온 토큰은 grant_id 를 같이 쓴다. refresh 를 쓰면 같은 grant 의
   토큰을 지우고 새 쌍을 낸다(옛 refresh 는 더 받지 않는다). 폐기도 grant 단위다.
 - 탈퇴한 계정의 코드·토큰은 찾지 못한 것으로 본다.
+- 연결 패널의 "연결된 앱"(list_connections, disconnect): 계정의 살아 있는 refresh 토큰이 있는 클라이언트가 한 연결이다.
+  연결한 날은 클라이언트 등록 시각(다시 연결할 때마다 새로 등록된다), 마지막 사용은 그 계정·클라이언트 토큰을 마지막으로
+  낸 시각이다(access 가 1시간이라 그 단위로 맞다. 요청마다 쓰지 않으려고 따로 기록하지 않는다).
+  끊기는 그 계정·클라이언트의 토큰과 아직 교환하지 않은 코드만 지우고 클라이언트 행은 둔다.
 코드·토큰은 sha256 만 둔다. 시각은 epoch 초(SDK 모델과 같다)이고 now 인자로 테스트한다.
 """
 import hashlib
@@ -18,6 +22,7 @@ import json
 import secrets
 import sqlite3
 import time
+from datetime import datetime, timezone
 
 from kb.db import tx
 
@@ -182,3 +187,38 @@ def revoke(conn: sqlite3.Connection, token: str) -> None:
     with tx(conn):
         conn.execute("DELETE FROM oauth_token WHERE grant_id IN (SELECT grant_id FROM oauth_token WHERE hash = ?)",
                      (_hash(token),))
+
+
+def _iso(t: int) -> str:
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def list_connections(conn: sqlite3.Connection, account_id: int, now: float | None = None) -> list[dict]:
+    """계정의 연결 [{client_id, name, connected_at, last_used_at}], 마지막 사용이 최근인 것부터. name 은 등록 때 받은
+    client_name(없으면 빈 문자열)이다. 시각은 UTC ISO 문자열."""
+    rows = conn.execute(
+        "SELECT c.client_id, c.info_json, c.created_at, max(t.created_at) AS last_at FROM oauth_client c "
+        "JOIN oauth_token t ON t.client_id = c.client_id AND t.account_id = ? "
+        "WHERE EXISTS (SELECT 1 FROM oauth_token r WHERE r.client_id = c.client_id AND r.account_id = ? "
+        "AND r.kind = 'refresh' AND r.expires_at > ?) "
+        "GROUP BY c.client_id ORDER BY last_at DESC, c.created_at DESC",
+        (account_id, account_id, _now(now))).fetchall()
+    out = []
+    for r in rows:
+        try:
+            name = json.loads(r["info_json"]).get("client_name") or ""
+        except (ValueError, AttributeError):
+            name = ""
+        out.append({"client_id": r["client_id"], "name": str(name), "connected_at": _iso(r["created_at"]),
+                    "last_used_at": _iso(r["last_at"])})
+    return out
+
+
+def disconnect(conn: sqlite3.Connection, account_id: int, client_id: str) -> bool:
+    """그 계정·클라이언트의 토큰과 아직 교환하지 않은 인가 코드를 지운다. 지운 것이 없으면 False."""
+    with tx(conn):
+        n = conn.execute("DELETE FROM oauth_token WHERE account_id = ? AND client_id = ?",
+                         (account_id, client_id)).rowcount
+        n += conn.execute("DELETE FROM auth_code WHERE account_id = ? AND client_id = ? AND grant_id IS NULL",
+                          (account_id, client_id)).rowcount
+    return n > 0

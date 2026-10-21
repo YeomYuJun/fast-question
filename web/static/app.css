@@ -413,6 +413,9 @@ body.login-mode .brand { display: none; }
 .token-item .name { font-size: 13.5px; line-height: 20px; overflow-wrap: anywhere; color: var(--ink); }
 .token-item .meta { font-size: 11.5px; line-height: 16px; color: var(--faint); }
 .token-item.expired .name { color: var(--faint); }
+/* 연결된 앱: 좁은 폭에서 메타는 '연결 …' 과 '마지막 사용 …' 사이에서만 꺾고, 끊기 버튼 글자는 꺾지 않는다 */
+.token-item .meta .nw { white-space: nowrap; }
+.token-item .btn { white-space: nowrap; }
 .cn-sec .btn:hover { text-decoration: none; }
 .btn.danger { color: var(--stale); border-color: var(--stale); }
 .btn.danger:hover { background: var(--stale-soft); }
