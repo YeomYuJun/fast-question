@@ -4,7 +4,7 @@
 
 | 파일 | 내용 |
 |---|---|
-| `Dockerfile` | `python:3.12-slim`, `requirements.txt` + `requirements-server.txt`(boto3), 비루트 사용자 `fq`, 데이터 볼륨 `/data`, `python run_web.py --config /etc/fq/config.json` |
+| `Dockerfile` | `python:3.12-slim`, `requirements.txt` + `requirements-server.txt`(boto3, anthropic), 비루트 사용자 `fq`, 데이터 볼륨 `/data`, `python run_web.py --config /etc/fq/config.json` |
 | `compose.yaml` | `app`(8765, 컨테이너 안에서만 열림) + `caddy`(80·443, Let's Encrypt 인증서) |
 | `Caddyfile` | `FQ_DOMAIN` → `app:8765`, `www.FQ_DOMAIN` → 본 주소로 넘김 |
 | `config.example.json` | 원격 모드 설정 예시. `config.json` 으로 복사해 고친다 |
@@ -26,6 +26,9 @@
    - `oauth.github.client_id`, `oauth.google.client_id`: 로그인 공급자의 client id.
    - `allowed_logins`: 비어 있지 않으면 그 신원(`github:<숫자 id>`, `google:<sub>`)만 로그인한다.
    - `backup_s3_bucket`, `backup_s3_prefix`: 비어 있지 않으면 일별 백업 사본을 `s3://<bucket>/<prefix>users/<id>/kb-YYYYMMDD.sqlite3`, `<prefix>control/control-YYYYMMDD.sqlite3` 에 올린다.
+   - `limits`: 분당 요청 제한. `mcp`(`/mcp`, 계정 또는 토큰당), `register`(OAuth 동적 등록, IP 당), `read`·`write`(`/api/*` 읽기·쓰기, 계정당), `anon`(로그인하지 않은 `/api/*`, IP 당). 예시 값이 기본값이고, 뺀 키는 기본값을 쓴다.
+   - `corpus_cache`: 검색 메모리 사본 상한. `max_dbs`(사본을 둘 사용자 DB 수), `max_docs`(사본 항목 합계). 넘으면 가장 오래 쓰지 않은 DB 부터 비운다. 예시 값이 기본값이다.
+   - 두 키 모두 모르는 키나 양의 정수가 아닌 값이면 서버가 뜨지 않는다.
    - `host`(`0.0.0.0`), `data_dir`(`/data`), `log_dir`(`/data/logs`)는 이미지 구조에 맞춘 값이라 그대로 둔다.
 3. `deploy/.env` 에 `FQ_DOMAIN=<도메인>`(https:// 없이)을 적는다. Caddyfile 은 고치지 않는다(서버의 git pull 이 충돌하지 않게).
 4. 비밀값은 config 에 넣지 않는다. `compose.yaml` 이 다음 환경 변수를 컨테이너로 넘긴다. `deploy/.env` 파일(`이름=값` 한 줄씩)이나 셸 환경 변수로 준다.
@@ -51,9 +54,11 @@ docker compose -f deploy/compose.yaml up -d --build
 - 상태 점검: `https://<도메인>/healthz` 가 200 이면 정상, 503 이면 응답 JSON 의 `db`·`disk_free`·`morph` 중 실패한 항목을 본다. 컨테이너의 `HEALTHCHECK` 도 같은 경로를 1분마다 부른다.
 - 로그: 앱 로그는 표준 에러로 나가 `docker compose -f deploy/compose.yaml logs app` 로 본다. `/data/logs/web.log` 에도 남는다.
 - 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본).
+- 웹 Claude 패널: 사용자가 등록한 Anthropic API 키는 제어 DB 에 암호화해 두고, 암호 키는 처음 등록할 때 `/data/claude-key.secret` 으로 생긴다. 이 파일은 S3 로 올리지 않는다. 잃거나 바꾸면 저장된 키를 풀 수 없어 사용자가 키를 다시 등록해야 한다.
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
   배포로 기본 가이드(`kb/default_guide.json`)가 바뀌면 사용자 DB 마다 한 번 다시 넣는다. 사용자나 Claude 가 고친 가이드 항목은 그대로 둔다.
-  하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트와 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
+  하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트, 등록하고 하루 안에 토큰을 받지 않은 OAuth 클라이언트, 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
+- 계정당 상한: Q&A 20,000건, 분류 500개, 근거 100,000행(삭제한 것 포함), DB 파일 200 MB(보관·복원·연결 끊기 외의 쓰기를 막는다), 개인 토큰 10개. OAuth 연결은 20개이고, 넘으면 가장 오래 안 쓴 연결을 끊는다.
 - 앱은 Caddy 뒤에서만 받는다(compose 의 app 은 `expose` 만 한다). 요청·가입 제한이 실제 IP 로 걸리도록 원격 모드의 uvicorn 은 `X-Forwarded-For` 를 믿는다.
 
 ## 형태소 사용자 단어
@@ -83,3 +88,5 @@ docker compose -f deploy/compose.yaml exec app python scripts/global_words.py --
 - `--dry-run` 은 `POST /api/import/db/plan` 으로 보내 서버가 할 일(통째로 바꾸기 / 하나씩 넣기)과 건수, 건너뛸 목록만 받는다. 서버에 쓰지 않는다.
 - 서버의 내 DB 가 비어 있으면(기본 가이드만 있으면) 파일 내용을 통째로 바꾸고 원격 기본 가이드를 다시 넣는다. 아니면 항목을 하나씩 넣고 이미 있는 항목과 비슷한 질문은 건너뛴 목록을 보여 준다.
 - 손상됐거나 스키마 버전·표 목록이 서버와 다른 파일은 거부한다. 상한은 200 MB 다.
+- 통째로 바꿀 때는 올린 파일의 행 수와 크기가 계정당 상한 안이어야 한다(미리보기도 같이 거부한다). 하나씩 넣을 때는 상한에 닿은 항목부터 넣지 못한 목록에 든다.
+- 한 계정의 가져오기(미리보기 포함)는 한 번에 하나다. 진행 중에 또 보내면 409 로 거부한다.

@@ -420,7 +420,61 @@ def test_push_local_unknown_category_uploads_nothing(tmp_path, capsys):
     assert seen == [] and "없는 분류" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("path", ["/api/import/db", "/api/import/db/plan"])
+@pytest.mark.parametrize("limit", ["rows", "size"])
+def test_replace_import_checks_account_quota(cfg, app, tmp_path, monkeypatch, path, limit):
+    """통째로 바꾸는 가져오기는 add_qa 를 거치지 않으므로 올린 파일의 행 수(삭제한 것 포함)와 크기를 먼저 본다.
+    미리보기도 같은 이유로 거부해 실제 가져오기 결과와 같게 한다."""
+    from kb import store as store_mod
+
+    body = snapshot(local_db(tmp_path), tmp_path / "upload.sqlite3")
+    if limit == "rows":
+        monkeypatch.setitem(store_mod.QUOTAS, "qa", ("Q&A", 2))  # 살아 있는 2건 + 보관한 1건
+    else:
+        monkeypatch.setattr(store_mod, "DB_MAX_BYTES", len(body) // 2)
+    with client_for(app, 1) as c:
+        r = c.post(path, content=body, headers=OCTET)
+    assert r.status_code == 400 and r.json()["code"] == "quota", r.text
+    assert ("Q&A 3건" if limit == "rows" else "MB") in r.json()["error"]
+    assert not tenant.db_path_for(cfg.data_dir, 1).exists()
+
+
+def test_second_import_for_same_account_is_refused_before_upload(cfg, app, tmp_path):
+    body = snapshot(local_db(tmp_path), tmp_path / "upload.sqlite3")
+    app.state.importing.add(tenant.db_path_for(cfg.data_dir, 1).resolve())
+    with client_for(app, 1) as c:
+        r = c.post("/api/import/db", content=body, headers=OCTET)
+        assert r.status_code == 409 and r.json()["code"] == "busy"
+        assert not list((cfg.data_dir / "tmp").glob("*")), "받기 전에 거부한다"
+        app.state.importing.clear()
+        assert c.post("/api/import/db", content=body, headers=OCTET).status_code == 200
+    with client_for(app, 2) as c:  # 다른 계정은 막지 않는다
+        app.state.importing.add(tenant.db_path_for(cfg.data_dir, 1).resolve())
+        assert c.post("/api/import/db", content=body, headers=OCTET).status_code == 200
+    assert not app.state.importing - {tenant.db_path_for(cfg.data_dir, 1).resolve()}, "끝나면 표시를 지운다"
+
+
 def test_plan_accepts_db_larger_than_default_body_limit(cfg, app):
     with client_for(app, 1) as c:
         r = c.post("/api/import/db/plan", content=b"x" * (2 * 1024 * 1024), headers=OCTET)
     assert r.status_code == 400 and r.json()["code"] == "invalid_db", "1 MB 기본 상한이 아니라 가져오기 상한을 쓴다"
+
+
+def test_user_db_lock_is_per_account(cfg, app):
+    """새 계정 DB 만들기·통째로 바꾸기의 잠금은 계정마다 따로다. 한 계정의 큰 가져오기가 다른 계정의 첫 요청을 막지 않는다."""
+    import threading
+
+    lock = app.state.db_lock(tenant.db_path_for(cfg.data_dir, 1))
+    assert lock is app.state.db_lock(tenant.db_path_for(cfg.data_dir, 1))
+    done = threading.Event()
+
+    def first_request_of_other_account():
+        with client_for(app, 2) as c:
+            if c.get("/api/categories").status_code == 200:
+                done.set()
+
+    with lock:
+        t = threading.Thread(target=first_request_of_other_account, daemon=True)
+        t.start()
+        assert done.wait(20), "다른 계정의 첫 요청이 기다렸다"
+    t.join(20)

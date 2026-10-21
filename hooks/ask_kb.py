@@ -5,14 +5,15 @@
   비슷한 항목이 없으면 아무것도 넣지 않는다.
 검색은 실행 중인 web 서버(/api/search, 형태소 계층 포함)를 먼저 쓰고, 꺼져 있으면 DB 를 직접 읽는다
 (Kiwi 를 띄우는 데 2.5초가 걸려 직접 읽을 때는 정확히 일치·동의어·비슷한 결과만 쓴다).
-원격 자격 증명(kb/remote.py, %USERPROFILE%\\.fast-question\\credentials.json)이 있으면 원격 서버의 /api/search 를
-개인 토큰으로 2초 제한으로 부르고, 프로젝트 판정 자료(/api/projects)는 하루에 한 번 받아 projects.json 에 둔다.
-원격 검색이 실패하면 아무것도 넣지 않는다(이 PC 에는 DB 가 없다).
+원격 자격 증명(kb/remote.py, %USERPROFILE%\\.fast-question\\credentials.json)이 있고 그 mode 가 local 이 아니면
+원격 서버의 /api/search 를 개인 토큰으로 2초 제한으로 부르고, 프로젝트 판정 자료(/api/projects)는 하루에 한 번 받아 projects.json 에 둔다.
+원격 검색이 실패하면 아무것도 넣지 않는다(로컬 DB 로 대신 찾지 않는다).
+mode 가 local 이면(scripts/install.py --local) 자격 증명이 있어도 로컬 DB 를 쓴다.
 어떤 실패든 아무것도 출력하지 않고 0 으로 끝나 사용자 입력을 막지 않는다.
 
 설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다.
 설정 파일: 환경 변수 FAST_QUESTION_CONFIG, 없으면 저장소의 config.json.
-PC 클라이언트 패키지(`fast-question hook`, fq_client/cli.py)는 main(remote_only=True) 로 원격 경로만 쓴다.
+PC 클라이언트 패키지(`fast-question hook`, fq_client/cli.py)는 main(remote_only=True) 로 원격 경로만 쓴다(mode 를 보지 않는다).
 """
 import json
 import os
@@ -184,7 +185,8 @@ def context(query: str, res: dict, base: str, project: str | None = None) -> str
 
 
 def main(remote_only: bool = False) -> int:
-    """remote_only 는 PC 클라이언트(fq_client hook)다. 자격 증명이 없으면 로컬 설정·DB 를 읽지 않고 끝낸다."""
+    """remote_only 는 PC 클라이언트(fq_client hook)다. 자격 증명이 없으면 로컬 설정·DB 를 읽지 않고 끝낸다.
+    저장소 훅은 자격 증명의 mode 가 local 이면 로컬 DB 를 쓴다."""
     try:
         raw = sys.stdin.buffer.read().decode("utf-8-sig")
         data = json.loads(raw) if raw.strip() else {}
@@ -196,7 +198,7 @@ def main(remote_only: bool = False) -> int:
             return 0
         from kb.remote import load_credentials
         cred = load_credentials()
-        if cred:
+        if cred and (remote_only or cred["mode"] != "local"):
             res = remote_lookup(query, cred)
             project = project_of(data.get("cwd", ""), None, remote_projects(cred))
             text = context(query, res, cred["url"], project)

@@ -13,5 +13,7 @@
   },
   "allowed_logins": [],
   "backup_s3_bucket": "",
-  "backup_s3_prefix": ""
+  "backup_s3_prefix": "",
+  "limits": {"mcp": 120, "register": 5, "read": 300, "write": 60, "anon": 60},
+  "corpus_cache": {"max_dbs": 200, "max_docs": 500000}
 }

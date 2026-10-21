@@ -4,6 +4,7 @@ import pytest
 from kb import search
 from kb.db import connect
 from kb.store import Store
+from tests.test_auth import analyzer  # noqa: F401 - 픽스처
 
 
 @pytest.fixture
@@ -41,3 +42,21 @@ def test_total_docs_limit(dbs, monkeypatch):
     for s in dbs:  # 항목 1, 2, 3건
         s.search("질문")
     assert cached() == {"2.sqlite3"}  # 3건 + 앞의 것을 더하면 4건을 넘는다
+
+
+def test_configure_overrides_only_given_limits(monkeypatch):
+    monkeypatch.setattr(search, "CACHE_MAX_DBS", search.CACHE_MAX_DBS)
+    monkeypatch.setattr(search, "CACHE_MAX_DOCS", search.CACHE_MAX_DOCS)
+    docs = search.CACHE_MAX_DOCS
+    search.configure(max_dbs=7)
+    assert (search.CACHE_MAX_DBS, search.CACHE_MAX_DOCS) == (7, docs)
+
+
+def test_app_applies_corpus_cache_config(tmp_path, monkeypatch, analyzer):
+    from tests.test_auth import make_cfg
+    from web.app import create_app
+
+    monkeypatch.setattr(search, "CACHE_MAX_DBS", search.CACHE_MAX_DBS)
+    monkeypatch.setattr(search, "CACHE_MAX_DOCS", search.CACHE_MAX_DOCS)
+    create_app(make_cfg(tmp_path, corpus_cache={"max_docs": 9}), run_jobs=False, analyzer=analyzer)
+    assert search.CACHE_MAX_DOCS == 9

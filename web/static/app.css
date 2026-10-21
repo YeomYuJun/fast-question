@@ -453,3 +453,59 @@ a.brand:hover { text-decoration: none; }
   .doc-main { padding-top: var(--space-6); }
   .doc-head h1 { font-size: 23px; line-height: 32px; }
 }
+
+/* ---------- 웹 Claude 패널(claude.js): 열리면 화면 전체가 패널 너비만큼 왼쪽으로 밀린다 ---------- */
+.claude-btn.on { background: var(--claude-soft); border-color: var(--claude); color: var(--claude); }
+.claude-btn:hover { color: var(--claude); border-color: var(--claude); }
+body.claude-open { padding-right: 440px; }
+.claude-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 440px; z-index: 20;
+  display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--line);
+}
+.cl-head { display: flex; align-items: center; gap: var(--space-2); padding: 10px var(--space-4); border-bottom: 1px solid var(--line); }
+.cl-title { font-weight: 700; color: var(--claude); }
+.cl-model { padding: 2px 6px; font-size: 12.5px; }
+.cl-body { padding: var(--space-4); overflow-y: auto; }
+.cl-log { flex: 1 1 auto; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: 14px; }
+.cl-empty { margin: auto 0; color: var(--muted); text-align: center; }
+.cl-empty p { margin: 4px 0; }
+.cl-user {
+  align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: var(--radius-lg);
+  background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--text-answer);
+}
+.cl-turn { display: flex; flex-direction: column; gap: var(--space-2); font: var(--text-answer); }
+.cl-md { overflow-wrap: anywhere; }
+.cl-md p { margin: 0 0 8px; }
+.cl-md p:last-child { margin-bottom: 0; }
+.cl-md ul, .cl-md ol { margin: 0 0 8px; padding-left: 20px; }
+.cl-md code { font: var(--text-evidence); background: var(--surface-2); border-radius: var(--radius-sm); padding: 0 4px; }
+.cl-md .cl-h { font-weight: 700; }
+.cl-table { overflow-x: auto; margin: 0 0 8px; }
+.cl-table table { border-collapse: collapse; font-size: 13px; }
+.cl-table th, .cl-table td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
+.cl-table th { background: var(--surface-2); }
+.cl-code {
+  margin: 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-md);
+  font: var(--text-evidence); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto;
+}
+.cl-code.err { color: var(--stale); background: var(--stale-soft); }
+.cl-think, .cl-tool { font-size: 12.5px; color: var(--muted); }
+.cl-think summary, .cl-tool summary { cursor: pointer; width: fit-content; }
+.cl-think p { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); white-space: pre-wrap; }
+.cl-tool { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px 10px; }
+.cl-tool.pending summary { color: var(--claude); }
+.cl-tool.err summary { color: var(--stale); }
+.cl-tool-body { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 4px; }
+.cl-tool-label { font: var(--text-label); color: var(--faint); }
+.cl-note { margin: 0; font-size: 12px; color: var(--faint); }
+.cl-err { margin: 0; font-size: 12.5px; color: var(--stale); }
+.cl-key { display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.cl-key p { margin: 0; }
+.cl-key .fld { flex: 1; }
+.cl-compose { border-top: 1px solid var(--line); padding: 10px var(--space-4) 12px; display: flex; flex-direction: column; gap: 6px; }
+.cl-compose textarea { width: 100%; resize: vertical; min-height: 64px; font: var(--text-answer); padding: 6px 8px; }
+.cl-compose-row { display: flex; align-items: center; gap: var(--space-2); }
+@media (max-width: 900px) {
+  body.claude-open { padding-right: 0; }
+  .claude-panel { width: 100%; border-left: 0; }
+}

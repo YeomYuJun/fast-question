@@ -426,6 +426,52 @@ def test_idle_clients_are_deleted_after_a_year(cfg, app):
     assert idle != used
 
 
+def test_unused_clients_are_deleted_after_a_day(tmp_path):
+    """/register 는 로그인 없이 받으므로, 토큰까지 가지 않은 등록은 하루 뒤 지운다(대기 요청·코드는 10분이면 끝난다)."""
+    from kb import control, oauth_store
+    conn = control.connect_control(tmp_path / "control.sqlite3")
+    try:
+        me = control.create_account(conn)
+        oauth_store.put_client(conn, "unused", "{}", now=0)
+        oauth_store.put_client(conn, "used", "{}", now=0)
+        oauth_store.exchange_code(conn, oauth_store.create_code(conn, "used", me, PARAMS, now=0), now=0)
+        assert oauth_store.delete_idle_clients(conn, now=oauth_store.UNUSED_CLIENT_TTL) == 0
+        assert oauth_store.delete_idle_clients(conn, now=oauth_store.UNUSED_CLIENT_TTL + 1) == 1
+        assert [r[0] for r in conn.execute("SELECT client_id FROM oauth_client")] == ["used"]
+    finally:
+        conn.close()
+
+
+PARAMS = {"scopes": ["kb"], "resource": RESOURCE}
+
+
+def test_account_keeps_only_recent_client_connections(tmp_path, monkeypatch):
+    """계정당 연결(토큰이 살아 있는 클라이언트)이 CLIENT_MAX 를 넘으면 가장 오래 쓰지 않은 연결을 끊는다.
+    새 연결을 거부하지 않는다: claude.ai·Claude Code 는 다시 연결할 때마다 클라이언트를 새로 등록한다."""
+    from kb import control, oauth_store
+    monkeypatch.setattr(oauth_store, "CLIENT_MAX", 3)
+    conn = control.connect_control(tmp_path / "control.sqlite3")
+    try:
+        me, other = control.create_account(conn), control.create_account(conn)
+
+        def connect_client(client_id, account, t):
+            oauth_store.put_client(conn, client_id, "{}", now=t)
+            code = oauth_store.create_code(conn, client_id, account, PARAMS, now=t)
+            return oauth_store.exchange_code(conn, code, now=t)
+
+        issued = {f"c{i}": connect_client(f"c{i}", me, 1000 + i) for i in range(3)}
+        connect_client("o", other, 1000)
+        oauth_store.rotate_refresh(conn, issued["c0"]["refresh_token"], ["kb"], now=2000)  # c0 은 최근에 썼다
+        connect_client("c3", me, 3000)
+        live = {r[0] for r in conn.execute("SELECT DISTINCT client_id FROM oauth_token WHERE account_id = ?", (me,))}
+        assert live == {"c0", "c2", "c3"}
+        assert oauth_store.load_token(conn, issued["c1"]["access_token"], "access", now=3000) is None
+        assert oauth_store.load_token(conn, issued["c2"]["access_token"], "access", now=3000) is not None
+        assert conn.execute("SELECT count(*) FROM oauth_token WHERE account_id = ?", (other,)).fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
 def test_consent_page_keeps_origin_for_its_own_form():
     """no-referrer 면 브라우저가 승인 폼 POST 에 Origin: null 을 붙여 같은 출처 검사에 막힌다(브라우저 확인에서 찾음)."""
     from web.oauth_as import PAGE_HEADERS

@@ -11,7 +11,8 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 넣는다(가져오기가 DB 를 통째로 바꾸면 다시 넣고, 서버의 가이드가 바뀌면 주기 작업이 다시 넣는다). 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, PC 로그인 승인 /cli/authorize 와 토큰 교환 POST /api/cli/token(계정 대신 1회용 코드로
-받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에, 웹 Claude 패널
+/api/claude/key·/api/claude/chat 은 web/claude_chat.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
 /healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
 형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
@@ -43,6 +44,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from kb import control, guide, tenant
+from kb import search as search_mod
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
@@ -180,10 +182,13 @@ def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
 
 
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
-               analyzer: Analyzer | None = None, http_transport: httpx.AsyncBaseTransport | None = None) -> Starlette:
-    """http_transport: 원격 모드 로그인이 GitHub·Google 을 부를 때 쓰는 httpx 전송(테스트가 바꿔 끼운다)."""
+               analyzer: Analyzer | None = None, http_transport: httpx.AsyncBaseTransport | None = None,
+               claude_client_factory: Callable | None = None) -> Starlette:
+    """http_transport: 원격 모드 로그인이 GitHub·Google 을 부를 때 쓰는 httpx 전송(테스트가 바꿔 끼운다).
+    claude_client_factory: 웹 Claude 패널이 API 키로 Anthropic 클라이언트를 만드는 함수(테스트가 바꿔 끼운다)."""
     cfg = cfg or load_config()
     remote = cfg.mode == "remote"
+    search_mod.configure(**cfg.corpus_cache)
     if analyzer is None:  # 원격 모드의 사용자 단어는 제어 DB 의 서버 전역 사전이다
         analyzer = (Analyzer(words=control.words_source(tenant.control_path(cfg.data_dir))) if remote
                     else Analyzer())
@@ -211,13 +216,20 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         account_id = request.scope.get(ACCOUNT_KEY)
         return None if account_id is None else tenant.db_path_for(cfg.data_dir, account_id)
 
-    user_db_lock = threading.Lock()  # 사용자 DB 를 새로 만들거나 통째로 바꾸는 일을 한 번에 하나만 한다
+    db_locks: dict[Path, threading.Lock] = {}
+    db_locks_guard = threading.Lock()
+    importing: set[Path] = set()  # 가져오기가 진행 중인 계정 DB(web/importer.py, 계정마다 한 번에 하나)
+
+    def db_lock(db: Path) -> threading.Lock:
+        """계정 DB 마다 하나인 잠금. 새로 만들기와 통째로 바꾸기를 그 계정 안에서만 한 번에 하나로 한다."""
+        with db_locks_guard:
+            return db_locks.setdefault(db.resolve(), threading.Lock())
 
     def open_kb(db: Path) -> sqlite3.Connection:
         """요청의 KB 연결. 원격 모드에서 파일이 없으면 만들면서 기본 가이드를 넣는다(스레드 풀에서 부른다)."""
         if not remote or db.exists():
             return connect(db)
-        with user_db_lock:
+        with db_lock(db):
             fresh = not db.exists()
             conn = connect(db)
             if fresh:
@@ -438,14 +450,19 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes[1:1] = oauth_as.routes(auth.providers_from(cfg), control_file)  # /oauth/continue/<id>
         routes[1:1] = cli_login.routes(auth.providers_from(cfg), control_file)  # /cli/authorize, /api/cli/token
-        routes[1:1] = importer.routes(db_for, cfg.data_dir / "tmp", analyzer, user_db_lock,
-                                       lambda: guide.load_remote(cfg.public_url))
+        routes[1:1] = importer.routes(db_for, cfg.data_dir / "tmp", analyzer, db_lock,
+                                       lambda: guide.load_remote(cfg.public_url), importing)
+        from web import claude_chat  # anthropic 은 서버 의존성(requirements-server.txt)이라 원격 모드에서만 읽는다
+        routes[1:1] = claude_chat.routes(
+            control_file, cfg.data_dir,
+            lambda acc: Store(open_kb(tenant.db_path_for(cfg.data_dir, acc)), "claude", analyzer, remote=True),
+            cfg.public_url, **({"client_factory": claude_client_factory} if claude_client_factory else {}))
         routes.append(Mount("/", app=mcp))  # /mcp 와 OAuth 메타데이터. 다른 라우트가 먼저 맞는다
         middleware = [Middleware(SecurityHeaders),
                       Middleware(SameOriginOnly, hosts={urlsplit(cfg.public_url).netloc.lower()}),
-                      Middleware(BodyLimit),
+                      Middleware(BodyLimit, overrides={"/api/claude/chat": claude_chat.CHAT_BODY_MAX}),
                       Middleware(auth.AccountAuth, control_path=control_file, cookie=auth.cookie_names(cfg)[0]),
-                      Middleware(RateLimit),
+                      Middleware(RateLimit, limits=cfg.limits),
                       Middleware(oauth_as.RevokeFieldLog)]
     else:
         routes.insert(1, Route("/api/me", lambda r: JSONResponse({"mode": "local"})))
@@ -453,4 +470,6 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     app.state.db_path = path
     app.state.analyzer = analyzer
     app.state.run_jobs = run_jobs
+    app.state.importing = importing
+    app.state.db_lock = db_lock
     return app

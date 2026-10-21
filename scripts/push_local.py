@@ -27,27 +27,11 @@ if str(ROOT) not in sys.path:
 import httpx  # noqa: E402
 
 from kb.config import load_config  # noqa: E402
-from kb.dbcopy import prune  # noqa: E402
+from kb.dbcopy import copy_db, prune  # noqa: E402
 from kb.remote import credentials_path, load_credentials  # noqa: E402
 
 UPLOAD_TIMEOUT_S = 600
 _LOAD = object()
-
-
-def snapshot(db: Path, dst: Path) -> Path:
-    """WAL 이어도 사본은 journal_mode DELETE 파일 하나다. quick_check 가 ok 가 아니면 RuntimeError."""
-    src = sqlite3.connect(str(db))
-    target = sqlite3.connect(str(dst))
-    try:
-        src.backup(target)
-        target.execute("PRAGMA journal_mode = DELETE")
-        check = target.execute("PRAGMA quick_check").fetchone()[0]
-    finally:
-        target.close()
-        src.close()
-    if check != "ok":
-        raise RuntimeError(f"사본의 quick_check 가 실패했다: {check}")
-    return dst
 
 
 def push(file: Path, creds: dict, http=None, dry_run: bool = False) -> httpx.Response:
@@ -114,7 +98,11 @@ def main(argv: list[str] | None = None, *, creds=_LOAD, http=None) -> int:
         return 1
     work = Path(tempfile.mkdtemp(prefix="fq-push-"))
     try:
-        file = snapshot(db, work / "upload.sqlite3")
+        src = sqlite3.connect(str(db))
+        try:
+            file = copy_db(src, work / "upload.sqlite3")
+        finally:
+            src.close()
         try:
             counts = prune(file, args.exclude_category)
         except ValueError as e:

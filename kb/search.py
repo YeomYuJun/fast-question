@@ -42,11 +42,21 @@ class Doc(NamedTuple):
 
 
 # DB 경로별 메모리 사본. 원격 모드는 사용자마다 DB 가 달라 사본이 사용자 수만큼 생기므로, 가장 오래 쓰지 않은 것부터
-# 비워 DB 수와 항목 합계를 상한 아래로 둔다(1만 건 사본이 수 MB). 밀려난 DB 는 다음 검색에서 다시 읽는다
+# 비워 DB 수와 항목 합계를 상한 아래로 둔다(1만 건 사본이 수 MB). 밀려난 DB 는 다음 검색에서 다시 읽는다.
+# 아래 값은 기본값이고 config 의 corpus_cache(max_dbs, max_docs)를 web/app.py 가 configure 로 넣는다
 CACHE_MAX_DBS = 200
 CACHE_MAX_DOCS = 500_000
 _CACHE: "OrderedDict[str, tuple[tuple, dict[int, Doc]]]" = OrderedDict()
 _LOCK = threading.Lock()
+
+
+def configure(max_dbs: int | None = None, max_docs: int | None = None) -> None:
+    """사본 상한을 바꾼다. 사본이 프로세스 하나에 하나라 상한도 프로세스 전체에 걸린다. None 은 그대로 둔다."""
+    global CACHE_MAX_DBS, CACHE_MAX_DOCS
+    with _LOCK:
+        CACHE_MAX_DBS = CACHE_MAX_DBS if max_dbs is None else max_dbs
+        CACHE_MAX_DOCS = CACHE_MAX_DOCS if max_docs is None else max_docs
+        _evict()
 
 
 def _flat(text: str) -> str:

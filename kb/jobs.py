@@ -101,7 +101,7 @@ def _guide_job(conn: sqlite3.Connection, remote_guide: dict | None, analyzer) ->
 
 
 def _cleanup_job(cfg: Config, conn: sqlite3.Connection, now: datetime) -> list:
-    """제어 DB: 1년 안 쓴 OAuth 클라이언트, 30일 지난 탈퇴 폴더와 그 계정의 신원, 하루 지난 가입 IP 를 지운다(하루 한 번)."""
+    """제어 DB: 1년 안 쓴 OAuth 클라이언트와 하루 안에 토큰을 받지 않은 등록, 30일 지난 탈퇴 폴더와 그 계정의 신원, 하루 지난 가입 IP 를 지운다(하루 한 번)."""
     if not _due(conn, "last_cleanup", CLEANUP_EVERY_HOURS, now):
         return []
 

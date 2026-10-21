@@ -63,3 +63,14 @@ def test_remote_app_limits_anonymous_api(app):
     with TestClient(app, base_url=URL) as c:
         codes = [c.get("/api/categories").status_code for _ in range(61)]
     assert codes[:60] == [401] * 60 and codes[60] == 429
+
+
+def test_remote_app_takes_limits_from_config(tmp_path, analyzer):
+    from tests.test_auth import make_cfg
+    from tests.test_remote_web import client_for
+    from web.app import create_app
+
+    app = create_app(make_cfg(tmp_path, limits={"write": 1}), run_jobs=False, analyzer=analyzer)
+    with client_for(app, 1) as c:
+        assert [c.post("/api/categories", json={"name": n}).status_code for n in ("가", "나")] == [200, 429]
+        assert c.get("/api/categories").status_code == 200  # 읽기는 기본값 그대로

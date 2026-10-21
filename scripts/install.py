@@ -5,11 +5,17 @@ config.json 의 DB 에 기본 사용 가이드(kb/default_guide.json)를 넣는�
 MCP·훅·Skill 명령은 저장소 가상환경의 python(Windows .venv\\Scripts\\python.exe, 그 밖 .venv/bin/python)으로 실행한다.
 
 사용: .venv\\Scripts\\python.exe scripts\\install.py   (macOS·Linux: .venv/bin/python scripts/install.py, 아래도 같다)
-원격 서버 쓰기: .venv\\Scripts\\python.exe scripts\\install.py --remote https://<도메인>
-  개인 토큰(fq_pat_…)을 표준 입력으로 받아 서버의 /api/me 로 확인한 뒤 %USERPROFILE%\\.fast-question\\credentials.json
-  (macOS·Linux 는 ~/.fast-question/credentials.json)에 쓰고, MCP 를 로컬 프록시(run_mcp.py --remote)로 등록한다.
-  기본 가이드는 서버가 넣는다.
-  로컬로 돌아가기: credentials.json 을 지우고 인자 없이 다시 실행한다(MCP 가 로컬로 다시 등록된다).
+  인자가 없으면 지금 모드(로컬·원격)를 유지한다. 모드는 credentials.json 의 mode(kb/remote.py)다. 자격 증명이 없으면
+  로컬이고, mode 가 없는 옛 파일이면 지금 MCP 등록(run_mcp.py --remote 인지)을 보고 정해 파일에 적는다.
+원격 서버로 전환: .venv\\Scripts\\python.exe scripts\\install.py --remote [https://<도메인>]
+  주소를 생략하거나 저장된 주소와 같으면 저장된 개인 토큰을 서버의 /api/me 로 확인해 다시 쓴다. 다른 주소면 개인 토큰
+  (fq_pat_…)을 표준 입력으로 받아 확인한다. 확인되면 %USERPROFILE%\\.fast-question\\credentials.json
+  (macOS·Linux 는 ~/.fast-question/credentials.json)에 mode=remote 로 쓰고, MCP 를 로컬 프록시(run_mcp.py --remote)로
+  등록한다. 기본 가이드는 서버가 넣는다. 토큰이 거부되면 아무것도 바꾸지 않는다.
+로컬 DB 로 전환: .venv\\Scripts\\python.exe scripts\\install.py --local
+  credentials.json 은 지우지 않고 mode=local 만 적는다(주소·토큰·device_id 는 그대로). MCP 를 run_mcp.py 로 등록한다.
+전환은 DB 내용을 옮기지 않는다. 로컬 DB 를 서버로 옮기는 것은 scripts/push_local.py 다.
+전환 뒤에는 Claude Code 를 다시 시작하거나 /mcp 에서 fast-question 을 다시 연결한다.
 훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
 되돌리기: 위 훅 지우기, claude mcp remove -s user fast-question, ~/.claude/skills 아래 qa·qa-harvest 폴더 삭제
 Claude Code 플러그인(plugin/fast-question, scripts/build_plugin.py)과 함께 설치하면 MCP·즉석 질문 훅·Skill 이
@@ -147,8 +153,18 @@ def remove_hook(settings: Path = SETTINGS) -> str:
     return f"훅 제거: {settings} {HOOK_EVENT}"
 
 
-def register_mcp(remote: bool = False, run=subprocess.run, claude: str | None = None) -> str:
+def registered_remote(run=None, claude: str | None = None) -> bool:
+    """MCP fast-question 이 원격 프록시(run_mcp.py --remote)로 등록돼 있는가. 등록이 없거나 claude CLI 가 없으면 False."""
+    run, claude = run or subprocess.run, claude or shutil.which("claude")
+    if claude is None:
+        return False
+    got = run([claude, "mcp", "get", NAME], capture_output=True, timeout=60)
+    return got.returncode == 0 and b"--remote" in got.stdout
+
+
+def register_mcp(remote: bool = False, run=None, claude: str | None = None) -> str:
     """로컬은 run_mcp.py, 원격은 run_mcp.py --remote 로 사용자 범위에 등록한다. 다른 방식으로 등록돼 있으면 바꾼다."""
+    run = run or subprocess.run
     claude = claude or shutil.which("claude")
     if claude is None:
         return "claude CLI 를 찾지 못해 MCP 등록을 건너뜀"
@@ -186,8 +202,9 @@ def read_token() -> str:
     return sys.stdin.readline().strip()
 
 
-def check_token(url: str, token: str, opener=urlopen) -> str:
+def check_token(url: str, token: str, opener=None) -> str:
     """서버의 /api/me 로 토큰을 확인하고 계정 표시 이름을 돌려준다. 토큰이 틀리면 ValueError."""
+    opener = opener or urlopen
     req = Request(url.rstrip("/") + "/api/me", headers={"Authorization": f"Bearer {token}"})
     try:
         with opener(req, timeout=10) as r:  # noqa: S310 - 사용자가 준 서버 주소만 연다
@@ -199,48 +216,99 @@ def check_token(url: str, token: str, opener=urlopen) -> str:
     return acc.get("display_name") or ", ".join(acc.get("providers", [])) or str(acc.get("id", ""))
 
 
-def install_remote(url: str, token: str, opener=urlopen) -> list[str]:
-    """토큰을 확인한 뒤 자격 증명 파일을 쓴다. 확인에 실패하면 파일을 쓰지 않는다."""
+def install_remote(url: str, token: str, opener=None) -> list[str]:
+    """토큰을 확인한 뒤 자격 증명 파일을 mode=remote 로 쓴다. 확인에 실패하면 파일을 쓰지 않는다."""
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from kb.remote import save_credentials
     who = check_token(url, token, opener)
-    return [f"토큰 확인: {who}", f"자격 증명: {save_credentials(url, token)}"]
+    return [f"토큰 확인: {who}", f"자격 증명: {save_credentials(url, token, mode='remote')}"]
+
+
+def repo_command(script: str, *args: str) -> str:
+    """사용자에게 보여 줄 저장소 명령 한 줄(저장소 폴더에서 실행한다). Windows 는 PowerShell 에서 쓰는 경로 표기다."""
+    if IS_WINDOWS:
+        return " ".join([r".venv\Scripts\python.exe", script.replace("/", "\\"), *args])
+    return " ".join([".venv/bin/python", script, *args])
+
+
+def switch_remote(url: str | None, cred: dict | None, opener=None) -> list[str]:
+    """원격 모드로 전환한다. 저장된 주소와 같으면 저장된 토큰을 확인해 다시 쓰고, 다른 주소면 토큰을 입력받는다.
+    확인에 실패하면 ValueError 이고 자격 증명 파일은 그대로다."""
+    if url is None:
+        if cred is None:
+            raise ValueError("저장된 원격 자격 증명이 없습니다. 서버 주소를 함께 주세요: "
+                             + repo_command("scripts/install.py", "--remote <서버 주소>"))
+        url = cred["url"]
+    url = url.strip().rstrip("/")
+    if cred is None or cred["url"] != url:
+        return install_remote(url, read_token(), opener)
+    try:
+        return install_remote(url, cred["token"], opener)
+    except ValueError:
+        raise ValueError("서버가 저장된 토큰을 받지 않았습니다(폐기·만료). 다시 로그인한 뒤 전환하세요: "
+                         + repo_command("fq_client/cli.py", "login")) from None
+
+
+def current_mode(cred: dict | None, run=None, claude: str | None = None) -> str:
+    """지금 모드. 저장된 mode 를 따르고, 없으면 지금 MCP 등록을 보고 정한다. 자격 증명이 없으면 로컬이다."""
+    if cred is None:
+        return "local"
+    return cred["mode"] or ("remote" if registered_remote(run, claude) else "local")
 
 
 def main(argv: list[str]) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     if "--remove-hook" in argv:
-        print(remove_hook())
+        print(remove_hook(SETTINGS))
         return 0
+    if "--local" in argv and "--remote" in argv:
+        print("--local 과 --remote 는 함께 줄 수 없습니다.")
+        return 1
     if not venv_python().exists():
         print(f"가상환경이 없다: {venv_python()}")
         return 1
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from kb.remote import credentials_path, load_credentials, set_mode
+    cred = load_credentials()
+    before = current_mode(cred)
     if "--remote" in argv:
         i = argv.index("--remote")
-        if i + 1 >= len(argv):
-            print("--remote 뒤에 서버 주소(https://도메인)를 준다.")
-            return 1
-        url = argv[i + 1].rstrip("/")
+        url = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("--") else None
         try:
-            for msg in install_remote(url, read_token()):
+            for msg in switch_remote(url, cred):
                 print(msg)
         except (ValueError, OSError) as e:
-            print(f"원격 설정 실패: {e}")
+            print(f"원격 전환 실패: {e}")
             return 1
-        for msg in install_skills():
-            print(msg)
-        print(register_mcp(remote=True))
-        print(install_hook())
-        return 0
-    for msg in install_skills():
+        mode = "remote"
+    elif "--local" in argv:
+        if cred is not None:
+            set_mode("local")
+        mode = "local"
+    else:
+        mode = before
+        if cred is not None and cred["mode"] is None:  # mode 가 없는 옛 파일: 지금 등록을 적어 훅과 맞춘다
+            set_mode(mode)
+    for msg in install_skills(SKILLS_SRC, SKILLS_DST):
         print(msg)
-    print(register_mcp())
-    print(install_hook())
-    print(seed_guide())
-    from kb.remote import credentials_path, load_credentials
-    if load_credentials() is not None:
-        print(f"원격 자격 증명이 있어 즉석 질문 훅은 원격 서버를 쓴다: {credentials_path()} (로컬만 쓰려면 이 파일을 지운다)")
+    print(register_mcp(remote=mode == "remote"))
+    print(install_hook(SETTINGS))
+    if mode == "local":
+        print(seed_guide())
+        print("로컬 모드입니다. MCP 와 즉석 질문 훅이 이 PC 의 DB 를 씁니다. 원격으로 전환: "
+              + repo_command("scripts/install.py", "--remote"))
+        if cred is not None:
+            print(f"원격 자격 증명은 지우지 않고 그대로 두었습니다: {credentials_path()}")
+    else:
+        url = load_credentials()["url"]
+        print(f"원격 모드입니다. MCP 와 즉석 질문 훅이 {url} 을 씁니다. 로컬로 전환: "
+              + repo_command("scripts/install.py", "--local"))
+    # 프록시 MCP 는 시작할 때 자격 증명을 읽는다. 원격끼리 서버만 바꿔도 다시 연결해야 한다
+    if mode != before or (mode == "remote" and cred is not None and url != cred["url"]):
+        print("모드를 바꿨습니다. Claude Code 를 다시 시작하거나 /mcp 에서 fast-question 을 다시 연결하세요.")
+        print("DB 내용은 옮기지 않았습니다. 로컬 DB 를 서버로 옮기려면: " + repo_command("scripts/push_local.py"))
     return 0
 
 

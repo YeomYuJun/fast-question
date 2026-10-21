@@ -21,6 +21,9 @@
     <button id="connect-btn" class="navbtn small" type="button" aria-expanded="false" aria-controls="connect">연결</button>
     <button id="logout-btn" class="navbtn small" type="button">로그아웃</button>
   </span>
+  <button id="claude-btn" class="iconbtn claude-btn" type="button" aria-label="Claude 패널" title="Claude" aria-expanded="false" aria-controls="claude" hidden>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.5l1.9 6.1 6.1 1.9-6.1 1.9L12 18.5l-1.9-6.1L4 10.5l6.1-1.9z"></path><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"></path></svg>
+  </button>
   <button id="theme-btn" class="iconbtn" type="button" aria-label="테마 바꾸기">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"></path></svg>
   </button>
@@ -115,7 +118,9 @@
     </div>
   </main>
 </div>
+<aside id="claude" class="claude-panel" aria-label="Claude" hidden></aside>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script src="/static/app.js"></script>
+<script src="/static/claude.js"></script>
 </body>
 </html>

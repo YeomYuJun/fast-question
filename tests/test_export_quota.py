@@ -52,3 +52,41 @@ def test_quota_only_in_remote_mode(tmp_path, monkeypatch):
         local.add_category(name)
     remote.conn.close()
     local.conn.close()
+
+
+def test_db_size_cap_blocks_writes_that_grow_the_file(tmp_path, monkeypatch):
+    """파일 크기 상한은 행 수 상한이 못 막는 것(고칠 때마다 쌓이는 이력, 사전, 수확 기록)까지 막는다.
+    보관·복원·연결 끊기·근거 판정은 막지 않는다."""
+    s = Store(connect(tmp_path / "remote.sqlite3"), "user", remote=True)
+    s.add_category("가")
+    one = s.add_qa("가", "질문 하나", "답이다.")["item"]
+    two = s.add_qa("가", "질문 둘", "답이다.", force=True)["item"]
+    s.link(one["id"], two["id"])
+    monkeypatch.setattr(store_mod, "DB_MAX_BYTES", store_mod.db_bytes(s.conn))
+    writes = [lambda: s.add_category("나"), lambda: s.add_qa("가", "질문 셋", "답이다.", force=True),
+              lambda: s.update_qa(one["id"], one["version"], answer="고친 답이다."),
+              lambda: s.harvest_set("D:/work", {"repos": {}})]
+    for write in writes:
+        with pytest.raises(ValidationError) as e:
+            write()
+        assert e.value.code == "quota" and "DB 파일 받기" in e.value.message
+    s.unlink(one["id"], two["id"])
+    s.archive_qa(one["id"], s.get_qa(one["id"])["version"])
+    s.restore_qa(one["id"], s.get_qa(one["id"])["version"])
+    assert Store(s.conn, "system").add_category("system 은 막지 않는다")  # 기본 가이드 갱신 등 서버 작업
+    s.conn.close()
+
+
+def test_db_size_cap_is_remote_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(store_mod, "DB_MAX_BYTES", 0)
+    local = Store(connect(tmp_path / "local.sqlite3"), "user")
+    local.add_category("가")
+    local.conn.close()
+
+
+def test_api_reports_size_cap_as_quota(app, monkeypatch):
+    with TestClient(app, base_url=URL) as c:
+        login(c)
+        monkeypatch.setattr(store_mod, "DB_MAX_BYTES", 0)
+        r = c.post("/api/categories", json={"name": "이관"})
+    assert r.status_code == 400 and r.json()["code"] == "quota"

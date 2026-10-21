@@ -25,6 +25,18 @@ QA_COLS = ("id, category_id, question, answer, evidence_state, "
 
 # 원격 모드 계정당 상한(삭제한 행 포함, 행이 남아 공간을 쓴다)
 QUOTAS = {"qa": ("Q&A", 20_000), "category": ("분류", 500), "evidence": ("근거", 100_000)}
+# 원격 모드 계정당 DB 파일 크기 상한. 행 수 상한이 세지 않는 것(고칠 때마다 쌓이는 이력, 사전, 수확 기록, 근거 캡처값)을
+# 막는다. 쓰기마다 PRAGMA 로 잰다(WAL 에 있는 페이지도 든다). 보관·복원·연결 끊기·근거 판정은 막지 않는다.
+# 보관은 행을 지우지 않아 크기가 줄지 않는다
+DB_MAX_BYTES = 200 * 1024 * 1024
+MB = 1024 * 1024
+
+
+def db_bytes(conn: sqlite3.Connection) -> int:
+    """비어 있는 페이지를 뺀 DB 크기(바이트)."""
+    used = conn.execute("SELECT (SELECT page_count FROM pragma_page_count()) - "
+                        "(SELECT freelist_count FROM pragma_freelist_count())").fetchone()[0]
+    return used * conn.execute("PRAGMA page_size").fetchone()[0]
 
 REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없다. "
                         "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 쓴다.")
@@ -63,8 +75,21 @@ class Store:
 
     # ---------- 공통 ----------
 
+    def _check_size(self) -> None:
+        if not self.remote:
+            return
+        size = db_bytes(self.conn)
+        if size >= DB_MAX_BYTES:
+            raise ValidationError(
+                f"이 계정의 DB 파일이 {size // MB} MB 로 계정당 상한 {DB_MAX_BYTES // MB} MB 에 닿아 더 쓸 수 없습니다. "
+                "삭제해도 파일은 줄지 않습니다. 연결 패널의 DB 파일 받기로 지금까지의 내용을 내려받을 수 있습니다.",
+                code="quota")
+
     @contextmanager
-    def _writing(self) -> Iterator[sqlite3.Connection]:
+    def _writing(self, grows: bool = True) -> Iterator[sqlite3.Connection]:
+        """grows: 파일을 키우는 쓰기다. 원격 모드는 파일 크기 상한(DB_MAX_BYTES)을 먼저 본다."""
+        if grows:
+            self._check_size()
         try:
             with tx(self.conn) as c:
                 yield c
@@ -233,7 +258,7 @@ class Store:
         follow = f"분류 '{cat['path']}' 삭제로 함께 삭제" + (f": {note}" if note else "")
         archive = f"deleted_at = {NOW}, deleted_by = ?, updated_by = ?, change_note = ?, {BUMP}"
         n_child = n_qa = 0
-        with self._writing() as c:
+        with self._writing(grows=False) as c:
             n = c.execute(f"UPDATE category SET {archive} WHERE id = ? AND version = ? AND deleted_at IS NULL",
                           (self.actor, self.actor, note, id, version)).rowcount
             if n:
@@ -385,7 +410,7 @@ class Store:
 
     def archive_evidence(self, evidence_id: int) -> dict:
         row = self._evidence_row(evidence_id)
-        with self._writing() as c:
+        with self._writing(grows=False) as c:
             c.execute(f"UPDATE evidence SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                       "WHERE id = ? AND deleted_at IS NULL", (self.actor, self.actor, evidence_id))
             self._recompute_state(row["qa_id"])
@@ -410,7 +435,7 @@ class Store:
     def _write_verdicts(self, judged: list[tuple], mark_recheck: bool = False) -> list[dict]:
         """(근거 행, 판정, 설명) 목록을 쓴다. 판정 변화는 system 주체로 남긴다."""
         results = []
-        with self._writing() as c:
+        with self._writing(grows=False) as c:
             for r, verdict, detail in judged:
                 changed = verdict != r["verdict"] or (detail or None) != r["verdict_detail"]
                 if changed:
@@ -535,7 +560,7 @@ class Store:
         if category_id is not None:
             deleted += ", category_id = ?"
             params.append(category_id)
-        with self._writing() as c:
+        with self._writing(grows=False) as c:
             n = c.execute(
                 f"UPDATE qa SET {deleted}, updated_by = ?, change_note = ?, {BUMP} WHERE id = ? AND version = ?",
                 params + [self.actor, note, id, version],
@@ -580,7 +605,7 @@ class Store:
 
     def unlink(self, a: int, b: int) -> dict:
         a, b = sorted((a, b))
-        with self._writing() as c:
+        with self._writing(grows=False) as c:
             c.execute(f"UPDATE qa_link SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                       "WHERE a_id = ? AND b_id = ? AND deleted_at IS NULL", (self.actor, self.actor, a, b))
         return {"a": a, "b": b, "linked": False}

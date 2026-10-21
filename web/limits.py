@@ -5,6 +5,7 @@ BodyLimit 은 요청 본문을 1 MB(DB 가져오기 /api/import/db 와 미리보
 - /register(OAuth 동적 클라이언트 등록): IP 당 분당 5
 - /api/* 읽기(GET): 계정당 분당 300, 쓰기: 계정당 분당 60. 로그인하지 않은 요청은 IP 당 분당 60
 - 그 밖(화면, /static, /auth/*)은 제한하지 않는다
+위 수치는 기본값(DEFAULT_LIMITS)이고 config 의 limits 에 준 키만 바꾼다(web/app.py 가 limits= 로 넘긴다).
 계정은 AccountAuth 가 scope 에 넣은 값을 쓰므로 이 미들웨어는 AccountAuth 안쪽에 둔다. IP 는 scope 의 client 다
 (역방향 프록시 뒤에서는 uvicorn 의 proxy headers 설정이 client 를 실제 주소로 바꿔야 한다).
 """

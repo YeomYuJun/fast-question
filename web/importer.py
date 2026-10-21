@@ -9,13 +9,16 @@ scripts/push_local.py 가 온라인 백업 사본을 만들어 개인 토큰으�
 로컬 가이드는 로컬 화면 주소와 저장소 파일 근거를 담고 있어 원격 계정에 맞지 않는다.
 - 사용자 DB 가 없거나 비었으면(system 이 아닌 주체가 만든 행이 없다. 기본 가이드만 있는 DB 도 여기에 든다)
   SQLite 백업 API 로 파일 내용을 통째로 바꾼다. revision 이력까지 그대로 옮겨진다. 바꾼 뒤 원격 기본 가이드
-  (guide_data)를 다시 넣는다.
+  (guide_data)를 다시 넣는다. 바꾸기 전에 정리한 파일의 행 수(kb.store.QUOTAS, 삭제한 행 포함)와 크기
+  (kb.store.DB_MAX_BYTES)를 계정당 상한과 견주고, 넘으면 400(code quota)으로 거부한다. 미리보기도 같다.
 - 비어 있지 않으면 살아 있는 항목을 하나씩 add_qa 로 넣는다. 가져오기 전부터 있던 항목과 질문이 비슷하면
   (Store.similar 와 같은 기준) 넣지 않고 skipped 로 돌려준다. 근거는 파일의 캡처값을 그대로 넣고(Store(remote=True)
   의 captured 경로) 판정은 same 으로 시작한다. 보관한 항목, 관련 질문 연결, 사전(동의어·불용어·사용자 단어)은
   옮기지 않는다.
 - 쿼리 origin(올린 PC 의 device_id)이 있으면 파일·폴더·git 근거의 캡처값에 origin 으로 붙인다. 로컬 검사기는 자기
   PC 의 origin 이 붙은 근거만 판정하므로, 붙이지 않으면 옮긴 근거를 아무 PC 도 판정하지 않는다.
+- 한 계정의 가져오기(미리보기 포함)는 한 번에 하나다. 진행 중이면 본문을 받기 전에 409(code busy)로 거부한다.
+  받은 파일을 임시 폴더에 두므로, 같은 계정이 큰 파일을 겹쳐 올려 디스크를 채우지 못하게 한다.
 """
 import json
 import re
@@ -34,6 +37,7 @@ from starlette.routing import Route
 
 from kb import guide
 from kb import search as search_mod
+from kb import store as store_mod
 from kb.db import BUMP, connect, tx
 from kb.dbcopy import prune
 from kb.errors import KbError
@@ -119,6 +123,23 @@ def _stamp_origin(conn: sqlite3.Connection, origin: str) -> None:
 
 def _live_items(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT count(*) FROM qa WHERE deleted_at IS NULL").fetchone()[0]
+
+
+def check_quota(upload: Path) -> None:
+    """통째로 바꿀 파일이 계정당 상한 안인지 본다. add_qa 를 거치지 않는 경로라 여기서 막는다."""
+    conn = sqlite3.connect(str(upload))
+    try:
+        for table, (label, limit) in store_mod.QUOTAS.items():
+            n = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            if n > limit:
+                raise ImportRefused(f"올린 파일에 {label} {n}건이 있습니다(삭제한 것 포함). 계정당 {limit}건까지 받습니다.",
+                                    code="quota")
+        size = store_mod.db_bytes(conn)
+    finally:
+        conn.close()
+    if size > store_mod.DB_MAX_BYTES:
+        raise ImportRefused(f"올린 파일이 {size // store_mod.MB} MB 입니다. 계정당 DB 파일은 "
+                            f"{store_mod.DB_MAX_BYTES // store_mod.MB} MB 까지 받습니다.", code="quota")
 
 
 def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[], dict] | None = None) -> dict:
@@ -233,6 +254,7 @@ def run_import(db: Path, upload: Path, analyzer=None, lock=None, origin: str = "
     prune(upload)
     with lock or threading.Lock():
         if _will_replace(db):
+            check_quota(upload)
             return replace(db, upload, origin, guide_data)
         return merge(db, upload, analyzer, origin)
 
@@ -245,6 +267,7 @@ def plan(db: Path, upload: Path) -> dict:
     src.row_factory = sqlite3.Row
     try:
         if _will_replace(db):
+            check_quota(upload)
             return {"mode": "replaced", "items": _live_items(src), "dry_run": True}
         conn = connect(db)
         try:
@@ -256,22 +279,27 @@ def plan(db: Path, upload: Path) -> dict:
     return {"mode": "merged", "added": len(rows), "skipped": skipped, "dry_run": True}
 
 
-def routes(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer, lock,
-           guide_data: Callable[[], dict] | None = None) -> list[Route]:
+def routes(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer,
+           lock_for: Callable[[Path], threading.Lock], guide_data: Callable[[], dict] | None = None,
+           importing: set[Path] | None = None) -> list[Route]:
     """db_for: 요청의 계정 DB 경로(로그인 전이면 None). tmp_root: 받은 파일을 잠시 둘 폴더(데이터 디스크 안).
-    guide_data: 통째로 바꾼 뒤 다시 넣을 원격 기본 가이드(kb.guide.load_remote)."""
+    lock_for: 계정 DB 의 잠금(web/app.py 가 새 DB 를 만들 때도 같은 잠금을 쓴다).
+    guide_data: 통째로 바꾼 뒤 다시 넣을 원격 기본 가이드(kb.guide.load_remote).
+    importing: 가져오기가 진행 중인 계정 DB 경로(resolve 한 값). 이벤트 루프에서만 읽고 쓴다."""
+    importing = set() if importing is None else importing
+
     def work(request: Request, db: Path, upload: Path) -> dict:
-        return run_import(db, upload, analyzer, lock, request.query_params.get("origin", ""), guide_data)
+        return run_import(db, upload, analyzer, lock_for(db), request.query_params.get("origin", ""), guide_data)
 
     def preview(request: Request, db: Path, upload: Path) -> dict:
         return plan(db, upload)
 
-    return [Route("/api/import/db", handler(db_for, tmp_root, work), methods=["POST"]),
-            Route("/api/import/db/plan", handler(db_for, tmp_root, preview), methods=["POST"])]
+    return [Route("/api/import/db", handler(db_for, tmp_root, work, importing), methods=["POST"]),
+            Route("/api/import/db/plan", handler(db_for, tmp_root, preview, importing), methods=["POST"])]
 
 
 def handler(db_for: Callable[[Request], Path | None], tmp_root: Path,
-            run: Callable[[Request, Path, Path], dict]):
+            run: Callable[[Request, Path, Path], dict], importing: set[Path]):
     async def import_db(request: Request) -> JSONResponse:
         db = db_for(request)
         if db is None:
@@ -279,31 +307,44 @@ def handler(db_for: Callable[[Request], Path | None], tmp_root: Path,
         length = request.headers.get("content-length", "")
         if length.isdigit() and int(length) > IMPORT_MAX_BYTES:
             return _too_large()
-        tmp_root.mkdir(parents=True, exist_ok=True)
-        work = Path(tempfile.mkdtemp(dir=tmp_root))
+        key = db.resolve()
+        if key in importing:  # 확인과 표시 사이에 await 가 없어 같은 계정의 요청 둘이 함께 들어오지 못한다
+            return JSONResponse({"error": "이 계정의 가져오기가 이미 진행 중입니다. 끝난 뒤 다시 시도하세요.",
+                                 "code": "busy"}, status_code=409)
+        importing.add(key)
         try:
-            upload = work / "upload.sqlite3"
-            size = 0
-            with upload.open("wb") as f:
-                async for chunk in request.stream():
-                    size += len(chunk)
-                    if size > IMPORT_MAX_BYTES:
-                        return _too_large()
-                    f.write(chunk)
-            if size == 0:
-                return JSONResponse({"error": "요청 본문에 SQLite 파일이 없다.", "code": "invalid_db"},
-                                    status_code=400)
-            try:
-                result = await run_in_threadpool(run, request, db, upload)
-            except ImportRefused as e:
-                return JSONResponse({"error": e.message, "code": e.code}, status_code=e.status)
-            except sqlite3.OperationalError as e:
-                return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
-                                     "code": "busy"}, status_code=503)
-            return JSONResponse(result)
+            return await _receive_and_run(request, db, tmp_root, run)
         finally:
-            shutil.rmtree(work, ignore_errors=True)
+            importing.discard(key)
     return import_db
+
+
+async def _receive_and_run(request: Request, db: Path, tmp_root: Path,
+                           run: Callable[[Request, Path, Path], dict]) -> JSONResponse:
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(dir=tmp_root))
+    try:
+        upload = work / "upload.sqlite3"
+        size = 0
+        with upload.open("wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > IMPORT_MAX_BYTES:
+                    return _too_large()
+                f.write(chunk)
+        if size == 0:
+            return JSONResponse({"error": "요청 본문에 SQLite 파일이 없다.", "code": "invalid_db"},
+                                status_code=400)
+        try:
+            result = await run_in_threadpool(run, request, db, upload)
+        except ImportRefused as e:
+            return JSONResponse({"error": e.message, "code": e.code}, status_code=e.status)
+        except sqlite3.OperationalError as e:
+            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+                                 "code": "busy"}, status_code=503)
+        return JSONResponse(result)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _too_large() -> JSONResponse:

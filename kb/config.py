@@ -7,9 +7,11 @@ public_url(https://도메인, 경로 없음)의 Host 만 받는다.
 그 목록("github:<숫자 id>", "google:<sub>")의 신원만 로그인한다.
 backup_s3_bucket 이 있으면 원격 모드 주기 작업이 새 백업 사본을 s3://<bucket>/<backup_s3_prefix>users/<id>/ 에 올린다
 (kb/s3backup.py). prefix 가 비어 있지 않으면 끝에 / 를 붙인다.
+limits 는 원격 모드 요청 제한(분당, web/limits.py DEFAULT_LIMITS 의 키), corpus_cache 는 검색 메모리 사본 상한
+(kb/search.py configure 의 max_dbs·max_docs)이다. 둘 다 준 키만 기본값을 덮고, 모르는 키나 양의 정수가 아닌 값은 거부한다.
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,8 +33,12 @@ DEFAULTS = {
     "allowed_logins": [],
     "backup_s3_bucket": "",
     "backup_s3_prefix": "",
+    "limits": {},
+    "corpus_cache": {},
 }
 MODES = ("local", "remote")
+LIMIT_KEYS = ("mcp", "register", "read", "write", "anon")
+CORPUS_CACHE_KEYS = ("max_dbs", "max_docs")
 
 
 @dataclass(frozen=True)
@@ -53,6 +59,8 @@ class Config:
     allowed_logins: frozenset[str] = frozenset()
     backup_s3_bucket: str = ""
     backup_s3_prefix: str = ""
+    limits: dict = field(default_factory=dict)
+    corpus_cache: dict = field(default_factory=dict)
 
     @property
     def web_url(self) -> str:
@@ -88,7 +96,22 @@ def load_config(path: Path | None = None) -> Config:
         allowed_logins=frozenset(str(x) for x in raw["allowed_logins"]),
         backup_s3_bucket=str(raw["backup_s3_bucket"]).strip(),
         backup_s3_prefix=_prefix(raw["backup_s3_prefix"]),
+        limits=_counts(raw, "limits", LIMIT_KEYS),
+        corpus_cache=_counts(raw, "corpus_cache", CORPUS_CACHE_KEYS),
     )
+
+
+def _counts(raw: dict, key: str, allowed: tuple[str, ...]) -> dict[str, int]:
+    value = raw[key]
+    if not isinstance(value, dict):
+        raise ValueError(f"config 의 {key} 는 객체다: {value!r}")
+    unknown = sorted(set(value) - set(allowed))
+    if unknown:
+        raise ValueError(f"config 의 {key} 에 모르는 키가 있다: {', '.join(unknown)} (쓸 수 있는 키: {', '.join(allowed)})")
+    bad = [k for k, v in value.items() if not isinstance(v, int) or isinstance(v, bool) or v <= 0]
+    if bad:
+        raise ValueError(f"config 의 {key}.{bad[0]} 는 양의 정수다: {value[bad[0]]!r}")
+    return dict(value)
 
 
 def _prefix(value) -> str:

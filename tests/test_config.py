@@ -69,6 +69,25 @@ def test_remote_mode_requires_valid_settings(tmp_path, body, needle):
         load_config(_write(tmp_path, body))
 
 
+def test_limits_and_corpus_cache_keys_override_defaults(tmp_path):
+    from kb import config, search
+    from web.limits import DEFAULT_LIMITS
+    cfg = load_config(_write(tmp_path, {"limits": {"write": 30}, "corpus_cache": {"max_dbs": 50}}))
+    assert cfg.limits == {"write": 30} and cfg.corpus_cache == {"max_dbs": 50}
+    default = load_config(tmp_path / "없음.json")
+    assert default.limits == {} and default.corpus_cache == {}
+    assert set(config.LIMIT_KEYS) == set(DEFAULT_LIMITS)
+    assert {k: getattr(search, f"CACHE_MAX_{k[4:].upper()}") for k in config.CORPUS_CACHE_KEYS} == {
+        "max_dbs": search.CACHE_MAX_DBS, "max_docs": search.CACHE_MAX_DOCS}
+
+
+@pytest.mark.parametrize("body", [{"limits": {"writes": 1}}, {"limits": {"write": 0}}, {"limits": {"write": True}},
+                                  {"limits": [1]}, {"corpus_cache": {"max_dbs": "10"}}, {"corpus_cache": {"size": 1}}])
+def test_bad_limit_keys_are_refused(tmp_path, body):
+    with pytest.raises(ValueError, match="limits|corpus_cache"):
+        load_config(_write(tmp_path, body))
+
+
 def test_oauth_client_ids_and_allowed_logins(tmp_path):
     cfg = load_config(_write(tmp_path, {"mode": "remote", "public_url": "https://fq.example.com", "data_dir": "d",
                                         "oauth": {"github": {"client_id": "gh-id"}, "google": {"client_id": "g-id"}},

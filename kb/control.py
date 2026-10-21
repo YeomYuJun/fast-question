@@ -8,6 +8,7 @@ DDL 전체의 sha256 이라 손으로 올리지 않는다. DDL 이 바뀐 뒤 �
 - 로그인 상태(state, PKCE verifier)는 10분 안에 한 번만 쓸 수 있다.
 - 개인 토큰(fq_pat_…)은 훅·로컬 프록시가 Bearer 로 쓴다. 표에는 sha256 만 두고, 180일 뒤 끝난다. 계정당 살아 있는 토큰 10개.
 - PC 로그인 승인 코드(cli_grant)는 5분 안에 한 번만 개인 토큰으로 바꿀 수 있다(web/cli_login.py).
+- 웹 Claude 패널의 Anthropic API 키(claude_key)는 계정당 하나이고 암호화한 값만 둔다(web/claude_chat.py).
 - 형태소 사용자 단어는 원격 모드에서 서버 전역 사전(global_user_word) 하나다. Kiwi 가 프로세스에 하나라 사용자마다
   둘 수 없다. 운영자가 scripts/global_words.py 로 바꾸고, 분석기는 words_source() 로 이 표를 읽는다.
 세션·로그인 상태의 시각은 이 모듈이 UTC ISO 문자열로 넣고 비교한다(now 인자로 테스트한다).
@@ -162,8 +163,20 @@ CREATE TABLE IF NOT EXISTS cli_grant (
 );
 """
 
+# 웹 화면 Claude 패널(web/claude_chat.py): 계정이 등록한 Anthropic API 키. 값은 서버 키 파일로 암호화한 것만 둔다
+CLAUDE_KEY_DDL = """
+CREATE TABLE IF NOT EXISTS claude_key (
+    account_id INTEGER PRIMARY KEY REFERENCES account(id),
+    secret TEXT NOT NULL,
+    last4 TEXT NOT NULL,
+    model TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
-DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL, CLI_GRANT_DDL)
+DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL, CLI_GRANT_DDL,
+             CLAUDE_KEY_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
@@ -409,8 +422,8 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
 
 
 def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | None = None) -> None:
-    """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드·PC 로그인 승인 코드를 모두 지운다.
-    신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
+    """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드·PC 로그인 승인 코드·
+    Anthropic API 키를 모두 지운다. 신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
     t = _iso(_now(now))
     with tx(conn):
         conn.execute("UPDATE account SET deleted_at = ?, display_name = '' WHERE id = ? AND deleted_at IS NULL",
@@ -420,6 +433,33 @@ def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | No
         conn.execute("DELETE FROM oauth_token WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM auth_code WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM cli_grant WHERE account_id = ?", (account_id,))
+        conn.execute("DELETE FROM claude_key WHERE account_id = ?", (account_id,))
+
+
+def put_claude_key(conn: sqlite3.Connection, account_id: int, secret: str, last4: str, model: str,
+                   now: datetime | None = None) -> None:
+    """웹 Claude 패널의 API 키(암호화한 값)와 고른 모델. 계정당 하나라 덮어쓴다."""
+    with tx(conn):
+        conn.execute("INSERT INTO claude_key(account_id, secret, last4, model, updated_at) VALUES (?, ?, ?, ?, ?) "
+                     "ON CONFLICT(account_id) DO UPDATE SET secret = excluded.secret, last4 = excluded.last4, "
+                     "model = excluded.model, updated_at = excluded.updated_at",
+                     (account_id, secret, last4, model, _iso(_now(now))))
+
+
+def get_claude_key(conn: sqlite3.Connection, account_id: int) -> dict | None:
+    row = conn.execute("SELECT secret, last4, model, updated_at FROM claude_key WHERE account_id = ?",
+                       (account_id,)).fetchone()
+    return None if row is None else dict(row)
+
+
+def set_claude_model(conn: sqlite3.Connection, account_id: int, model: str) -> bool:
+    with tx(conn):
+        return conn.execute("UPDATE claude_key SET model = ? WHERE account_id = ?", (model, account_id)).rowcount > 0
+
+
+def delete_claude_key(conn: sqlite3.Connection, account_id: int) -> bool:
+    with tx(conn):
+        return conn.execute("DELETE FROM claude_key WHERE account_id = ?", (account_id,)).rowcount > 0
 
 
 def put_cli_grant(conn: sqlite3.Connection, account_id: int, challenge: str, device: str,

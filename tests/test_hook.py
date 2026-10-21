@@ -1,3 +1,4 @@
+import io
 import json
 import subprocess
 import sys
@@ -198,6 +199,42 @@ def test_hook_uses_remote_server_with_token(tmp_path):
     assert "#7" in text and f"{remote.url}/#qa/7" in text and "#1" not in text  # 로컬 DB 를 읽지 않는다
     assert {auth for _, auth in remote.seen} == {"Bearer fq_pat_test"}
     assert (tmp_path / "home" / ".fast-question" / "projects.json").exists()
+
+
+def test_hook_reads_local_db_in_local_mode(tmp_path):
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")])
+    try:
+        cred = _cred_file(tmp_path, remote.url)
+        cred.write_text(json.dumps({"url": remote.url, "token": "fq_pat_test", "mode": "local"}), encoding="utf-8")
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"db_path": str(_db_with_item(tmp_path)), "port": 1}), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
+                           input=json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?"}).encode(),
+                           capture_output=True, timeout=60,
+                           env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": r"C:\Windows",
+                                "FQ_CREDENTIALS": str(cred), "USERPROFILE": str(tmp_path / "home")})
+    finally:
+        remote.close()
+    text = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+    assert "#1" in text and "#7" not in text and remote.seen == []
+
+
+def test_client_hook_ignores_local_mode(tmp_path, monkeypatch):
+    """플러그인(fq_client hook, remote_only)은 원격 전용이라 mode 를 보지 않는다."""
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")])
+    try:
+        cred = _cred_file(tmp_path, remote.url)
+        cred.write_text(json.dumps({"url": remote.url, "token": "fq_pat_test", "mode": "local"}), encoding="utf-8")
+        monkeypatch.setenv("FQ_CREDENTIALS", str(cred))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?"}).encode()))
+        monkeypatch.setattr(sys, "stdin", stdin)
+        out = io.StringIO()
+        monkeypatch.setattr(sys, "stdout", out)
+        assert ask_kb.main(remote_only=True) == 0
+    finally:
+        remote.close()
+    assert "#7" in json.loads(out.getvalue())["hookSpecificOutput"]["additionalContext"]
 
 
 def test_hook_is_silent_when_remote_is_down(tmp_path):
