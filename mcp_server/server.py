@@ -5,7 +5,8 @@ KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현�
 web_url 은 웹 화면 주소(로컬 http://127.0.0.1:<port>, 원격 public_url)다. kb_add·kb_add_many(created)·kb_update·kb_get 결과와
 kb_search 의 hits·similar 항목에 그 Q&A 를 펼치는 주소 url = <web_url>/#qa/<id> 를 넣는다.
 kb_search 의 hits 중 열린 정리 건(kb/cleanup.py)이 있는 항목에는 cleanup = [규칙 이름] 을 붙인다.
-remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고, 근거 재기록은
+remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고(도구 설명도
+file 대신 items 를 쓰라고 적는다), 근거 재기록은
 로컬 프록시가 보낸 캡처값(spec.captured)을 쓴다. 근거·재검증·사전의 원격 제한은 Store(remote=True)가 건다.
 """
 import json
@@ -20,7 +21,7 @@ from kb.errors import ConflictError, KbError
 from kb.morph import reindex
 from kb.rules import check_claude_qa
 from kb.store import Store
-from mcp_server.instructions import INSTRUCTIONS
+from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, ADD_MANY_REMOTE, INSTRUCTIONS
 
 HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "matched", "evidence_state", "archived",
             "created_by", "updated_at", "version")
@@ -228,13 +229,8 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             return res
         return run(go)
 
-    @server.tool()
+    @server.tool(description=ADD_MANY_DOC + (ADD_MANY_REMOTE if remote else ADD_MANY_FILE))
     def kb_add_many(items: list[dict] | None = None, file: str | None = None) -> dict:
-        """Q&A 를 한 번에 여러 건(최대 100) 등록한다. 항목은 kb_add 의 인자와 같다:
-        {"category", "question", "answer", "evidence"?, "links"?, "force"?}. 항목마다 따로 처리해 하나가 실패해도
-        나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다.
-        file 에 항목 배열 JSON 파일의 절대경로를 주면 그 파일을 읽는다. 초안 파일을 그대로 넣을 때는 file 을 쓴다
-        (항목을 다시 옮겨 적으면 글자가 바뀔 수 있다). 항목의 다른 키는 무시한다."""
         if file and remote:
             raise ValueError("원격 서버는 사용자 PC 의 파일을 읽을 수 없다. 로컬 프록시가 파일을 읽어 items 로 보낸다.")
         if file:

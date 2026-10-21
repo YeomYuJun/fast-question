@@ -146,3 +146,10 @@ def test_run_mcp_remote_without_credentials_exits(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "run_mcp.py"), "--remote"], capture_output=True, env=env, timeout=60)
     # 표준 오류는 콘솔 코드 페이지(CP949)로 나온다. ASCII 부분으로 확인한다
     assert r.returncode == 1 and b"install.py --remote" in r.stderr
+
+
+def test_proxy_add_many_description_offers_file(cfg, app):
+    _, token = new_token(cfg)
+    tools = via_proxy(app, token, lambda c: c.list_tools()).tools
+    doc = next(t for t in tools if t.name == "kb_add_many").description
+    assert "초안 파일을 그대로" in doc and "file 을 쓸 수 없다" not in doc

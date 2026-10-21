@@ -18,3 +18,13 @@ fast-question 은 사용자의 질문·답변 지식 DB 다. 사람은 등록분
 - 분류 삭제(kb_delete_category)는 하위 분류와 Q&A 를 모두 함께 삭제한다. 먼저 confirm 없이 불러 받은 경고문을 사용자에게 보여 주고, 승인을 받은 뒤에만 confirm=true 로 부른다.
 - 등록·수정·조회한 Q&A 를 사용자에게 알릴 때는 결과의 url(웹 화면에서 그 항목을 여는 주소)을 함께 보여 준다.
 """
+
+# kb_add_many 도구 설명. 서버(mcp_server/server.py)와 PC 프록시(mcp_server/proxy.py)가 함께 쓴다(프록시는 서버 모듈을 import 하지 않는다)
+ADD_MANY_DOC = """Q&A 를 한 번에 여러 건(최대 100) 등록한다. 항목은 kb_add 의 인자와 같다:
+{"category", "question", "answer", "evidence"?, "links"?, "force"?}. 항목마다 따로 처리해 하나가 실패해도
+나머지는 등록된다. results[i].status 는 created / similar_found(후보 포함, 등록 안 됨) / error 다. 항목의 다른 키는 무시한다.
+"""
+ADD_MANY_FILE = """file 에 항목 배열 JSON 파일의 절대경로를 주면 그 파일을 읽는다. 초안 파일을 그대로 넣을 때는 file 을 쓴다
+(항목을 다시 옮겨 적으면 글자가 바뀔 수 있다)."""
+# 원격 직접 연결(claude.ai·한 줄 연결)은 사용자 PC 의 파일을 읽을 수 없다. 로컬 프록시는 ADD_MANY_FILE 설명으로 바꿔 내보낸다
+ADD_MANY_REMOTE = """이 연결에서는 file 을 쓸 수 없다(사용자 PC 의 파일을 읽지 못한다). 항목은 모두 items 로 보낸다."""

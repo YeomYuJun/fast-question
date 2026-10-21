@@ -273,3 +273,13 @@ def test_add_many_reads_draft_file(server, tmp_path):
     assert call(server, "kb_search", {"query": "뺐다"})[1]["hits"][0]["answer"] == items[0]["answer"]
     err, text = call(server, "kb_add_many", {})
     assert err and "items 나 file" in text
+
+
+def test_add_many_description_offers_file_only_locally(db):
+    async def docs(srv):
+        async with Client(srv) as c:
+            return {t.name: t.description for t in (await c.list_tools()).tools}
+    local = asyncio.run(docs(build_server(store_factory(db, None), web_url=WEB)))["kb_add_many"]
+    remote = asyncio.run(docs(build_server(store_factory(db, None), web_url=WEB, remote=True)))["kb_add_many"]
+    assert "초안 파일을 그대로" in local
+    assert "초안 파일을 그대로" not in remote and "file 을 쓸 수 없다" in remote
