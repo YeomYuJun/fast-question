@@ -145,6 +145,7 @@ def test_autostart_builds_command_without_running(monkeypatch, capsys):
     import scripts.autostart as auto
 
     calls = []
+    monkeypatch.setattr(auto, "IS_WINDOWS", True)  # 작업 스케줄러 명령은 Windows 에서만 만든다
     monkeypatch.setattr(auto.subprocess, "run", lambda *a, **kw: calls.append(a))
     assert auto.main([]) == 2  # 인자가 없으면 사용법만 보이고 아무것도 바꾸지 않는다
     assert calls == []

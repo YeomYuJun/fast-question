@@ -76,7 +76,8 @@ main 에 push 하면 `.github/workflows/deploy.yml` 이 테스트를 돌리고, 
 처음 한 번 하는 설정(서버 bash, 저장소는 `~/fast-question`)
 
 ```bash
-cd ~/fast-question && git fetch origin && git checkout -B main origin/main
+cd ~/fast-question && git remote set-url origin https://github.com/YeomYuJun/fast-question.git
+git fetch origin && git checkout -B main origin/main
 ssh-keygen -t ed25519 -N "" -C fq-github-deploy -f ~/.ssh/fq_deploy
 printf 'command="sh %s/fast-question/deploy/deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding %s\n' "$HOME" "$(cat ~/.ssh/fq_deploy.pub)" >> ~/.ssh/authorized_keys
 echo "DEPLOY_HOST: $(whoami)@<도메인>"
@@ -84,7 +85,9 @@ echo "DEPLOY_KNOWN_HOSTS: <도메인> $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed2551
 cat ~/.ssh/fq_deploy
 ```
 
+- 원격 주소를 HTTPS 로 둔다. 저장소가 공개라 서버가 GitHub 인증 키 없이 받아 온다.
 - 이 키는 강제 명령으로 등록되어, 무엇을 보내든 `deploy/deploy.sh` 만 실행한다(셸·포트 전달 없음).
+- 개인키 출력은 GitHub secret 칸에만 붙여 넣는다. 다른 곳에 남겼으면 authorized_keys 의 `fq-github-deploy` 줄과 키 파일을 지우고 다시 만든다.
 - GitHub 저장소 Settings → Environments 에 `production` 을 만들고 secret 세 개를 넣는다.
   - `DEPLOY_HOST`: 위에 출력된 `사용자@도메인`
   - `DEPLOY_KNOWN_HOSTS`: 위에 출력된 한 줄(`<도메인>` 을 실제 도메인으로)

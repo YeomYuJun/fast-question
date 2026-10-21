@@ -18,7 +18,8 @@ def _ours(data):
     return [h for g in data["hooks"]["UserPromptSubmit"] for h in g["hooks"] if "ask_kb.py" in h["command"]]
 
 
-def test_install_hook_keeps_other_hooks_and_writes_without_bom(tmp_path):
+def test_install_hook_keeps_other_hooks_and_writes_without_bom(tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "IS_WINDOWS", True)  # Windows 형식(python.exe)의 명령을 본다
     p = _settings(tmp_path, {"model": "x", "hooks": {"UserPromptSubmit": [{"hooks": [OTHER]}],
                                                      "Stop": [{"hooks": [OTHER]}]}})
     assert "등록" in install.install_hook(p)
@@ -110,7 +111,8 @@ def test_install_skills_copies_every_skill_folder(tmp_path):
     assert all("그대로" in m for m in install.install_skills(src, dst))
 
 
-def test_install_skills_fills_marks_in_md_only(tmp_path):
+def test_install_skills_fills_marks_in_md_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(install, "IS_WINDOWS", True)  # Windows 형식(큰따옴표, Scripts\python.exe)의 명령을 본다
     src, dst, root = tmp_path / "skill", tmp_path / "dst", tmp_path / "repo dir"
     (src / "qa").mkdir(parents=True)
     (src / "qa" / "SKILL.md").write_text(f"{install.CLI_MARK} lint-draft x / {install.RULES_MARK}", encoding="utf-8")
