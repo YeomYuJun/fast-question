@@ -26,8 +26,9 @@ from kb.errors import NotFoundError, ValidationError
 from kb.text import SIMILAR_MIN, bigrams, dice
 
 SHARED_EVIDENCE_MIN = 0.4  # 같은 근거·anchor 를 단 두 항목은 이 값부터 중복 후보다
-EVIDENCE_RULES = {"stale": ("evidence_stale", "근거 파일이 기록한 뒤에 바뀌었다. 근거를 다시 읽고 답을 확인한다."),
-                  "unknown": ("evidence_unknown", "근거를 판정하지 못했다(경로가 없어졌거나 git 을 실행하지 못했다).")}
+# qa.evidence_state → (규칙 이름, 설명, 그 상태를 만든 근거 판정). 설명 뒤에 그 근거들의 판정 설명을 붙인다
+EVIDENCE_RULES = {"stale": ("evidence_stale", "근거가 기록한 뒤에 바뀌었다", "changed"),
+                  "unknown": ("evidence_unknown", "근거를 판정하지 못했다", "unknown")}
 RESOLUTIONS = ("fixed", "kept")
 _CHUNK = 500  # IN (...) 자리표시자 수
 
@@ -230,10 +231,13 @@ def open_list(store, rule: str | None = None, limit: int = 20) -> dict:
         f"SELECT f.{FINDING_COLS.replace(', ', ', f.')} FROM cleanup_finding f JOIN qa q ON q.id = f.qa_id "
         "WHERE f.resolved_at IS NULL AND q.deleted_at IS NULL ORDER BY f.id").fetchall()
     entries = [_finding(r) for r in rows]
-    for state, (name, detail) in EVIDENCE_RULES.items():
-        entries += [{"id": None, "qa_id": r[0], "other_qa_id": None, "rule": name, "detail": detail}
-                    for r in conn.execute("SELECT id FROM qa WHERE deleted_at IS NULL AND evidence_state = ? ORDER BY id",
-                                          (state,))]
+    for state, (name, label, verdict) in EVIDENCE_RULES.items():
+        rows = conn.execute(
+            "SELECT q.id, group_concat(DISTINCT e.verdict_detail) FROM qa q LEFT JOIN evidence e ON e.qa_id = q.id "
+            "AND e.deleted_at IS NULL AND e.verdict = ? WHERE q.deleted_at IS NULL AND q.evidence_state = ? "
+            "GROUP BY q.id ORDER BY q.id", (verdict, state))
+        entries += [{"id": None, "qa_id": r[0], "other_qa_id": None, "rule": name,
+                     "detail": f"{label}: {r[1]}" if r[1] else label} for r in rows]
     if rule:
         entries = [e for e in entries if e["rule"] == rule]
     page = entries[:max(0, int(limit))]

@@ -73,6 +73,26 @@ def test_git_path_tracks_only_its_paths(repo):
     assert verdict == "changed" and "NasFileStorage.java" in detail
 
 
+def test_changed_detail_says_whether_anchor_remains(base, repo):
+    f = base / "설정.txt"
+    f.write_text("timeout = 30\n", encoding="utf-8")
+    row = capture({"kind": "file", "path": str(f), "anchor": "timeout"})
+    f.write_text("timeout = 60\n", encoding="utf-8")
+    assert check(row) == ("changed", "설정.txt 내용이 바뀌었다 (앵커 'timeout' 있음)")
+    f.write_text("limit = 60\n", encoding="utf-8")
+    assert check(row) == ("changed", "설정.txt 내용이 바뀌었다 (앵커 'timeout' 없음)")
+
+    target = repo / "src" / "NasFileStorage.java"
+    row = capture({"kind": "auto", "path": str(target), "anchor": "class Nas"})
+    plain = capture({"kind": "auto", "path": str(target)})
+    target.write_text("class Storage {}\n", encoding="utf-8")
+    verdict, detail = check(row)
+    assert verdict == "changed" and detail.endswith("(앵커 'class Nas' 없음)")
+    assert "앵커" not in check(plain)[1]
+    target.unlink()
+    assert "앵커" not in check(row)[1]  # 파일이 없으면 앵커를 따로 말하지 않는다
+
+
 def test_git_deleted_file_is_changed(repo):
     target = repo / "src" / "NasFileStorage.java"
     row = capture({"kind": "auto", "path": str(target)})

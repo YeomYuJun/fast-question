@@ -9,7 +9,7 @@
             "command": "uvx",
             "args": [
               "--from",
-              "fast-question==0.1.1",
+              "fast-question==0.1.2",
               "fast-question",
               "hook"
             ],

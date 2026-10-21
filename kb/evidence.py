@@ -270,6 +270,21 @@ def spec_of(row: Mapping) -> dict:
     return {"kind": kind, "path": row["path"], "anchor": row["anchor"]}
 
 
+def _anchor_note(anchor: str | None, files: list[Path]) -> str:
+    """바뀐 근거의 판정 설명 끝에 붙이는 앵커 유무. 근거 상태(changed)는 바꾸지 않고 정리 목록이 보여 주는 설명만 늘린다.
+    앵커가 없거나 읽을 파일이 없으면 빈 문자열."""
+    if not anchor or not files:
+        return ""
+    needle = anchor.encode("utf-8")
+    for f in files:
+        try:
+            if needle in f.read_bytes():
+                return f" (앵커 '{anchor}' 있음)"
+        except OSError:
+            return ""
+    return f" (앵커 '{anchor}' 없음)"
+
+
 class Checker:
     """판정기. 한 번의 재검증 동안 git diff·ls-files 결과를 (저장소, 커밋) 단위로 재사용한다."""
 
@@ -306,7 +321,9 @@ class Checker:
             h = hash_file(p)
             if h is None:
                 return "unknown", f"{p.name} 파일을 읽지 못했다"
-            return ("same", "") if h == cap.get("sha256") else ("changed", f"{p.name} 내용이 바뀌었다")
+            if h == cap.get("sha256"):
+                return "same", ""
+            return "changed", f"{p.name} 내용이 바뀌었다" + _anchor_note(row.get("anchor"), [p])
         if kind == "dir":
             p = Path(row["path"])
             if not p.exists():
@@ -322,7 +339,8 @@ class Checker:
             diff, untr = self._diff_of(repo, row["commit_sha"]), self._untr_of(repo)
             if diff is None or untr is None:
                 return "unknown", "git 으로 비교하지 못했다(커밋이 없거나 git 실행 실패)"
-            match = spec_matcher(json.loads(row["paths_json"] or '["."]'))
+            specs = json.loads(row["paths_json"] or '["."]')
+            match = spec_matcher(specs)
             dirty, untracked = cap.get("dirty", {}), cap.get("untracked", {})
             changed = []
             now_dirty = [f for f in diff if match(f)]
@@ -336,7 +354,8 @@ class Checker:
                 return "same", ""
             uniq = list(dict.fromkeys(changed))
             more = f" 외 {len(uniq) - 3}개" if len(uniq) > 3 else ""
-            return "changed", ", ".join(uniq[:3]) + more + " 가 기록 뒤에 바뀌었다"
+            files = [Path(repo) / s for s in specs if (Path(repo) / s).is_file()]
+            return "changed", ", ".join(uniq[:3]) + more + " 가 기록 뒤에 바뀌었다" + _anchor_note(row.get("anchor"), files)
         if kind == "githead":
             repo = row["repo"]
             if not Path(repo).exists():

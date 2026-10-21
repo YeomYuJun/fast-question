@@ -7,7 +7,7 @@ description: 사용자의 질문·답변 지식 DB(fast-question)에 Q&A 를 등
 
 fast-question 은 사용자가 작업 중 생긴 질문 한 줄과 짧은 답을 쌓는 DB 다. 도구 결과의 `url` 이 그 항목을 웹 화면에서 여는 주소다.
 도구는 MCP 서버 `fast-question` 의 `kb_*` 다. 도구가 목록에 없으면 사용자에게 `claude mcp list` 로 연결 상태를 확인해 달라고 하고 멈춘다.
-원격 서버에 로그인하지 않아 연결되지 않은 것이면 터미널에서 `uvx --from fast-question==0.1.1 fast-question login` 을 실행한 뒤 `/mcp` 로 다시 연결하게 한다.
+원격 서버에 로그인하지 않아 연결되지 않은 것이면 터미널에서 `uvx --from fast-question==0.1.2 fast-question login` 을 실행한 뒤 `/mcp` 로 다시 연결하게 한다.
 
 사람은 등록분을 검토하지 않는다. 등록은 아래 양식으로 Claude 가 끝까지 처리하고, 중간에 사용자에게 묻지 않는다.
 무엇을 넣고 무엇을 넣지 않는지, 질문·답변·분류·근거 양식은 이 폴더의 [rules.md](rules.md) 가 원본이다. 등록 전에 읽는다.
@@ -59,6 +59,8 @@ fast-question 은 사용자가 작업 중 생긴 질문 한 줄과 짧은 답을
    - `duplicate`(질문이 비슷한 항목): 두 항목을 비교한다. 같은 사실을 묻는 질문이면 답이 더 정확한 쪽으로 `kb_update` 해 합치고, 나머지는 `kb_archive` 한 뒤 `kb_cleanup_resolve` resolution=fixed. 다른 사실이면 필요할 때 `kb_link` 로 잇고 resolution=kept, `note` 에 무엇이 다른지 적는다.
    - `rule_violation`(지금 형식 규칙 위반): `detail` 의 위반 내용대로 `kb_update` 로 고친 뒤 resolution=fixed. 원문 인용처럼 규칙이 잘못 걸린 경우만 kept.
    - `evidence_stale`·`evidence_unknown`(근거 상태): 조회 4번과 "근거 재확인" 2번대로 처리한다. 근거를 다시 기록하면 목록에서 빠지므로 resolve 하지 않는다(`id` 가 null 이다).
+     - `detail` 끝에 "(앵커 '…' 없음)" 이 붙은 항목은 답이 가리키던 코드·문장이 근거에서 사라진 것이다. 이런 항목부터 근거를 다시 읽고 고친다. "(앵커 '…' 있음)" 은 앵커 주변이 바뀌었는지만 확인한다.
+     - `detail` 이 "사용자 PC 에서 판정하지 않았다" 이면 근거가 틀린 것이 아니다. 먼저 `kb_recheck` 로 이 PC 에서 판정한다. 이 PC 에 그 경로가 없으면(다른 PC 에서 등록한 근거) 그대로 두고 넘어간다.
 3. fixed 는 조건을 다시 확인해 아직 걸리면 거부된다. 거부 메시지대로 더 고친다. kept 로 닫은 건은 그 항목의 질문·답이 바뀌기 전까지 다시 올라오지 않는다.
 4. 처리한 항목마다 한 줄씩 보고한다. 형식: `정리: <질문> <결과의 url> (<한 일>)`.
 
