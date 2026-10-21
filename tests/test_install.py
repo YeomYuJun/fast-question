@@ -1,6 +1,7 @@
 import json
+import shlex
 
-from scripts import install
+from scripts import autostart, install
 
 OTHER = {"type": "command", "command": 'node "d:\\tools\\hooks\\other/inject.js"'}
 
@@ -47,6 +48,54 @@ def test_remove_hook_removes_only_ours(tmp_path):
     assert "제거" in install.remove_hook(p)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["hooks"]["UserPromptSubmit"] == [{"hooks": [OTHER]}]
+
+
+def test_venv_python_follows_platform(monkeypatch, tmp_path):
+    monkeypatch.setattr(install, "IS_WINDOWS", True)
+    assert install.venv_python(tmp_path) == tmp_path / ".venv" / "Scripts" / "python.exe"
+    monkeypatch.setattr(install, "IS_WINDOWS", False)
+    assert install.venv_python(tmp_path) == tmp_path / ".venv" / "bin" / "python"
+
+
+def test_posix_hook_and_cli_commands_split_back_to_paths(monkeypatch, tmp_path):
+    """macOS·Linux 의 Claude Code 는 훅 command 와 Skill 의 명령을 sh 계열 셸로 실행한다. 공백·$ 가 든 경로도 그대로 나뉜다."""
+    root = tmp_path / "repo dir $HOME"
+    monkeypatch.setattr(install, "IS_WINDOWS", False)
+    monkeypatch.setattr(install, "ROOT", root)
+    monkeypatch.setattr(install, "HOOK", root / "hooks" / "ask_kb.py")
+    py = str(root / ".venv" / "bin" / "python")
+    assert shlex.split(install.hook_command()) == [py, str(root / "hooks" / "ask_kb.py")]
+    assert shlex.split(install.local_marks(root)[install.CLI_MARK]) == [py, str(root / "fq_client" / "cli.py")]
+
+
+def test_windows_hook_command_keeps_double_quoted_posix_paths(monkeypatch, tmp_path):
+    monkeypatch.setattr(install, "IS_WINDOWS", True)
+    monkeypatch.setattr(install, "ROOT", tmp_path)
+    monkeypatch.setattr(install, "HOOK", tmp_path / "hooks" / "ask_kb.py")
+    py = (tmp_path / ".venv" / "Scripts" / "python.exe").as_posix()
+    assert install.hook_command() == f'"{py}" "{(tmp_path / "hooks" / "ask_kb.py").as_posix()}"'
+
+
+def test_register_mcp_uses_platform_python(monkeypatch, tmp_path):
+    monkeypatch.setattr(install, "IS_WINDOWS", False)
+    monkeypatch.setattr(install, "ROOT", tmp_path)
+    seen = []
+
+    def run(args, **kw):
+        import subprocess
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 1 if args[2] == "get" else 0, b"", b"")
+    install.register_mcp(run=run, claude="claude")
+    assert seen[-1][-2:] == [str(tmp_path / ".venv" / "bin" / "python"), str(install.ENTRY)]
+
+
+def test_autostart_refuses_other_platforms(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(autostart, "IS_WINDOWS", False)
+    monkeypatch.setattr(autostart.subprocess, "run", lambda *a, **kw: calls.append(a))
+    for argv in (["--install"], ["--check-install"], ["--show"], []):
+        assert autostart.main(argv) == 1
+    assert calls == [] and "run_web.py" in capsys.readouterr().out
 
 
 def test_install_skills_copies_every_skill_folder(tmp_path):

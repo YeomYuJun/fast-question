@@ -61,7 +61,8 @@ def test_this_pc_judges_its_own_evidence(cfg, app, tmp_path):
     src = local_file(tmp_path)
     item = setup_item(app, token, "pc-a", src)
     conn = user_conn(cfg, acc)
-    origin = json.loads(conn.execute("SELECT captured_json FROM evidence").fetchone()[0])["origin"]
+    origin = json.loads(conn.execute("SELECT captured_json FROM evidence WHERE qa_id = ?",
+                                     (item["id"],)).fetchone()[0])["origin"]
     conn.close()
     assert origin == "pc-a"
 

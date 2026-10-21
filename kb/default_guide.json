@@ -159,8 +159,14 @@
       "category": "Claude 연동",
       "question": "fast-question 원격 서버에 Claude Code 를 연결하려면?",
       "target": "remote",
-      "answer": "화면 상단 연결에서 토큰을 만들고, 그 아래 설치 명령을 저장소 폴더의 PowerShell 에서 실행한다.\n- 토큰은 PC 마다 하나, 값은 만들 때 한 번만 보임\n- 설치 명령이 Skill·즉석 질문 훅·MCP 서버를 등록\n- MCP 를 HTTP 로 직접 붙이면(claude mcp add --transport http) 파일 근거를 달 수 없음",
-      "evidence": []
+      "answer": "화면 상단 연결의 1단계(한 줄 연결)나 2단계(플러그인 설치) 명령을 터미널에서 차례로 실행한다.\n- 1단계: claude mcp add --transport http 로 등록하고 /mcp 에서 로그인·승인, 파일 근거를 달 수 없음\n- 2단계: 플러그인이 Skill·즉석 질문 훅·MCP 서버를 설치, PC 에 uv 필요, uvx fast-question login 으로 로그인\n- 2단계를 쓰면 1단계 등록은 claude mcp remove -s user fast-question 으로 지움",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "const PLUGIN_CMDS"
+        }
+      ]
     },
     {
       "category": "운영",

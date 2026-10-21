@@ -2,10 +2,13 @@
 즉석 질문 훅(hooks/ask_kb.py)을 ~/.claude/settings.json 의 UserPromptSubmit 에 등록하고,
 config.json 의 DB 에 기본 사용 가이드(kb/default_guide.json)를 넣는다.
 
-사용: .venv\\Scripts\\python.exe scripts\\install.py
+MCP·훅·Skill 명령은 저장소 가상환경의 python(Windows .venv\\Scripts\\python.exe, 그 밖 .venv/bin/python)으로 실행한다.
+
+사용: .venv\\Scripts\\python.exe scripts\\install.py   (macOS·Linux: .venv/bin/python scripts/install.py, 아래도 같다)
 원격 서버 쓰기: .venv\\Scripts\\python.exe scripts\\install.py --remote https://<도메인>
   개인 토큰(fq_pat_…)을 표준 입력으로 받아 서버의 /api/me 로 확인한 뒤 %USERPROFILE%\\.fast-question\\credentials.json
-  에 쓰고, MCP 를 로컬 프록시(run_mcp.py --remote)로 등록한다. 기본 가이드는 서버가 넣는다.
+  (macOS·Linux 는 ~/.fast-question/credentials.json)에 쓰고, MCP 를 로컬 프록시(run_mcp.py --remote)로 등록한다.
+  기본 가이드는 서버가 넣는다.
   로컬로 돌아가기: credentials.json 을 지우고 인자 없이 다시 실행한다(MCP 가 로컬로 다시 등록된다).
 훅만 지우기: .venv\\Scripts\\python.exe scripts\\install.py --remove-hook
 되돌리기: 위 훅 지우기, claude mcp remove -s user fast-question, ~/.claude/skills 아래 qa·qa-harvest 폴더 삭제
@@ -15,6 +18,7 @@ Claude Code 플러그인(plugin/fast-question, scripts/build_plugin.py)과 함�
 import getpass
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -26,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILLS_SRC = ROOT / "skill"
 SKILLS_DST = Path.home() / ".claude" / "skills"
 SETTINGS = Path.home() / ".claude" / "settings.json"
-PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+IS_WINDOWS = os.name == "nt"
 ENTRY = ROOT / "run_mcp.py"
 HOOK = ROOT / "hooks" / "ask_kb.py"
 HOOK_EVENT = "UserPromptSubmit"
@@ -37,9 +41,24 @@ CLI_MARK = "{{FQ_CLI}}"  # PC 클라이언트 명령(fq_client/cli.py) 실행 �
 RULES_MARK = "{{QA_RULES}}"  # qa Skill 의 rules.md 위치
 
 
-def local_marks(root: Path = ROOT) -> dict[str, str]:
+def venv_python(root: Path | None = None) -> Path:
+    """저장소 가상환경의 python. 설치를 어느 python 으로 돌렸든 MCP·훅은 requirements 가 깔린 .venv 로 띄운다."""
+    venv = (root or ROOT) / ".venv"
+    return venv / "Scripts" / "python.exe" if IS_WINDOWS else venv / "bin" / "python"
+
+
+def shell_command(*paths: Path) -> str:
+    """훅 command 와 Skill 명령 한 줄. Claude Code 가 셸로 실행한다.
+    Windows 는 슬래시 경로를 큰따옴표로 감싸고, 그 밖은 sh 규칙으로 감싼다($·따옴표가 든 경로도 그대로 넘어간다)."""
+    if IS_WINDOWS:
+        return " ".join(f'"{p.as_posix()}"' for p in paths)
+    return shlex.join(str(p) for p in paths)
+
+
+def local_marks(root: Path | None = None) -> dict[str, str]:
     """이 저장소의 가상환경 python 으로 fq_client/cli.py 를 부른다. rules.md 는 ~/.claude/skills/qa 에 복사된다."""
-    return {CLI_MARK: f'"{(root / ".venv" / "Scripts" / "python.exe").as_posix()}" "{(root / "fq_client" / "cli.py").as_posix()}"',
+    root = root or ROOT
+    return {CLI_MARK: shell_command(venv_python(root), root / "fq_client" / "cli.py"),
             RULES_MARK: "~/.claude/skills/qa/rules.md"}
 
 
@@ -78,7 +97,7 @@ def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST,
 
 
 def hook_command() -> str:
-    return f'"{PYTHON.as_posix()}" "{HOOK.as_posix()}"'
+    return shell_command(venv_python(), HOOK)
 
 
 def _is_ours(hook: dict) -> bool:
@@ -138,7 +157,7 @@ def register_mcp(remote: bool = False, run=subprocess.run, claude: str | None = 
         if (b"--remote" in got.stdout) == remote:
             return f"MCP 이미 등록됨: {NAME}"
         run([claude, "mcp", "remove", "-s", "user", NAME], capture_output=True, timeout=60)
-    args = [str(PYTHON), str(ENTRY)] + (["--remote"] if remote else [])
+    args = [str(venv_python()), str(ENTRY)] + (["--remote"] if remote else [])
     r = run([claude, "mcp", "add", "-s", "user", NAME, "--", *args], capture_output=True, timeout=60)
     out = (r.stdout + r.stderr).decode("utf-8", errors="replace").strip()
     return f"MCP 등록 {'완료' if r.returncode == 0 else '실패'}({'원격 프록시' if remote else '로컬'}): {out}"
@@ -194,8 +213,8 @@ def main(argv: list[str]) -> int:
     if "--remove-hook" in argv:
         print(remove_hook())
         return 0
-    if not PYTHON.exists():
-        print(f"가상환경이 없다: {PYTHON}")
+    if not venv_python().exists():
+        print(f"가상환경이 없다: {venv_python()}")
         return 1
     if "--remote" in argv:
         i = argv.index("--remote")

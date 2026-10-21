@@ -181,7 +181,7 @@ def test_run_due_all_backs_up_each_user_and_control_db(tmp_path):
     done = run_due_all(cfg)
     assert set(done["users"]) == {1, 2}
     for acc in (1, 2):
-        assert set(done["users"][acc]) == {"backup", "expire"}  # 근거 재검증은 서버에서 돌지 않는다
+        assert set(done["users"][acc]) == {"backup", "guide", "expire"}  # 근거 재검증은 서버에서 돌지 않는다
         copies = list((tenant.user_dir(cfg.data_dir, acc) / "backup").glob("kb-*.sqlite3"))
         assert len(copies) == 1
         copy = sqlite3.connect(copies[0])
@@ -306,3 +306,30 @@ def test_missing_boto3_is_reported_as_upload_error(tmp_path, monkeypatch):
     done = run_due_all(cfg)
     assert "boto3" in done["users"][1]["upload"]["error"]
     assert "path" in done["users"][1]["backup"]
+
+
+def test_run_due_all_refreshes_remote_guide_only_when_it_changes(tmp_path, monkeypatch):
+    """원격 가이드는 사용자 DB 의 meta(guide_hash)와 다를 때만 다시 넣는다. 이미 쓰던 DB 도 받는다."""
+    from kb import guide, tenant
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    user_db(cfg, 1).close()
+    n = len(guide.load_remote(cfg.public_url)["items"])
+    assert run_due_all(cfg)["users"][1]["guide"]["added"] == n
+    later = datetime.now(timezone.utc) + timedelta(hours=25)
+    assert "guide" not in run_due_all(cfg, now=later)["users"][1]  # 가이드가 그대로면 건너뛴다
+
+    real = guide.load_remote
+
+    def changed(url):
+        data = real(url)
+        data["items"][0]["answer"] = "서버에서 바뀐 가이드 답이다."
+        return data
+    monkeypatch.setattr(guide, "load_remote", changed)
+    done = run_due_all(cfg, now=later + timedelta(hours=25))
+    assert done["users"][1]["guide"]["updated"] == 1
+    conn = connect(tenant.db_path_for(cfg.data_dir, 1))
+    assert conn.execute("SELECT count(*) FROM qa WHERE answer = '서버에서 바뀐 가이드 답이다.'").fetchone()[0] == 1
+    assert get_meta(conn, "guide_hash")
+    conn.close()

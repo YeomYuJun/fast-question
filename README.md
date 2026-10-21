@@ -46,7 +46,9 @@ uvx fast-question login
 
 ## 로컬 모드
 
-저장소를 받아 PC 에서 웹 화면과 MCP 를 직접 띄운다. DB 는 SQLite 파일 하나이고 위치는 `config.json` 의 `db_path` 다. Windows 기준이고 Python 3.12 가 필요하다.
+저장소를 받아 PC 에서 웹 화면과 MCP 를 직접 띄운다. DB 는 SQLite 파일 하나이고 위치는 `config.json` 의 `db_path` 다. Python 3.12 가 필요하다.
+
+Windows(PowerShell)
 
 ```powershell
 git clone https://github.com/YeomYuJun/fast-question
@@ -57,17 +59,29 @@ python -m venv .venv
 .venv\Scripts\python.exe run_web.py
 ```
 
-- `scripts\install.py` 가 하는 일
-  - `skill\` 의 qa·qa-harvest Skill 을 `~\.claude\skills` 로 복사한다.
+Linux
+
+```sh
+git clone https://github.com/YeomYuJun/fast-question
+cd fast-question
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python scripts/install.py
+.venv/bin/python run_web.py
+```
+
+- `scripts/install.py` 가 하는 일
+  - `skill/` 의 qa·qa-harvest Skill 을 `~/.claude/skills` 로 복사한다.
   - `run_mcp.py` 를 MCP 서버 `fast-question` 으로 Claude Code 사용자 범위에 등록한다(`claude` CLI 가 PATH 에 있어야 한다).
-  - 즉석 질문 훅(`hooks\ask_kb.py`)을 `~\.claude\settings.json` 의 UserPromptSubmit 에 등록한다. 처음 고치기 전 원본은 `settings.json.fast-question.bak` 으로 남긴다.
+  - 즉석 질문 훅(`hooks/ask_kb.py`)을 `~/.claude/settings.json` 의 UserPromptSubmit 에 등록한다. 처음 고치기 전 원본은 `settings.json.fast-question.bak` 으로 남긴다.
   - DB 에 기본 사용 가이드를 넣는다.
+  - MCP·훅·Skill 명령은 저장소의 `.venv` python 으로 실행된다. 저장소를 옮기면 다시 실행한다.
 - `run_web.py` 는 http://127.0.0.1:8765 에 웹 화면을 띄운다. 설정은 저장소의 `config.json`(DB 경로, 포트, 백업·로그 폴더)이고, `--config "<다른 config.json>"` 으로 바꾼다.
 - `run_mcp.py` 는 Claude Code 가 띄우는 stdio MCP 진입점이다. 직접 실행하지 않는다.
-- 훅만 지우기: `.venv\Scripts\python.exe scripts\install.py --remove-hook`
-- 되돌리기: 훅 지우기, `claude mcp remove -s user fast-question`, `~\.claude\skills` 아래 qa·qa-harvest 폴더 삭제
-- 로그온할 때 웹 화면을 자동으로 띄우기: `.venv\Scripts\python.exe scripts\autostart.py --install`(작업 스케줄러 등록, `--remove` 로 해제)
-- 플러그인과 `scripts\install.py` 를 함께 쓰면 MCP·훅·Skill 이 두 벌 걸린다. 둘 중 하나만 쓴다.
+- 훅만 지우기: `scripts/install.py --remove-hook`(위와 같은 `.venv` python 으로 실행)
+- 되돌리기: 훅 지우기, `claude mcp remove -s user fast-question`, `~/.claude/skills` 아래 qa·qa-harvest 폴더 삭제
+- 로그온할 때 웹 화면을 자동으로 띄우기(Windows 전용, 작업 스케줄러 등록): `.venv\Scripts\python.exe scripts\autostart.py --install`(`--remove` 로 해제). 다른 OS 에서는 등록하지 않고 안내만 낸다.
+- 플러그인과 `scripts/install.py` 를 함께 쓰면 MCP·훅·Skill 이 두 벌 걸린다. 둘 중 하나만 쓴다.
 
 ## 서버 배포
 

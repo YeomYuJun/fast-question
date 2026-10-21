@@ -103,7 +103,13 @@ def test_global_word_change_makes_every_user_db_reindex(cfg):
     control.add_global_word(conn, "망연계")
     conn.close()
     done = run_due_all(cfg, analyzer)
-    assert {acc: r["reindex"] for acc, r in done["users"].items()} == {1: 1, 2: 1}
+    # 첫 주기 작업이 기본 가이드도 넣었으므로 DB 의 모든 항목이 다시 색인된다
+    rows = {}
+    for acc in (1, 2):
+        c = connect(tenant.db_path_for(cfg.data_dir, acc))
+        rows[acc] = c.execute("SELECT count(*) FROM qa").fetchone()[0]
+        c.close()
+    assert {acc: r["reindex"] for acc, r in done["users"].items()} == rows and rows[1] > 1
     assert RecordingKiwi.loads == 2  # 사전이 바뀌어 한 번만 다시 띄웠다
 
 

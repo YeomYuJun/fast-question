@@ -5,10 +5,10 @@
 오류는 ValidationError·KbError 400, NotFoundError 404, ConflictError 409(+ current),
 쓰기 잠금 대기 초과 503 으로 돌려준다.
 run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌린다. 로컬 모드는 kb.jobs.run_due(백업, 근거 재검증,
-재색인), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·재색인, 제어 DB 백업)이다.
+재색인), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·기본 가이드 갱신·재색인, 제어 DB 백업)이다.
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 웹 요청이 사용자 DB 를 처음
-만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 1회 넣는다(가져오기가 DB 를 통째로 바꾸면 다시 넣는다). 계정은 인증 계층(web/auth.py
+만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 넣는다(가져오기가 DB 를 통째로 바꾸면 다시 넣고, 서버의 가이드가 바뀌면 주기 작업이 다시 넣는다). 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, PC 로그인 승인 /cli/authorize 와 토큰 교환 POST /api/cli/token(계정 대신 1회용 코드로
 받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.

@@ -5,7 +5,9 @@ OS 설정을 바꾸므로 사용자가 직접 실행한다. ONLOGON 작업 등�
 로그: data\\logs\\web.log (run_web.py 가 날짜별로 남긴다)
 원격 모드 로컬 검사기를 매일 09:00 에 돌리기(작업 fast-question-check):
       .venv\\Scripts\\python.exe scripts\\autostart.py --check-install | --check-remove
+Windows 전용이다. 다른 OS 에서는 안내만 내고 1 로 끝난다.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +19,7 @@ TASK = "fast-question-web"
 CHECK_ENTRY = ROOT / "scripts" / "local_check.py"
 CHECK_TASK = "fast-question-check"
 USAGE = __doc__
+IS_WINDOWS = os.name == "nt"
 
 
 def install_args() -> list[str]:
@@ -41,6 +44,9 @@ def run(args: list[str]) -> int:
 def main(argv: list[str]) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    if not IS_WINDOWS:
+        print("자동 시작 등록은 Windows(작업 스케줄러) 전용이다. 이 OS 에서는 .venv/bin/python run_web.py 로 직접 띄운다.")
+        return 1
     if argv == ["--install"]:
         if not PYTHONW.exists():
             print(f"가상환경의 pythonw 가 없다: {PYTHONW}")

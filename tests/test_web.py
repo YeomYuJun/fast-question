@@ -79,19 +79,27 @@ def test_terms_and_privacy_pages(client):
         assert client.get(path).status_code == 200, path
 
 
-def test_install_commands_cover_shells_without_comments():
-    """연결 패널의 설치 명령은 셸마다 따로 있고, 복사하는 내용은 명령 한 줄뿐이다(주석·안내는 상자 밖)."""
+def test_plugin_install_commands_match_marketplace():
+    """연결 패널 2단계는 플러그인 설치·로그인 명령이고, 상자마다 명령 한 줄뿐이다(주석·안내는 상자 밖).
+    마켓플레이스·플러그인 이름은 .claude-plugin/marketplace.json 과 같다. 저장소 설치 명령(install.py)은 없다."""
+    import json
     import re
+    from pathlib import Path
     from web.app import STATIC
     js = (STATIC / "app.js").read_text(encoding="utf-8")
-    m = re.search(r"const INSTALL_SHELLS = \[(.*?)\n\];", js, re.S)
-    assert m, "app.js 에 INSTALL_SHELLS 가 없다"
+    m = re.search(r"const PLUGIN_CMDS = \(url\) => \[(.*?)\n\];", js, re.S)
+    assert m, "app.js 에 PLUGIN_CMDS 가 없다"
     block = m.group(1)
-    assert re.findall(r'name: "([^"]+)"', block) == ["PowerShell", "cmd", "Git Bash"]
+    market = json.loads((Path(__file__).resolve().parent.parent / ".claude-plugin" / "marketplace.json")
+                        .read_text(encoding="utf-8-sig"))
+    plugin = market["plugins"][0]["name"]
+    assert re.findall(r'["`]([^"`]+)["`]', block) == [
+        f"claude plugin marketplace add {market['owner']['name']}/fast-question",
+        f"claude plugin install {plugin}@{market['name']}",
+        "uvx fast-question login --url ${url}",
+    ]
     assert "#" not in block and "\\n" not in block
-    assert block.count(r".venv\\Scripts\\python.exe scripts\\install.py --remote ${url}") == 2
-    assert block.count(".venv/Scripts/python.exe scripts/install.py --remote ${url}") == 1
-    assert "installCommand()" not in js
+    assert "install.py" not in js and "INSTALL_SHELLS" not in js and "fq-shell" not in js
 
 
 def test_one_line_connect_command():
