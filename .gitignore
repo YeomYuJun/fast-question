@@ -8,11 +8,12 @@ __pycache__/
 .superpowers/
 .claude/
 design/
-deploy/.env
-deploy/aws.env
-deploy/config.json
-deploy/.env
-deploy/aws.env
+deploy/*.env
+deploy/.env*
+deploy/config.json*
+deploy/*.mine.json
+*.ppk
+*.pem
 dist/
 build/
 *.egg-info/
