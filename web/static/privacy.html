@@ -26,17 +26,34 @@
     </nav>
     <div class="doc-head">
       <h1>개인정보 처리방침</h1>
-      <span class="doc-date">시행일 2026-00-00 (SAMPLE)</span>
+      <span class="doc-date">시행일 2026-10-26</span>
     </div>
+    <p class="doc-lead">yyj2046(이하 운영자)이 개인으로 운영하는 fast question(https://fast-question.com)이 개인정보를 어떻게 다루는지 알립니다. 내 PC 에만 설치해 쓰는 로컬 모드는 운영자 서버와 통신하지 않아 이 방침의 대상이 아닙니다.</p>
     <ol class="clauses">
-      <li><span class="n">1</span><div><h2>수집 항목</h2><p>로그인 공급자의 신원 id, 표시 이름, 접속 기록의 IP 주소와 User-Agent, 사용자가 등록한 질문·답변과 근거 경로.</p></div></li>
-      <li><span class="n">2</span><div><h2>목적</h2><p>로그인, 사용자별 DB 제공, 남용 방지, 장애 대응.</p></div></li>
-      <li><span class="n">3</span><div><h2>보존 기간</h2><p>탈퇴 후 30일, 접속 기록 30일.</p></div></li>
-      <li><span class="n">4</span><div><h2>제3자·위탁</h2><p>서버는 AWS(서울 리전)에 있다. 로그인은 GitHub·Google 이 처리한다.</p></div></li>
-      <li><span class="n">5</span><div><h2>이용자 권리</h2><p>화면에서 열람, DB 파일 내보내기, 탈퇴(삭제)를 할 수 있다.</p></div></li>
-      <li><span class="n">6</span><div><h2>쿠키·브라우저 저장소</h2><p>로그인 세션 쿠키, 브라우저 저장소(테마, 최근 검색어, 분류 패널 상태)를 쓴다.</p></div></li>
-      <li><span class="n">7</span><div><h2>운영자 열람</h2><p id="operator" class="boxed">운영자는 장애 대응·백업 복구를 위해 저장된 데이터에 접근할 수 있다. 저장 데이터는 디스크 수준에서만 암호화된다.</p></div></li>
-      <li><span class="n">8</span><div><h2>연락처</h2><p><span class="mono">contact@example.com</span> <span class="sample">(SAMPLE)</span></p></div></li>
+      <li><span class="n">1</span><div><h2>처리하는 정보</h2>
+        <p>로그인: GitHub 사용자 번호와 로그인 이름, 또는 Google 계정 식별자. 이메일·실명·전화번호는 받지 않습니다.</p>
+        <p>계정: 계정 번호, 가입·탈퇴 시각, 로그인 세션과 접근 토큰의 해시값(원래 값은 저장하지 않습니다), 브라우저 종류(User-Agent), 가입할 때의 IP 주소.</p>
+        <p>저장한 내용: 분류, 질문, 답변, 근거(파일 경로와 해시, git 정보, 웹 주소, 메모), 변경 이력. 파일 내용 자체는 서버로 오지 않습니다.</p>
+        <p>Claude 패널: 등록한 Anthropic API 키(암호화해 저장)와 고른 모델. 검색어와 Claude 패널 대화는 저장하지 않습니다.</p></div></li>
+      <li><span class="n">2</span><div><h2>이용 목적</h2><p>로그인과 계정 구분, 질문·답변의 저장·검색과 Claude 연결, 가입·요청 남용 방지, 장애 대응과 복구에만 씁니다. 광고, 분석, 판매에는 쓰지 않습니다.</p></div></li>
+      <li><span class="n">3</span><div><h2>보유 기간과 파기</h2>
+        <p>저장한 내용과 계정 정보는 탈퇴할 때까지 둡니다. 탈퇴하면 바로 접근을 막고 30일 뒤 지웁니다. 백업 사본까지 모두 사라지기까지 저장한 내용은 최대 38일, 로그인 식별자는 최대 61일 걸립니다.</p>
+        <p>가입 IP 는 1일, 서비스 기록은 14일 뒤 지웁니다. 로그인 세션은 마지막 사용 뒤 30일(길어도 90일), 개인 접근 토큰은 180일까지 유효합니다.</p>
+        <p>기간이 지난 정보는 주기 작업이 파일과 기록을 삭제해 자동으로 지웁니다.</p></div></li>
+      <li><span class="n">4</span><div><h2>제3자 제공과 처리 위탁</h2>
+        <p>개인정보를 제3자에게 제공하지 않습니다. 법령에 따른 요구가 있을 때만 그 범위에서 제공합니다.</p>
+        <p>서버 운영과 백업 보관을 아마존웹서비시즈코리아 유한책임회사에 맡깁니다. 데이터는 AWS 서울 리전에만 저장합니다.</p>
+        <p>로그인은 GitHub·Google 화면에서 직접 하며, 그 과정은 각 회사의 처리방침을 따릅니다.</p></div></li>
+      <li><span class="n">5</span><div><h2>Anthropic 으로 보내는 정보</h2><p>웹 Claude 패널에 내 API 키를 등록하고 요청을 보내면, 그 대화와 저장소 검색 결과가 그때마다 HTTPS 로 Anthropic, PBC(미국)의 API 에 전송됩니다. 요청한 응답을 만들기 위해서이고, 전송된 정보의 처리는 이용자와 Anthropic 사이의 조건을 따릅니다. 패널을 쓰지 않거나 키를 지우면 보내지 않습니다. 내 PC 의 Claude Code 를 연결해 쓸 때는 Claude Code 가 직접 보냅니다.</p></div></li>
+      <li><span class="n">6</span><div><h2>이용자의 권리</h2><p>화면에서 언제든 열람·수정·삭제하고, 연결 화면에서 저장소 전체를 파일로 내려받거나 탈퇴할 수 있습니다. 그 밖의 요청은 <span class="mono">yyj2046@gmail.com</span> 으로 보내 주세요. 10일 안에 답합니다.</p></div></li>
+      <li><span class="n">7</span><div><h2>운영자 열람</h2><p id="operator" class="boxed">운영자는 장애 대응·백업 복구를 위해 저장된 데이터에 접근할 수 있습니다. 저장 데이터는 디스크 수준에서만 암호화됩니다. 그 밖의 목적으로는 열람하지 않습니다.</p></div></li>
+      <li><span class="n">8</span><div><h2>안전성 확보 조치</h2><p>모든 접속은 HTTPS 로만 받습니다. 세션과 토큰은 해시로만, API 키는 암호화해 저장합니다. 계정마다 데이터 파일을 따로 두고 하루 한 번 백업하며, 백업 저장소는 공개 접근을 막고 암호화합니다. 서버 접속은 운영자의 SSH 키로만 합니다.</p></div></li>
+      <li><span class="n">9</span><div><h2>쿠키와 브라우저 저장소</h2><p>로그인에 필요한 쿠키 두 개(<span class="mono">__Host-fq_session</span> 로그인 유지, <span class="mono">__Host-fq_login</span> 로그인 확인 10분)만 씁니다. 광고·분석 쿠키는 쓰지 않으며, 쿠키를 막으면 로그인할 수 없습니다. 테마, 최근 검색어, 패널 상태 같은 화면 설정과 Claude 패널 대화는 브라우저 저장소에 둡니다.</p></div></li>
+      <li><span class="n">10</span><div><h2>만 14세 미만</h2><p>만 14세 미만은 이용할 수 없습니다. 가입한 사실을 알게 되면 계정을 삭제합니다.</p></div></li>
+      <li><span class="n">11</span><div><h2>보호책임자와 상담</h2>
+        <p>개인정보 보호책임자: yyj2046 (<span class="mono">yyj2046@gmail.com</span>)</p>
+        <p>침해 상담·신고: 개인정보분쟁조정위원회 1833-6972, 개인정보침해신고센터 118, 대검찰청 1301, 경찰청 182</p></div></li>
+      <li><span class="n">12</span><div><h2>방침 변경</h2><p>방침을 바꾸면 적용 7일 전부터(중요한 변경은 30일 전부터) 화면에 알립니다.</p></div></li>
     </ol>
   </article>
 </main>
