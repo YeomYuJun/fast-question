@@ -43,6 +43,8 @@ main { max-width: 28rem; margin: var(--space-12) auto; padding: var(--space-6); 
 h1 { margin: 0 0 var(--space-4); font: var(--text-question-lg); }
 p { margin: 0 0 var(--space-3); color: var(--muted); }
 p.note { font: var(--text-meta); color: var(--faint); }
+p.agree { margin: var(--space-4) 0 0; font-size: 12px; line-height: 19px; color: var(--faint); }
+@media (max-width: 480px) { main { margin: var(--space-12) var(--space-4); } }
 dl { margin: 0 0 var(--space-6); }
 dt { font: var(--text-label); color: var(--faint); }
 dd { margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-all; }
@@ -112,7 +114,9 @@ def login_page(providers, params: dict, status: int = 200) -> HTMLResponse:
     links = "".join(f'<a class="btn" href="/auth/login/{html.escape(name)}?{html.escape(query)}">'
                     f"{html.escape(PROVIDER_LABELS.get(name, name))} 로 로그인</a>" for name in sorted(providers))
     body = ("<h1>로그인</h1><p>이 PC 의 fast-question 명령을 계정에 연결하려면 먼저 로그인하세요.</p>"
-            + (f'<div class="actions">{links}</div>' if links else "<p>켜진 로그인 공급자가 없습니다.</p>"))
+            + (f'<div class="actions">{links}</div>' if links else "<p>켜진 로그인 공급자가 없습니다.</p>")
+            + '<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 '
+            '<a href="/privacy">개인정보 처리방침</a>을 확인한 것으로 봅니다.</p>')
     return page("로그인", body, status)
 
 
@@ -120,7 +124,7 @@ def consent_page(params: dict, account: dict) -> HTMLResponse:
     hidden = "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in params.items())
     who = account.get("display_name") or ", ".join(PROVIDER_LABELS.get(p, p) for p in account.get("providers", []))
     body = ("<h1>이 PC 를 연결할까요?</h1>"
-            "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 내 질문·답변 저장소를 검색·등록·수정합니다."
+            "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 내 질문·답변 저장소를 검색·등록·수정합니다. "
             "토큰은 180일 뒤 끝나고, 연결 패널의 토큰 목록에서 언제든 폐기할 수 있습니다.</p>"
             f"<dl><dt>PC 이름</dt><dd>{html.escape(params['device'])}</dd>"
             f"<dt>계정</dt><dd>{html.escape(who)}</dd></dl>"

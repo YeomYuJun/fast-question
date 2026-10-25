@@ -202,8 +202,8 @@ LOGO = ('<svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true">'
         '<path d="M23 45V20A16 16 0 0 1 39 4H47V13H39A7 7 0 0 0 32 20V45Z" fill="var(--ink)"></path>'
         '<path d="M16 22H39V30H16Z" fill="var(--ink)"></path>'
         '<path d="M23 50.5H32A9 9 0 0 1 23 59.5Z" fill="var(--accent)"></path></svg>')
-AGREE = ('<p class="agree">로그인하면 <a href="/terms">이용약관</a>과 <a href="/privacy">개인정보 처리방침</a>에 '
-         "동의하는 것으로 봅니다.</p>")
+AGREE = ('<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 <a href="/privacy">개인정보 처리방침</a>을 '
+         "확인한 것으로 봅니다.</p>")
 # Referrer-Policy 는 same-origin 이다. no-referrer 면 Chrome 이 이 페이지의 승인 폼 POST 에 Origin: null 을 붙여
 # 같은 출처 검사(SameOriginOnly)가 거부한다. same-origin 도 다른 사이트(콜백 주소)에는 리퍼러를 보내지 않는다.
 # Content-Security-Policy 는 모든 응답에 web/app.py 의 SecurityHeaders 가 붙인다
