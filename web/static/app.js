@@ -59,12 +59,17 @@ async function api(method, url, body) {
     opt.headers["Content-Type"] = "application/json";
     opt.body = JSON.stringify(body);
   }
-  const r = await fetch(url, opt);
+  let r;
+  try {
+    r = await fetch(url, opt);
+  } catch (e) {
+    throw new Error("서버에 연결하지 못했다."); // 브라우저의 영어 오류(Failed to fetch) 대신
+  }
   const data = await r.json().catch(() => ({}));
   // 원격 모드에서 세션이 끝났으면 로그인 화면으로 바꾼다
   if (r.status === 401 && data.code === "unauthorized") showLogin(data.providers || []);
   if (!r.ok) {
-    const err = new Error(data.error || `HTTP ${r.status}`);
+    const err = new Error(data.error || `요청을 처리하지 못했다(HTTP ${r.status}).`);
     err.status = r.status;
     err.data = data;
     throw err;
@@ -690,7 +695,7 @@ function detailEl(id) {
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline" }, label("이력"), histLine(id, d),
-      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A를 복사했다.")),
+      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했다.")),
       ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했다.")),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
 }
@@ -700,7 +705,7 @@ async function copy(text, done) {
     await navigator.clipboard.writeText(text);
     toast(done);
   } catch (e) {
-    toast(`복사하지 못했다: ${e.message}`, { err: true });
+    toast("복사하지 못했다. 브라우저가 클립보드 접근을 막았다.", { err: true });
   }
 }
 
@@ -894,7 +899,7 @@ function openNew(question) {
   }
   if (!state.flat.length) {
     openSide(true);
-    toast("분류가 아직 없다. 왼쪽 패널에서 + 분류 추가로 먼저 만든다.", { err: true });
+    toast("분류가 아직 없다. 왼쪽 패널의 \"+ 분류 추가\" 로 먼저 만든다.", { err: true });
     return;
   }
   const firstHit = rows.size ? [...rows.values()].find((r) => !r.classList.contains("out")) : null;
@@ -1100,12 +1105,12 @@ function showLogin(providers) {
 
 // 로그인 수단 추가 결과(/auth/link 콜백이 붙인 쿼리)
 const LINK_ERRORS = {
-  session: "로그인한 상태에서 다시 시도한다.",
-  state: "시간이 지났거나 그 사이 로그아웃했다. 다시 시도한다.",
-  provider: "로그인 공급자의 응답을 확인하지 못했다. 다시 시도한다.",
-  closed: "이 계정은 추가할 수 없다.",
-  exists: "이 공급자의 다른 계정이 이미 연결되어 있다.",
-  denied: "로그인 수단 추가를 취소했다.",
+  session: "로그인한 상태에서 다시 시도해 주세요.",
+  state: "시간이 지났거나 그 사이 로그아웃했습니다. 다시 시도해 주세요.",
+  provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
+  closed: "이 계정은 추가할 수 없습니다.",
+  exists: "이 공급자의 다른 계정이 이미 연결되어 있습니다.",
+  denied: "로그인 수단 추가를 취소했습니다.",
 };
 
 function linkResult() {
@@ -1115,8 +1120,8 @@ function linkResult() {
   for (const k of ["linked", "link_error", "discarded"]) p.delete(k);
   const rest = p.toString();
   history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
-  if (err) toast(LINK_ERRORS[err] || "로그인 수단을 추가하지 못했다.", { err: true });
-  else toast(`${PROVIDERS[ok] || ok} 로그인을 추가했다.` + (dropped ? " 그 계정이 쓰던 DB 는 버렸다." : ""));
+  if (err) toast(LINK_ERRORS[err] || "로그인 수단을 추가하지 못했습니다.", { err: true });
+  else toast(`${PROVIDERS[ok] || ok} 로그인을 추가했습니다.` + (dropped ? " 그 계정이 쓰던 저장소는 버렸습니다." : ""));
 }
 
 let me = null;  // 원격 모드 로그인 정보(/api/me)
@@ -1193,7 +1198,7 @@ const stamp = (iso) => {
 };
 
 async function disconnectApp(a) {
-  if (!window.confirm(`${stamp(a.connected_at)} 에 연결한 "${appName(a)}" 의 연결을 끊습니다. 그 앱은 다시 연결해야 이 DB 를 쓸 수 있습니다.\n끊으시겠습니까?`)) return;
+  if (!window.confirm(`${stamp(a.connected_at)} 에 연결한 "${appName(a)}" 의 연결을 끊습니다. 그 앱은 다시 연결해야 이 저장소를 쓸 수 있습니다.\n끊으시겠습니까?`)) return;
   try {
     await api("DELETE", `/api/account/apps/${encodeURIComponent(a.client_id)}`);
   } catch (e) {
@@ -1237,7 +1242,7 @@ async function renderConnect() {
       el("div", {}, el("h2", {}, "연결"),
         el("p", { class: "connect-note" }, touchOnly
           ? "Claude Code 연결(한 줄 연결, 플러그인 설치)은 Claude Code 를 쓰는 PC 의 브라우저에서 합니다. 여기서는 토큰 폐기, 연결 끊기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있습니다."
-          : "Claude Code 를 이 서버의 내 DB 에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Skill 과 즉석 질문 훅까지 이 PC 에 설치합니다.")),
+          : "Claude Code 를 내 질문·답변 저장소에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Claude Code 플러그인까지 이 PC 에 설치합니다.")),
       el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
     touchOnly ? null : el("div", { class: "cn-sec code" }, el("span", { class: "cn-label" }, "Claude Code 연결"),
       cnStep("1", "한 줄로 연결",
@@ -1261,8 +1266,8 @@ async function renderConnect() {
     appsBlock(apps),
     loginBlock(),
     el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "내보내기"),
-      el("p", { class: "connect-note" }, "내 DB 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 config.json 의 db_path 로 그대로 열립니다."),
-      el("div", { class: "cn-row" }, el("a", { class: "btn", href: "/api/export/db", download: "" }, "DB 파일 받기"))),
+      el("p", { class: "connect-note" }, "내 저장소 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 설정(config.json)의 db_path 로 지정하면 그대로 열립니다."),
+      el("div", { class: "cn-row" }, el("a", { class: "btn", href: "/api/export/db", download: "" }, "저장소 파일 받기"))),
     leaveForm(),
     el("div", { class: "cn-foot" }, el("a", { href: "/terms" }, "이용약관"), el("a", { href: "/privacy" }, "개인정보 처리방침")));
 }
@@ -1274,10 +1279,10 @@ function loginBlock() {
   const label = (n) => PROVIDERS[n] || n;
   return el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "로그인 수단"),
     el("p", { class: "connect-note" }, `지금 ${mine.map(label).join(" · ")} 로 로그인할 수 있습니다.`
-      + (more.length ? " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 DB 가 열립니다. 추가하는 계정으로 이미 쓰던 DB 가 있으면 그 DB 는 버려집니다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 DB 파일을 받습니다." : "")),
+      + (more.length ? " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 저장소가 열립니다. 추가하는 계정으로 이미 쓰던 저장소가 있으면 버려집니다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 저장소 파일을 받아 두세요." : "")),
     more.length ? el("div", { class: "cn-row" }, more.map((n) =>
       el("form", { method: "post", action: `/auth/link/${n}`, onsubmit: (ev) => {
-        if (!window.confirm(`${label(n)} 로그인을 이 계정에 추가합니다.\n그 ${label(n)} 계정으로 쓰던 fast-question DB 가 있으면 버려집니다(30일 뒤 삭제).\n추가하시겠습니까?`)) ev.preventDefault();
+        if (!window.confirm(`${label(n)} 로그인을 이 계정에 추가합니다.\n그 ${label(n)} 계정으로 쓰던 fast question 저장소가 있으면 버려집니다(30일 뒤 삭제).\n추가하시겠습니까?`)) ev.preventDefault();
       } }, el("button", { class: "btn", type: "submit" }, `${label(n)} 로그인 추가`)))) : null);
 }
 
@@ -1295,7 +1300,7 @@ function leaveForm() {
     location.href = "/";
   } },
   el("span", { class: "cn-label" }, "탈퇴"),
-  el("p", { class: "connect-note" }, "계정을 지웁니다. 이 계정의 로그인·토큰이 모두 끊기고 DB 를 더 열 수 없습니다. 먼저 DB 파일을 받아 둡니다. 계속하려면 탈퇴 를 입력합니다."),
+  el("p", { class: "connect-note" }, "계정을 지웁니다. 이 계정의 로그인·토큰이 모두 끊기고 저장소를 더 열 수 없습니다. 먼저 저장소 파일을 받아 두세요. 계속하려면 아래 칸에 \"탈퇴\" 를 입력하고 버튼을 누르세요."),
   el("div", { class: "cn-row" }, word, el("button", { class: "btn danger", type: "submit" }, "탈퇴")));
 }
 

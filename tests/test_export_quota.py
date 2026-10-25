@@ -69,7 +69,7 @@ def test_db_size_cap_blocks_writes_that_grow_the_file(tmp_path, monkeypatch):
     for write in writes:
         with pytest.raises(ValidationError) as e:
             write()
-        assert e.value.code == "quota" and "DB 파일 받기" in e.value.message
+        assert e.value.code == "quota" and "저장소 파일 받기" in e.value.message
     s.unlink(one["id"], two["id"])
     s.archive_qa(one["id"], s.get_qa(one["id"])["version"])
     s.restore_qa(one["id"], s.get_qa(one["id"])["version"])

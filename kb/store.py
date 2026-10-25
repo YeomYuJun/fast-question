@@ -82,7 +82,7 @@ class Store:
         if size >= DB_MAX_BYTES:
             raise ValidationError(
                 f"이 계정의 DB 파일이 {size // MB} MB 로 계정당 상한 {DB_MAX_BYTES // MB} MB 에 닿아 더 쓸 수 없습니다. "
-                "삭제해도 파일은 줄지 않습니다. 연결 패널의 DB 파일 받기로 지금까지의 내용을 내려받을 수 있습니다.",
+                "삭제해도 파일은 줄지 않습니다. 연결 패널의 저장소 파일 받기로 지금까지의 내용을 내려받을 수 있습니다.",
                 code="quota")
 
     @contextmanager
