@@ -27,8 +27,8 @@ from kb.text import SIMILAR_MIN, bigrams, dice
 
 SHARED_EVIDENCE_MIN = 0.4  # 같은 근거·anchor 를 단 두 항목은 이 값부터 중복 후보다
 # qa.evidence_state → (규칙 이름, 설명, 그 상태를 만든 근거 판정). 설명 뒤에 그 근거들의 판정 설명을 붙인다
-EVIDENCE_RULES = {"stale": ("evidence_stale", "근거가 기록한 뒤에 바뀌었다", "changed"),
-                  "unknown": ("evidence_unknown", "근거를 판정하지 못했다", "unknown")}
+EVIDENCE_RULES = {"stale": ("evidence_stale", "근거가 기록한 뒤에 바뀌었습니다", "changed"),
+                  "unknown": ("evidence_unknown", "근거를 판정하지 못했습니다", "unknown")}
 RESOLUTIONS = ("fixed", "kept")
 _CHUNK = 500  # IN (...) 자리표시자 수
 
@@ -289,18 +289,18 @@ def _still_found(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
 def resolve(store, finding_id: int, resolution: str, note: str | None = None) -> dict:
     """열린 정리 건을 닫는다. fixed 는 조건을 다시 확인해 아직 맞으면 거부한다. kept 는 문제가 아니라고 본 것이다."""
     if resolution not in RESOLUTIONS:
-        raise ValidationError(f"resolution 은 {', '.join(RESOLUTIONS)} 중 하나다: {resolution}")
+        raise ValidationError(f"resolution 은 {', '.join(RESOLUTIONS)} 중 하나여야 합니다: {resolution}")
     conn = store.conn
     row = conn.execute(f"SELECT {FINDING_COLS} FROM cleanup_finding WHERE id = ?", (finding_id,)).fetchone()
     if row is None:
-        raise NotFoundError(f"정리 건을 찾지 못했다: {finding_id}")
+        raise NotFoundError(f"정리 건을 찾지 못했습니다: {finding_id}")
     if row["resolved_at"] is not None:
-        raise ValidationError(f"이미 닫힌 정리 건이다({row['resolution']}): {finding_id}")
+        raise ValidationError(f"이미 닫힌 정리 건입니다({row['resolution']}): {finding_id}")
     if resolution == "fixed":
         still = _still_found(conn, row)
         if still:
-            raise ValidationError(f"아직 정리 조건에 걸린다: {still}. 항목을 고치거나 보관한 뒤 닫는다. "
-                                  "문제가 아니라고 판단했으면 kept 로 닫는다.")
+            raise ValidationError(f"아직 정리 조건에 걸립니다: {still}. 항목을 고치거나 보관한 뒤 닫아 주세요. "
+                                  "문제가 아니라고 판단했으면 kept 로 닫아 주세요.")
     with tx(conn) as c:
         c.execute(f"UPDATE cleanup_finding SET resolved_at = {NOW}, resolution = ?, resolved_by = ?, note = ? "
                   "WHERE id = ? AND resolved_at IS NULL", (resolution, store.actor, note, finding_id))

@@ -75,7 +75,7 @@ def test_file_evidence_is_captured_on_this_pc(cfg, app, tmp_path):
 
     err, msg = call(app, token, "kb_add", {"category": "이관", "question": "없는 근거", "answer": "답이다.",
                                            "evidence": [{"kind": "file", "path": str(tmp_path / "없음.txt")}]})
-    assert err and "근거 경로가 없다" in msg
+    assert err and "근거 경로가 없습니다" in msg
 
 
 def test_add_many_reads_local_file_and_reports_per_item(cfg, app, tmp_path):
@@ -96,7 +96,7 @@ def test_add_many_reads_local_file_and_reports_per_item(cfg, app, tmp_path):
 
     assert not err, res
     assert [(r["index"], r["status"]) for r in res["results"]] == [(0, "created"), (1, "error"), (2, "error"), (3, "created")]
-    assert "근거 경로가 없다" in res["results"][1]["error"]
+    assert "근거 경로가 없습니다" in res["results"][1]["error"]
     assert res["created"] == 2
     assert all(r["url"] == f"{URL}/#qa/{r['id']}" for r in res["results"] if r["status"] == "created")
 

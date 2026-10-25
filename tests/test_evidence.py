@@ -77,12 +77,12 @@ def test_capture_rejects_anchor_missing_from_file(base, repo):
     f = base / "설정.txt"
     f.write_text("시간 제한 timeout = 30\n", encoding="utf-8")
     assert capture({"kind": "file", "path": str(f), "anchor": "시간 제한"})["anchor"] == "시간 제한"
-    with pytest.raises(ValidationError, match="앵커 'retry' 가 설정.txt 에 없다"):
+    with pytest.raises(ValidationError, match="앵커 'retry' 가 설정.txt 에 없습니다"):
         capture({"kind": "file", "path": str(f), "anchor": "retry"})
     target = repo / "src" / "NasFileStorage.java"
-    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없다"):
+    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없습니다"):
         capture({"kind": "auto", "path": str(target), "anchor": "class Storage"})
-    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없다"):
+    with pytest.raises(ValidationError, match="NasFileStorage.java 에 없습니다"):
         capture({"kind": "git", "repo": str(repo), "paths": ["src/NasFileStorage.java"], "anchor": "class Storage"})
 
 
@@ -102,9 +102,9 @@ def test_changed_detail_says_whether_anchor_remains(base, repo):
     f.write_text("timeout = 30\n", encoding="utf-8")
     row = capture({"kind": "file", "path": str(f), "anchor": "timeout"})
     f.write_text("timeout = 60\n", encoding="utf-8")
-    assert check(row) == ("changed", "설정.txt 내용이 바뀌었다 (앵커 'timeout' 있음)")
+    assert check(row) == ("changed", "설정.txt 내용이 바뀌었습니다 (앵커 'timeout' 있음)")
     f.write_text("limit = 60\n", encoding="utf-8")
-    assert check(row) == ("changed", "설정.txt 내용이 바뀌었다 (앵커 'timeout' 없음)")
+    assert check(row) == ("changed", "설정.txt 내용이 바뀌었습니다 (앵커 'timeout' 없음)")
 
     target = repo / "src" / "NasFileStorage.java"
     row = capture({"kind": "auto", "path": str(target), "anchor": "class Nas"})
@@ -175,7 +175,7 @@ def test_url_and_note_are_external():
 
 
 def test_capture_rejects_missing_path(base):
-    with pytest.raises(ValidationError, match="근거 경로가 없다"):
+    with pytest.raises(ValidationError, match="근거 경로가 없습니다"):
         capture({"kind": "auto", "path": str(base / "없음.txt")})
     with pytest.raises(ValidationError, match="근거 형식"):
         capture({"kind": "zip", "path": str(base)})
@@ -314,7 +314,7 @@ def test_update_with_bad_evidence_changes_nothing(conn, base):
     s = Store(conn, "user")
     s.add_category("이관")
     item = s.add_qa("이관", "질문", "답변")["item"]
-    with pytest.raises(ValidationError, match="근거 경로가 없다"):
+    with pytest.raises(ValidationError, match="근거 경로가 없습니다"):
         s.update_qa(item["id"], item["version"], answer="바꾼 답변",
                     evidence=[{"kind": "auto", "path": str(base / "없는 파일")}])
     assert s.get_qa(item["id"])["answer"] == "답변"

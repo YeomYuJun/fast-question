@@ -142,7 +142,7 @@ def test_unchecked_evidence_turns_unknown(tmp_path):
     time.sleep(0.01)
     assert s.expire_verdicts(days=0) == 1
     got = s.get_qa(item["id"])
-    assert got["evidence_state"] == "unknown" and "판정하지 않았다" in got["evidence"][0]["verdict_detail"]
+    assert got["evidence_state"] == "unknown" and "판정하지 않았습니다" in got["evidence"][0]["verdict_detail"]
     s.conn.close()
 
 
@@ -203,5 +203,5 @@ def test_proxy_capture_rejects_missing_anchor(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("def foo(): pass\n", encoding="utf-8")
     assert localize({"kind": "file", "path": str(f), "anchor": "def foo"})["captured"]["anchor"] == "def foo"
-    with pytest.raises(ValidationError, match="앵커 'def bar' 가 a.txt 에 없다"):
+    with pytest.raises(ValidationError, match="앵커 'def bar' 가 a.txt 에 없습니다"):
         localize({"kind": "file", "path": str(f), "anchor": "def bar"})

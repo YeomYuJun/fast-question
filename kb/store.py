@@ -38,8 +38,8 @@ def db_bytes(conn: sqlite3.Connection) -> int:
                         "(SELECT freelist_count FROM pragma_freelist_count())").fetchone()[0]
     return used * conn.execute("PRAGMA page_size").fetchone()[0]
 
-REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없다. "
-                        "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 쓴다.")
+REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없습니다. "
+                        "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 써 주세요.")
 
 
 class Store:
@@ -59,7 +59,7 @@ class Store:
         label, limit = QUOTAS[table]
         n = self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
         if n + adding > limit:
-            raise ValidationError(f"이 계정에 {label} {n}건이 있다. 계정당 {limit}건(삭제한 것 포함)까지 둔다.", code="quota")
+            raise ValidationError(f"이 계정에 {label} {n}건이 있습니다. 계정당 {limit}건(삭제한 것 포함)까지 둘 수 있습니다.", code="quota")
 
     def _capture(self, spec: dict) -> dict:
         if not self.remote:
@@ -67,7 +67,7 @@ class Store:
         if "captured" in spec:
             row = accept_captured(spec["captured"])
             if row["kind"] in ("url", "note"):  # 서버가 직접 만들 수 있고, 형식 규칙이 spec 의 글을 검사한다
-                raise ValidationError("url·note 근거는 captured 없이 보낸다.")
+                raise ValidationError("url·note 근거는 captured 없이 보내 주세요.")
             return row
         if (spec.get("kind") or "auto") not in ("url", "note"):
             raise ValidationError(REMOTE_PATH_EVIDENCE)
@@ -121,7 +121,7 @@ class Store:
     def _qa_row(self, id: int) -> sqlite3.Row:
         row = self.conn.execute(f"SELECT {QA_COLS} FROM qa WHERE id = ?", (id,)).fetchone()
         if row is None:
-            raise NotFoundError(f"Q&A 를 찾지 못했다: {id}")
+            raise NotFoundError(f"Q&A 를 찾지 못했습니다: {id}")
         return row
 
     def items(self, ids: list[int]) -> list[dict]:
@@ -147,7 +147,7 @@ class Store:
                 after(c)
         if n == 0:
             cur = current(id)  # 없으면 NotFoundError
-            raise ConflictError("다른 곳에서 먼저 고쳤다. 현재 값을 다시 읽고 고친다.", current=cur)
+            raise ConflictError("다른 곳에서 먼저 고쳤습니다. 현재 값을 다시 읽고 고쳐 주세요.", current=cur)
 
     # ---------- 분류 ----------
 
@@ -156,7 +156,7 @@ class Store:
             "SELECT id, parent_id, name, description, deleted_at, version FROM category WHERE id = ?", (id,)
         ).fetchone()
         if row is None:
-            raise NotFoundError(f"분류를 찾지 못했다: {id}")
+            raise NotFoundError(f"분류를 찾지 못했습니다: {id}")
         paths = paths if paths is not None else self._paths()
         return {
             "id": row["id"], "parent_id": row["parent_id"], "name": row["name"],
@@ -206,9 +206,9 @@ class Store:
                     "AND c.deleted_at IS NULL AND p.deleted_at IS NULL", parts
                 ).fetchone()
             else:
-                raise ValidationError("분류는 대분류와 중분류 2단계까지만 만들 수 있다.", code="category_depth")
+                raise ValidationError("분류는 대분류와 중분류 2단계까지만 만들 수 있습니다.", code="category_depth")
         if row is None:
-            raise NotFoundError(f"분류를 찾지 못했다: {ref}")
+            raise NotFoundError(f"분류를 찾지 못했습니다: {ref}")
         return row[0]
 
     def add_category(self, name: str, parent: int | str | None = None, description: str = "") -> dict:
@@ -230,7 +230,7 @@ class Store:
         if description is not None:
             sets["description"] = clean(description)
         if not sets:
-            raise ValidationError("바꿀 값이 없다.")
+            raise ValidationError("바꿀 값이 없습니다.")
         sets["change_note"] = note
         self._update("category", id, version, sets, self._category)
         return self._category(id)
@@ -238,7 +238,7 @@ class Store:
     def _live_category(self, id: int) -> dict:
         cat = self._category(id)
         if cat["archived"]:
-            raise NotFoundError(f"분류를 찾지 못했다(이미 삭제했다): {id}")
+            raise NotFoundError(f"분류를 찾지 못했습니다(이미 삭제됨): {id}")
         return cat
 
     def category_impact(self, id: int) -> dict:
@@ -270,7 +270,7 @@ class Store:
                 n_child = c.execute(f"UPDATE category SET {archive} WHERE parent_id = ? AND deleted_at IS NULL",
                                     (self.actor, self.actor, follow, id)).rowcount
         if n == 0:
-            raise ConflictError("다른 곳에서 먼저 고쳤다. 현재 값을 다시 읽고 고친다.", current=self._category(id))
+            raise ConflictError("다른 곳에서 먼저 고쳤습니다. 현재 값을 다시 읽고 고쳐 주세요.", current=self._category(id))
         return {"category": self._category(id), "archived_children": n_child, "archived_qa": n_qa}
 
     # ---------- Q&A ----------
@@ -346,7 +346,7 @@ class Store:
     def _evidence_row(self, evidence_id: int) -> sqlite3.Row:
         row = self.conn.execute(f"SELECT {self.EV_COLS} FROM evidence WHERE id = ?", (evidence_id,)).fetchone()
         if row is None:
-            raise NotFoundError(f"근거를 찾지 못했다: {evidence_id}")
+            raise NotFoundError(f"근거를 찾지 못했습니다: {evidence_id}")
         return row
 
     @staticmethod
@@ -420,7 +420,7 @@ class Store:
         """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다.
         판정 변화는 근거 파일이 바뀌어 생긴 것이므로 누가 재검증을 눌렀든 system 주체로 기록한다."""
         if self.remote:
-            raise ValidationError("원격 서버는 근거 파일을 읽을 수 없어 재검증할 수 없다. 사용자 PC 의 로컬 검사기가 판정한다.")
+            raise ValidationError("원격 서버는 근거 파일을 읽을 수 없어 재검증할 수 없습니다. 사용자 PC 의 로컬 검사기가 판정합니다.")
         sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
                "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL")
         params: tuple = ()
@@ -473,7 +473,7 @@ class Store:
         for res in results:
             verdict = res.get("verdict")
             if verdict not in ("same", "changed", "unknown"):
-                raise ValidationError(f"판정은 same·changed·unknown 중 하나다: {verdict}")
+                raise ValidationError(f"판정은 same·changed·unknown 중 하나여야 합니다: {verdict}")
             row = self.conn.execute(f"SELECT {self.EV_COLS} FROM evidence WHERE id = ? AND deleted_at IS NULL",
                                     (int(res["evidence_id"]),)).fetchone()
             if row is None or row["kind"] not in self.CHECKED_KINDS:
@@ -490,7 +490,7 @@ class Store:
             f"SELECT {self.EV_COLS} FROM evidence WHERE deleted_at IS NULL AND verdict = 'same' "
             "AND kind IN ('file', 'dir', 'git', 'githead') AND checked_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)",
             (f"-{int(days)} days",)).fetchall()
-        detail = f"{days}일 넘게 사용자 PC 에서 판정하지 않았다"
+        detail = f"{days}일 넘게 사용자 PC 에서 판정하지 않았습니다"
         return sum(r["changed"] for r in self._write_verdicts([(r, "unknown", detail) for r in rows]))
 
     def update_qa(self, id: int, version: int, *, question: str | None = None, answer: str | None = None,
@@ -505,7 +505,7 @@ class Store:
         if category not in (None, ""):
             sets["category_id"] = self.resolve_category(category)
         if not sets and evidence is None:
-            raise ValidationError("바꿀 값이 없다.")
+            raise ValidationError("바꿀 값이 없습니다.")
         keep: list[int] = []
         if evidence is not None and self.remote:
             evidence, keep = self._split_kept(id, evidence)
@@ -566,7 +566,7 @@ class Store:
                 params + [self.actor, note, id, version],
             ).rowcount
         if n == 0:
-            raise ConflictError("다른 곳에서 먼저 고쳤다. 현재 값을 다시 읽고 고친다.", current=current(id))
+            raise ConflictError("다른 곳에서 먼저 고쳤습니다. 현재 값을 다시 읽고 고쳐 주세요.", current=current(id))
         return self.get_qa(id)
 
     def archive_qa(self, id: int, version: int, note: str | None = None) -> dict:
@@ -581,14 +581,14 @@ class Store:
             cid = None
             current = self._qa_row(id)["category_id"]
             if self._category(current)["archived"]:
-                raise ValidationError("이 항목의 분류가 삭제되어 있다. 옮길 분류를 함께 주어 복원한다.")
+                raise ValidationError("이 항목의 분류가 삭제되어 있습니다. 옮길 분류를 함께 주어 복원해 주세요.")
         return self._set_archived(id, version, False, note, category_id=cid)
 
     # ---------- 관련 질문 ----------
 
     def _link(self, a: int, b: int) -> None:
         if a == b:
-            raise ValidationError("자기 자신과는 연결할 수 없다.")
+            raise ValidationError("자기 자신과는 연결할 수 없습니다.")
         a, b = sorted((a, b))
         self._qa_row(a)
         self._qa_row(b)
@@ -614,7 +614,7 @@ class Store:
 
     def history(self, table: str, row_id: int, limit: int = 20) -> list[dict]:
         if table not in AUDITED:
-            raise ValidationError(f"이력이 없는 테이블이다: {table}")
+            raise ValidationError(f"이력이 없는 테이블입니다: {table}")
         rows = self.conn.execute(
             "SELECT id, op, actor, at, before_json, after_json FROM revision "
             "WHERE table_name = ? AND row_id = ? ORDER BY id DESC LIMIT ?", (table, row_id, limit))
@@ -664,7 +664,7 @@ class Store:
     def dict_action(self, action: str, **kw) -> dict:
         if self.remote and action.startswith("user_word"):
             # 형태소 분석기(약 600 MB)는 서버에 하나라 사용자 단어를 사용자마다 둘 수 없다
-            raise ValidationError("원격 서버에서는 형태소 사용자 단어를 바꿀 수 없다. 동의어·불용어는 쓸 수 있다.")
+            raise ValidationError("원격 서버에서는 형태소 사용자 단어를 바꿀 수 없습니다. 동의어·불용어는 쓸 수 있습니다.")
         with self._writing() as c:
             reindex = dict_mod.apply(c, self.actor, action, **kw)
         return {"snapshot": dict_mod.snapshot(self.conn), "reindex_needed": reindex}

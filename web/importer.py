@@ -76,27 +76,27 @@ def validate(path: Path) -> None:
     try:
         conn = sqlite3.connect(str(path))
     except sqlite3.Error as e:
-        raise ImportRefused(f"SQLite 파일을 열지 못했다: {e}") from None
+        raise ImportRefused(f"SQLite 파일을 열지 못했습니다: {e}") from None
     try:
         try:
             check = [r[0] for r in conn.execute("PRAGMA integrity_check").fetchall()]
         except sqlite3.DatabaseError as e:
-            raise ImportRefused(f"SQLite 파일이 아니거나 손상됐다: {e}") from None
+            raise ImportRefused(f"SQLite 파일이 아니거나 손상됐습니다: {e}") from None
         if check != ["ok"]:
-            raise ImportRefused(f"파일이 손상됐다(integrity_check): {'; '.join(check[:3])}")
+            raise ImportRefused(f"파일이 손상됐습니다(integrity_check): {'; '.join(check[:3])}")
         try:
             row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         except sqlite3.DatabaseError:
             row = None
         if row is None:
-            raise ImportRefused("fast-question DB 가 아니다(meta.schema_version 이 없다).")
+            raise ImportRefused("fast question 저장소 파일이 아닙니다(meta.schema_version 이 없습니다).")
         if row[0] != SCHEMA_VERSION:
-            raise ImportRefused(f"스키마 버전이 {row[0]} 이다. 이 서버는 {SCHEMA_VERSION} 만 받는다. "
-                                "로컬 저장소를 최신으로 올리고 웹 서버를 한 번 띄운 뒤 다시 올린다.")
+            raise ImportRefused(f"스키마 버전이 {row[0]} 입니다. 이 서버는 {SCHEMA_VERSION} 만 받습니다. "
+                                "로컬 저장소를 최신으로 올리고 웹 서버를 한 번 띄운 뒤 다시 올려 주세요.")
         tables = _tables(conn)
         if tables != expected_tables():
             diff = sorted(tables ^ expected_tables())
-            raise ImportRefused(f"표 목록이 이 서버의 스키마와 다르다: {', '.join(diff)}")
+            raise ImportRefused(f"표 목록이 이 서버의 스키마와 다릅니다: {', '.join(diff)}")
     finally:
         conn.close()
 
@@ -249,7 +249,7 @@ def _will_replace(db: Path) -> bool:
 def run_import(db: Path, upload: Path, analyzer=None, lock=None, origin: str = "",
                guide_data: Callable[[], dict] | None = None) -> dict:
     if origin and not ORIGIN_RE.fullmatch(origin):
-        raise ImportRefused("origin 은 영문·숫자·- 64자 이하다.")
+        raise ImportRefused("origin 은 영문·숫자·- 64자 이하여야 합니다.")
     validate(upload)
     prune(upload)
     with lock or threading.Lock():
@@ -303,7 +303,7 @@ def handler(db_for: Callable[[Request], Path | None], tmp_root: Path,
     async def import_db(request: Request) -> JSONResponse:
         db = db_for(request)
         if db is None:
-            return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
+            return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
         length = request.headers.get("content-length", "")
         if length.isdigit() and int(length) > IMPORT_MAX_BYTES:
             return _too_large()
@@ -333,14 +333,14 @@ async def _receive_and_run(request: Request, db: Path, tmp_root: Path,
                     return _too_large()
                 f.write(chunk)
         if size == 0:
-            return JSONResponse({"error": "요청 본문에 SQLite 파일이 없다.", "code": "invalid_db"},
+            return JSONResponse({"error": "요청 본문에 SQLite 파일이 없습니다.", "code": "invalid_db"},
                                 status_code=400)
         try:
             result = await run_in_threadpool(run, request, db, upload)
         except ImportRefused as e:
             return JSONResponse({"error": e.message, "code": e.code}, status_code=e.status)
         except sqlite3.OperationalError as e:
-            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
                                  "code": "busy"}, status_code=503)
         return JSONResponse(result)
     finally:
@@ -348,5 +348,5 @@ async def _receive_and_run(request: Request, db: Path, tmp_root: Path,
 
 
 def _too_large() -> JSONResponse:
-    return JSONResponse({"error": f"가져올 파일은 {IMPORT_MAX_BYTES // (1024 * 1024)} MB 까지 받는다.",
+    return JSONResponse({"error": f"가져올 파일은 {IMPORT_MAX_BYTES // (1024 * 1024)} MB 까지 받습니다.",
                          "code": "too_large"}, status_code=413)

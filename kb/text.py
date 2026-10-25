@@ -21,23 +21,23 @@ def dice(a: set[str], b: set[str]) -> float:
 
 def clean(s: str) -> str:
     if not isinstance(s, str):
-        raise ValidationError("문자열이 필요하다.")
+        raise ValidationError("문자열이 필요합니다.")
     s = unicodedata.normalize("NFC", s).replace("\r\n", "\n").replace("\r", "\n")
     return "\n".join(line.rstrip() for line in s.split("\n")).strip()
 
 
 def _non_empty(s: str, what: str) -> str:
     if not s:
-        raise ValidationError(f"{what}이(가) 비어 있다.")
+        raise ValidationError(f"{what}이(가) 비어 있습니다.")
     return s
 
 
 def check_question(s: str) -> str:
     s = _non_empty(clean(s), "질문")
     if "\n" in s:
-        raise ValidationError(f"질문은 한 줄로 쓴다. 지금 {s.count(chr(10)) + 1}줄이다.")
+        raise ValidationError(f"질문은 한 줄로 써 주세요. 지금 {s.count(chr(10)) + 1}줄입니다.")
     if len(s) > QUESTION_MAX:
-        raise ValidationError(f"질문은 {QUESTION_MAX}자까지 쓸 수 있다. 지금 {len(s)}자다.")
+        raise ValidationError(f"질문은 {QUESTION_MAX}자까지 쓸 수 있습니다. 지금 {len(s)}자입니다.")
     return s
 
 
@@ -47,18 +47,18 @@ def check_answer(s: str) -> str:
     s = _non_empty(s, "답변")
     lines = s.count("\n") + 1
     if lines > ANSWER_MAX_LINES:
-        raise ValidationError(f"답변은 {ANSWER_MAX_LINES}줄까지 쓸 수 있다. 지금 {lines}줄이다.")
+        raise ValidationError(f"답변은 {ANSWER_MAX_LINES}줄까지 쓸 수 있습니다. 지금 {lines}줄입니다.")
     if len(s) > ANSWER_MAX:
-        raise ValidationError(f"답변은 {ANSWER_MAX}자까지 쓸 수 있다. 지금 {len(s)}자다.")
+        raise ValidationError(f"답변은 {ANSWER_MAX}자까지 쓸 수 있습니다. 지금 {len(s)}자입니다.")
     return s
 
 
 def check_name(s: str) -> str:
     s = _non_empty(clean(s), "이름")
     if "\n" in s:
-        raise ValidationError("이름은 한 줄로 쓴다.")
+        raise ValidationError("이름은 한 줄로 써 주세요.")
     if len(s) > NAME_MAX:
-        raise ValidationError(f"이름은 {NAME_MAX}자까지 쓸 수 있다. 지금 {len(s)}자다.")
+        raise ValidationError(f"이름은 {NAME_MAX}자까지 쓸 수 있습니다. 지금 {len(s)}자입니다.")
     if ">" in s:  # "대분류 > 중분류" 경로 구분자와 겹친다
-        raise ValidationError("분류 이름에는 > 를 쓸 수 없다.")
+        raise ValidationError("분류 이름에는 > 를 쓸 수 없습니다.")
     return s

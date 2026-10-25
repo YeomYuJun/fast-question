@@ -95,7 +95,7 @@ class Google:
                 r.raise_for_status()
                 self._keys = {k["kid"]: k for k in r.json().get("keys", []) if "kid" in k}
         if kid not in self._keys:
-            raise AuthError(f"id_token 서명 키를 찾지 못했다: {kid}")
+            raise AuthError(f"id_token 서명 키를 찾지 못했습니다: {kid}")
         return jwt.PyJWK(self._keys[kid]).key
 
     async def identity(self, code: str, verifier: str) -> tuple[str, str]:
@@ -228,14 +228,14 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def login(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
         return await start(p, safe_next(request.query_params.get("next")))
 
     async def link(request: Request) -> Response:
         """로그인 수단 추가(연결 패널의 폼 POST). 공급자 로그인이 끝나면 callback 이 이 계정에 신원을 붙인다."""
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
         if request.scope.get(AUTH_KIND_KEY) != "session":
             return RedirectResponse("/?link_error=session", status_code=303)
         return await start(p, "/", request.scope[ACCOUNT_KEY], 303)
@@ -243,7 +243,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def callback(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
         q = request.query_params
         if q.get("error"):
             return failed("denied")
@@ -316,7 +316,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def me(request: Request) -> Response:
         account_id = request.scope.get(ACCOUNT_KEY)
         if account_id is None:
-            return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized", "mode": "remote",
+            return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized", "mode": "remote",
                                  "providers": sorted(providers)}, status_code=401)
 
         def read(conn):
@@ -328,7 +328,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
 
     def need_session(request: Request) -> Response | None:
         if request.scope.get(AUTH_KIND_KEY) != "session":
-            return JSONResponse({"error": "브라우저에서 로그인해야 한다.", "code": "unauthorized"}, status_code=401)
+            return JSONResponse({"error": "브라우저에서 로그인해 주세요.", "code": "unauthorized"}, status_code=401)
         return None
 
     async def tokens(request: Request) -> Response:
@@ -353,7 +353,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return denied
         if not await run_in_threadpool(db, control.revoke_personal_token, request.scope[ACCOUNT_KEY],
                                        request.path_params["id"]):
-            return JSONResponse({"error": "토큰을 찾지 못했다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "토큰을 찾지 못했습니다.", "code": "not_found"}, status_code=404)
         return JSONResponse({"ok": True})
 
     async def apps(request: Request) -> Response:
@@ -380,7 +380,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         except ValueError:
             confirm = None
         if confirm != "탈퇴":
-            return JSONResponse({"error": "확인 문구로 '탈퇴' 를 입력한다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "확인 문구로 '탈퇴' 를 입력해 주세요.", "code": "invalid"}, status_code=400)
         account_id = request.scope[ACCOUNT_KEY]
 
         def work() -> None:

@@ -199,7 +199,7 @@ def test_evidence_line_on_create_and_edit(client, tmp_path):
 
     bad = client.patch(f"/api/qa/{item['id']}", json={"version": cleared["version"],
                                                       "evidence_line": str(tmp_path / "없는 파일")})
-    assert bad.status_code == 400 and "근거 경로가 없다" in bad.json()["error"]
+    assert bad.status_code == 400 and "근거 경로가 없습니다" in bad.json()["error"]
 
 
 def test_search_by_category(client):

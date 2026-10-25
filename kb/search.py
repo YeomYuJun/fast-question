@@ -191,13 +191,13 @@ def _bigrams(text: str) -> set[str]:
 
 def _regex(q: str, case_sensitive: bool) -> re.Pattern:
     if len(q) > REGEX_MAX:
-        raise ValidationError(f"정규식은 {REGEX_MAX}자까지 쓸 수 있다. 지금 {len(q)}자다.")
+        raise ValidationError(f"정규식은 {REGEX_MAX}자까지 쓸 수 있습니다. 지금 {len(q)}자입니다.")
     if _NESTED_REPEAT.search(q):
-        raise ValidationError("정규식에 중첩 반복((a+)+ 같은 형태)을 쓸 수 없다. 검색 시간이 끝없이 늘 수 있다.")
+        raise ValidationError("정규식에 중첩 반복((a+)+ 같은 형태)을 쓸 수 없습니다. 검색 시간이 끝없이 늘 수 있습니다.")
     try:
         return re.compile(q, 0 if case_sensitive else re.IGNORECASE)
     except re.error as e:
-        raise ValidationError(f"정규식이 올바르지 않다: {e}") from e
+        raise ValidationError(f"정규식이 올바르지 않습니다: {e}") from e
 
 
 def search(store: "Store", query: str, *, analyzer=None, category_id: int | None = None,
@@ -388,7 +388,7 @@ def search_many(store: "Store", queries: list[str], *, analyzer=None, limit: int
     t0 = time.perf_counter()
     qs = [q for q in dict.fromkeys(unicodedata.normalize("NFC", q or "").strip() for q in queries) if q]
     if not qs:
-        raise ValidationError("queries 에 검색어가 하나 이상 필요하다.")
+        raise ValidationError("queries 에 검색어가 하나 이상 필요합니다.")
     best: dict[int, dict] = {}
     matched: dict[int, list[str]] = {}
     similar: dict[int, dict] = {}

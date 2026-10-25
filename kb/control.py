@@ -375,14 +375,14 @@ def create_personal_token(conn: sqlite3.Connection, account_id: int, name: str,
     """새 토큰. 반환값의 token 은 이때 한 번만 알 수 있다."""
     name = name.strip()
     if not 1 <= len(name) <= 60 or not name.isprintable():
-        raise TokenRefused("토큰 이름은 한 줄 1~60자다.")
+        raise TokenRefused("토큰 이름은 한 줄 1~60자로 써 주세요.")
     t = _now(now)
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     with tx(conn):
         alive = conn.execute("SELECT count(*) FROM personal_token WHERE account_id = ? AND revoked_at IS NULL "
                              "AND expires_at > ?", (account_id, _iso(t))).fetchone()[0]
         if alive >= TOKEN_MAX:
-            raise TokenRefused(f"살아 있는 토큰이 이미 {TOKEN_MAX}개다. 쓰지 않는 토큰을 폐기한다.")
+            raise TokenRefused(f"살아 있는 토큰이 이미 {TOKEN_MAX}개입니다. 쓰지 않는 토큰을 폐기해 주세요.")
         token_id = conn.execute(
             "INSERT INTO personal_token(account_id, name, hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
             (account_id, name, _hash(token), _iso(t), _iso(t + TOKEN_LIFETIME))).lastrowid
@@ -512,14 +512,14 @@ def global_words(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 def add_global_word(conn: sqlite3.Connection, word: str, tag: str = "NNP") -> None:
     word = (word or "").strip()
     if not 1 <= len(word) <= 40 or any(c.isspace() for c in word):
-        raise ValueError("단어는 공백 없는 1~40자다.")
+        raise ValueError("단어는 공백 없이 1~40자로 써 주세요.")
     if tag not in GLOBAL_WORD_TAGS:
-        raise ValueError(f"품사는 {'·'.join(GLOBAL_WORD_TAGS)} 중 하나다: {tag}")
+        raise ValueError(f"품사는 {'·'.join(GLOBAL_WORD_TAGS)} 중 하나여야 합니다: {tag}")
     try:
         with tx(conn):
             conn.execute("INSERT INTO global_user_word(word, tag) VALUES (?, ?)", (word, tag))
     except sqlite3.IntegrityError:
-        raise ValueError(f"이미 있는 단어다: {word}") from None
+        raise ValueError(f"이미 있는 단어입니다: {word}") from None
 
 
 def remove_global_word(conn: sqlite3.Connection, word: str) -> bool:

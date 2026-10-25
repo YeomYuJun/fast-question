@@ -178,7 +178,7 @@ def test_rename_category(server):
     tree = call(server, "kb_categories")[1]["categories"]
     assert tree[0]["children"][0]["path"] == "이관 사업 > NAS"
     err, msg = call(server, "kb_rename_category", {"category": "이관 사업", "version": top["version"], "name": "x"})
-    assert err and "먼저 고쳤다" in msg
+    assert err and "먼저 고쳤습니다" in msg
 
 
 def test_delete_category_needs_confirm(server):

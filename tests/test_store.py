@@ -32,7 +32,7 @@ def test_category_tree_and_resolve(user):
 
 
 def test_unknown_category_not_found(user):
-    with pytest.raises(NotFoundError, match="분류를 찾지 못했다"):
+    with pytest.raises(NotFoundError, match="분류를 찾지 못했습니다"):
         user.resolve_category("없는 분류")
 
 

@@ -63,13 +63,13 @@ async function api(method, url, body) {
   try {
     r = await fetch(url, opt);
   } catch (e) {
-    throw new Error("서버에 연결하지 못했다."); // 브라우저의 영어 오류(Failed to fetch) 대신
+    throw new Error("서버에 연결하지 못했습니다."); // 브라우저의 영어 오류(Failed to fetch) 대신
   }
   const data = await r.json().catch(() => ({}));
   // 원격 모드에서 세션이 끝났으면 로그인 화면으로 바꾼다
   if (r.status === 401 && data.code === "unauthorized") showLogin(data.providers || []);
   if (!r.ok) {
-    const err = new Error(data.error || `요청을 처리하지 못했다(HTTP ${r.status}).`);
+    const err = new Error(data.error || `요청을 처리하지 못했습니다(HTTP ${r.status}).`);
     err.status = r.status;
     err.data = data;
     throw err;
@@ -223,7 +223,7 @@ function renameForm(c, cls) {
         state.catRenaming = null;
         await refreshCats();
         runSearch();
-        toast(body.name ? `분류 이름을 "${done.path}" 로 바꿨다.` : `분류 "${done.path}" 의 설명을 바꿨다.`);
+        toast(body.name ? `분류 이름을 "${done.path}" 로 바꿨습니다.` : `분류 "${done.path}" 의 설명을 바꿨습니다.`);
       } catch (err) {
         toast(err.message, { err: true });
       }
@@ -246,16 +246,16 @@ async function deleteCategory(c) {
   }
   const parts = [];
   if (impact.children) parts.push(`하위 분류 ${impact.children}개`);
-  if (impact.qa) parts.push(`지식 ${impact.qa}건`);
+  if (impact.qa) parts.push(`Q&A ${impact.qa}건`);
   const warn = parts.length ? `\n${parts.join(", ")}도 모두 함께 삭제됩니다.` : "";
-  if (!window.confirm(`분류 "${c.path}" 를 삭제한다.${warn}\n삭제를 하시겠습니까?`)) return;
+  if (!window.confirm(`분류 "${c.path}" 를 삭제합니다.${warn}\n삭제하시겠습니까?`)) return;
   try {
     const res = await api("POST", `/api/categories/${c.id}/archive`, { version: impact.category.version });
     const gone = new Set([c.id, ...(c.children || []).map((x) => x.id)]);
     if (gone.has(state.cat)) state.cat = null;
     await refreshCats();
     runSearch();
-    toast(`분류 "${c.path}" 를 삭제했다.` + (res.archived_qa ? ` 지식 ${res.archived_qa}건도 함께 삭제했다.` : ""));
+    toast(`분류 "${c.path}" 를 삭제했습니다.` + (res.archived_qa ? ` Q&A ${res.archived_qa}건도 함께 삭제했습니다.` : ""));
   } catch (err) {
     toast(err.message, { err: true });
     refreshCats();
@@ -329,7 +329,7 @@ async function addCategory(e) {
   const raw = $("#cat-name").value.trim();
   if (!raw) return;
   const parts = raw.split(">").map((s) => s.trim());
-  if (parts.length > 2) return toast("분류는 대분류 > 중분류 2단계까지다.", { err: true });
+  if (parts.length > 2) return toast("분류는 대분류 > 중분류 2단계까지 만들 수 있습니다.", { err: true });
   const body = parts.length === 2 ? { name: parts[1], parent: parts[0] } : { name: parts[0] };
   try {
     const c = await api("POST", "/api/categories", body);
@@ -337,7 +337,7 @@ async function addCategory(e) {
     $("#cat-form").hidden = true;
     $("#cat-add").hidden = false;
     await refreshCats();
-    toast(`분류 "${c.path}" 를 만들었다.`);
+    toast(`분류 "${c.path}" 를 만들었습니다.`);
   } catch (err) {
     toast(err.message, { err: true });
   }
@@ -698,8 +698,8 @@ function detailEl(id) {
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline hline" }, label("이력"), histLine(id, d),
-      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했다.")),
-      ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했다.")),
+      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했습니다.")),
+      ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했습니다.")),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
 }
 
@@ -708,7 +708,7 @@ async function copy(text, done) {
     await navigator.clipboard.writeText(text);
     toast(done);
   } catch (e) {
-    toast("복사하지 못했다. 브라우저가 클립보드 접근을 막았다.", { err: true });
+    toast("복사하지 못했습니다. 브라우저가 클립보드 접근을 막았습니다.", { err: true });
   }
 }
 
@@ -772,7 +772,7 @@ function editForm(base, isNew, onSaved, onCancel) {
         if (fe.value.trim()) body.evidence_line = fe.value;
         const r = await api("POST", "/api/qa", body);
         if (r.status === "similar_found") return showSimilar(r.similar);
-        return onSaved(r.item, "등록했다.");
+        return onSaved(r.item, "등록했습니다.");
       }
       const body = { version: base.version };
       if (fq.value !== base.question) body.question = fq.value;
@@ -780,14 +780,14 @@ function editForm(base, isNew, onSaved, onCancel) {
       if (Number(fc.value) !== base.category_id) body.category = Number(fc.value);
       if (fe.value.trim() !== (base.evidence_line || "")) body.evidence_line = fe.value;
       if (Object.keys(body).length === 1) return onCancel();
-      onSaved(await api("PATCH", `/api/qa/${base.id}`, body), "저장했다.");
+      onSaved(await api("PATCH", `/api/qa/${base.id}`, body), "저장했습니다.");
     } catch (e) {
       if (e.status === 409) {
         await loadDetail(base.id);
         const fresh = state.details.get(base.id);
         if (fresh) {
           form.replaceWith(editForm(fresh, false, onSaved, onCancel));
-          return toast("다른 곳에서 먼저 고쳤다. 지금 값으로 다시 열었다.", { err: true });
+          return toast("다른 곳에서 먼저 고쳤습니다. 지금 값으로 다시 열었습니다.", { err: true });
         }
       }
       msg.textContent = e.message;
@@ -798,26 +798,26 @@ function editForm(base, isNew, onSaved, onCancel) {
 
   function showSimilar(list) {
     fill(sim,
-      el("div", { class: "head" }, "비슷한 질문이 이미 있다. 같은 내용이면 그 항목을 고친다."),
+      el("div", { class: "head" }, "비슷한 질문이 이미 있습니다. 같은 내용이면 그 항목을 고쳐 주세요."),
       list.map((h) => el("div", {},
         el("a", { href: `#qa/${h.id}` }, h.question),
         el("span", { class: "sub" }, `${h.category_path} · ${Math.round(h.score * 100)}%`))),
-      el("div", {}, el("button", { class: "btn", type: "button", onclick: () => submit(true) }, "다른 질문이다. 그래도 등록")));
+      el("div", {}, el("button", { class: "btn", type: "button", onclick: () => submit(true) }, "다른 질문으로 등록")));
   }
 
   // 삭제는 행을 지우지 않고 보관 표시만 한다(되돌리기·MCP kb_restore 로 복원된다)
   async function remove() {
-    if (!window.confirm("삭제를 하시겠습니까?")) return;
+    if (!window.confirm("삭제하시겠습니까?")) return;
     try {
       const it = await api("POST", `/api/qa/${base.id}/archive`, { version: base.version });
       onSaved(it, null);
-      toast("삭제했다.", {
+      toast("삭제했습니다.", {
         action: {
           label: "되돌리기",
           fn: async () => {
             try {
               await api("POST", `/api/qa/${it.id}/restore`, { version: it.version });
-              toast("되돌렸다.");
+              toast("되돌렸습니다.");
               refreshCats();
               runSearch();
             } catch (e) {
@@ -902,7 +902,7 @@ function openNew(question) {
   }
   if (!state.flat.length) {
     openSide(true);
-    toast("분류가 아직 없다. 왼쪽 패널의 \"+ 분류 추가\" 로 먼저 만든다.", { err: true });
+    toast("분류가 아직 없습니다. 왼쪽 패널의 \"+ 분류 추가\" 로 먼저 만들어 주세요.", { err: true });
     return;
   }
   const firstHit = rows.size ? [...rows.values()].find((r) => !r.classList.contains("out")) : null;
@@ -995,7 +995,7 @@ async function openFromHash() {
     toggle(id, true);
     scrollTo(id);
   } else {
-    toast(`#${id} 를 찾지 못했다(삭제했거나 없는 번호다).`, { err: true });
+    toast(`#${id} 를 찾지 못했습니다(삭제했거나 없는 번호입니다).`, { err: true });
   }
 }
 

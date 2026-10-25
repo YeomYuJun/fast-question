@@ -361,6 +361,6 @@ def test_list_evidence_detail_carries_verdict_detail(claude, conn, tmp_path):
     item = add(claude, "판정 못 한 근거의 질문은?", evidence=[{"kind": "file", "path": str(f)}])
     ev = claude.get_qa(item["id"])["evidence"][0]
     claude.apply_verdicts([{"evidence_id": ev["id"], "version": ev["version"], "verdict": "unknown",
-                            "detail": "30일 넘게 사용자 PC 에서 판정하지 않았다"}])
+                            "detail": "30일 넘게 사용자 PC 에서 판정하지 않았습니다"}])
     out = cleanup.open_list(claude, rule="evidence_unknown")
-    assert "30일 넘게 사용자 PC 에서 판정하지 않았다" in out["findings"][0]["detail"]
+    assert "30일 넘게 사용자 PC 에서 판정하지 않았습니다" in out["findings"][0]["detail"]

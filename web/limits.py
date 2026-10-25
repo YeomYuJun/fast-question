@@ -73,7 +73,7 @@ class RateLimit:
                 wait = self._take(*rule)
                 if wait > 0:
                     retry = max(1, math.ceil(wait))
-                    resp = JSONResponse({"error": f"요청이 너무 많다. {retry}초 뒤 다시 시도한다.", "code": "rate_limited"},
+                    resp = JSONResponse({"error": f"요청이 너무 많습니다. {retry}초 뒤 다시 시도해 주세요.", "code": "rate_limited"},
                                         status_code=429, headers={"Retry-After": str(retry)})
                     await resp(scope, receive, send)
                     return
@@ -93,7 +93,7 @@ class BodyLimit:
             await self.app(scope, receive, send)
             return
         limit = self.overrides.get(scope["path"], self.max_bytes)
-        too_big = JSONResponse({"error": f"요청 본문이 {limit // (1024 * 1024)} MB 를 넘는다.", "code": "too_large"},
+        too_big = JSONResponse({"error": f"요청 본문이 {limit // (1024 * 1024)} MB 를 넘습니다.", "code": "too_large"},
                                status_code=413)
         for k, v in scope["headers"]:
             if k == b"content-length" and v.isdigit() and int(v) > limit:

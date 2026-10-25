@@ -168,7 +168,7 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                 return {"deleted": False, "category": cat["path"], "version": cat["version"],
                         "children": impact["children"], "qa": impact["qa"],
                         "warning": (f"분류 '{cat['path']}' 를 삭제하면 하위 분류 {impact['children']}개와 "
-                                    f"Q&A {impact['qa']}건이 모두 함께 삭제된다. 사용자가 승인하면 confirm=true 로 다시 부른다.")}
+                                    f"Q&A {impact['qa']}건이 모두 함께 삭제됩니다. 사용자가 승인하면 confirm=true 로 다시 불러 주세요.")}
             res = s.archive_category(cat["id"], version, note=reason)
             return {"deleted": True, "category": res["category"]["path"],
                     "archived_children": res["archived_children"], "archived_qa": res["archived_qa"]}
@@ -187,18 +187,18 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
         def go(s: Store):
             if action == "add":
                 if id is None or not spec:
-                    raise KbError("add 에는 id 와 spec 이 필요하다.")
+                    raise KbError("add 에는 id 와 spec 이 필요합니다.")
                 check_claude_qa(evidence=[spec])
                 return _detail(s.add_evidence(id, spec))
             if action in ("recapture", "archive", "spec"):
                 if evidence_id is None:
-                    raise KbError(f"{action} 에는 evidence_id 가 필요하다.")
+                    raise KbError(f"{action} 에는 evidence_id 가 필요합니다.")
                 if action == "archive":
                     return _detail(s.archive_evidence(evidence_id))
                 if action == "spec":
                     return {"spec": s.evidence_spec(evidence_id)}
                 return _detail(s.recapture_evidence(evidence_id, captured=(spec or {}).get("captured")))
-            raise KbError(f"알 수 없는 근거 동작이다: {action}")
+            raise KbError(f"알 수 없는 근거 동작입니다: {action}")
         return run(go)
 
     @server.tool()
@@ -232,14 +232,14 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
     @server.tool(description=ADD_MANY_DOC + (ADD_MANY_REMOTE if remote else ADD_MANY_FILE))
     def kb_add_many(items: list[dict] | None = None, file: str | None = None) -> dict:
         if file and remote:
-            raise ValueError("원격 서버는 사용자 PC 의 파일을 읽을 수 없다. 로컬 프록시가 파일을 읽어 items 로 보낸다.")
+            raise ValueError("원격 서버는 사용자 PC 의 파일을 읽을 수 없습니다. 로컬 프록시가 파일을 읽어 items 로 보냅니다.")
         if file:
             # 윈도우에서 만든 JSON 은 BOM 이 붙어 온다
             items = json.loads(Path(file).read_text(encoding="utf-8-sig"))
         if not items:
-            raise ValueError("kb_add_many 에는 items 나 file 이 필요하다.")
+            raise ValueError("kb_add_many 에는 items 나 file 이 필요합니다.")
         if len(items) > ADD_MANY_MAX:
-            raise ValueError(f"kb_add_many 는 한 번에 {ADD_MANY_MAX}건까지 받는다. 지금 {len(items)}건이다.")
+            raise ValueError(f"kb_add_many 는 한 번에 {ADD_MANY_MAX}건까지 받습니다. 지금 {len(items)}건입니다.")
 
         def go(s: Store):
             results = []
@@ -252,7 +252,7 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                     results.append({"index": n, "status": "error", "error": e.message})
                     continue
                 except KeyError as e:
-                    results.append({"index": n, "status": "error", "error": f"{e.args[0]} 이(가) 없다."})
+                    results.append({"index": n, "status": "error", "error": f"{e.args[0]} 이(가) 없습니다."})
                     continue
                 if res["status"] == "similar_found":
                     results.append({"index": n, "status": "similar_found",
@@ -272,12 +272,12 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             if action == "list":
                 return {"records": s.harvest_list()}
             if not root:
-                raise KbError(f"{action} 에는 root 가 필요하다.")
+                raise KbError(f"{action} 에는 root 가 필요합니다.")
             if action == "get":
                 return {"record": s.harvest_get(root)}
             if action == "set":
                 return {"record": s.harvest_set(root, state or {})}
-            raise KbError(f"알 수 없는 수확 기록 동작이다: {action}")
+            raise KbError(f"알 수 없는 수확 기록 동작입니다: {action}")
         return run(go)
 
     @server.tool()

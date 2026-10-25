@@ -78,14 +78,14 @@ class KbAuthProvider:
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         uris = [str(u) for u in client_info.redirect_uris or []]
         if not 1 <= len(uris) <= REDIRECT_MAX:
-            raise RegistrationError("invalid_redirect_uri", f"redirect_uri 는 1~{REDIRECT_MAX}개다.")
+            raise RegistrationError("invalid_redirect_uri", f"redirect_uri 는 1~{REDIRECT_MAX}개여야 합니다.")
         bad = [u for u in uris if not allowed_redirect(u)]
         if bad:
             raise RegistrationError("invalid_redirect_uri", "redirect_uri 는 http://localhost:<포트>/callback, "
-                                    f"http://127.0.0.1:<포트>/callback, https://… 만 받는다: {bad[0]}")
+                                    f"http://127.0.0.1:<포트>/callback, https://… 만 받습니다: {bad[0]}")
         raw = client_info.model_dump_json(exclude_none=True)
         if len(raw) > CLIENT_JSON_MAX:
-            raise RegistrationError("invalid_client_metadata", f"등록 정보가 {CLIENT_JSON_MAX}바이트를 넘는다.")
+            raise RegistrationError("invalid_client_metadata", f"등록 정보가 {CLIENT_JSON_MAX}바이트를 넘습니다.")
         await self._run(oauth_store.put_client, client_info.client_id, raw)
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
@@ -95,7 +95,7 @@ class KbAuthProvider:
                      self.resource, client.client_id, client.client_name)
             resource = self.resource
         if resource != self.resource:
-            raise AuthorizeError("invalid_target", f"resource 는 {self.resource} 여야 한다.")
+            raise AuthorizeError("invalid_target", f"resource 는 {self.resource} 여야 합니다.")
         pending_id = await self._run(oauth_store.put_pending, client.client_id, {
             "scopes": params.scopes or [SCOPE], "code_challenge": params.code_challenge,
             "redirect_uri": str(params.redirect_uri),
@@ -117,7 +117,7 @@ class KbAuthProvider:
     @staticmethod
     def _oauth_token(issued: dict | None) -> OAuthToken:
         if issued is None:
-            raise TokenError("invalid_grant", "이미 썼거나 끝난 코드·토큰이다.")
+            raise TokenError("invalid_grant", "이미 썼거나 끝난 코드·토큰입니다.")
         return OAuthToken(access_token=issued["access_token"], token_type="Bearer", expires_in=issued["expires_in"],
                           scope=" ".join(issued["scopes"]), refresh_token=issued["refresh_token"])
 

@@ -65,7 +65,7 @@ def list_dir(root: Path) -> tuple[str, int]:
             except OSError:
                 rows.append(f"{rel}\t?")
             if len(rows) > DIR_CAP:
-                raise ValidationError(f"폴더 안 파일이 {DIR_CAP}개를 넘는다. 더 좁은 경로를 근거로 쓴다.")
+                raise ValidationError(f"폴더 안 파일이 {DIR_CAP}개를 넘습니다. 더 좁은 경로를 근거로 써 주세요.")
     rows.sort()
     return _sha("\n".join(rows).encode("utf-8")), len(rows)
 
@@ -111,10 +111,10 @@ def _ignored(top: Path, p: Path) -> bool:
 
 def _exists(path: str | None) -> Path:
     if not path:
-        raise ValidationError("근거 경로가 없다: (비어 있음)")
+        raise ValidationError("근거 경로가 없습니다: (비어 있음)")
     p = Path(path)
     if not p.exists():
-        raise ValidationError(f"근거 경로가 없다: {path}")
+        raise ValidationError(f"근거 경로가 없습니다: {path}")
     return p.resolve()
 
 
@@ -125,12 +125,12 @@ def _check_anchor(anchor: str | None, p: Path) -> None:
     try:
         data = p.read_bytes()
     except OSError:
-        raise ValidationError(f"앵커를 찾으려 했으나 파일을 읽지 못했다: {p}") from None
+        raise ValidationError(f"앵커를 찾으려 했으나 파일을 읽지 못했습니다: {p}") from None
     # 압축·이진 문서는 시트 이름·절 제목이 바이트로 드러나지 않는다(rules.md 가 이들에 시트·절 앵커를 쓰게 한다)
     if p.suffix.lower() in BINARY_DOCS or b"\0" in data[:8192]:
         return
     if anchor.encode("utf-8") not in data:
-        raise ValidationError(f"앵커 '{anchor}' 가 {p.name} 에 없다. 파일에 있는 문자열을 그대로 쓴다.")
+        raise ValidationError(f"앵커 '{anchor}' 가 {p.name} 에 없습니다. 파일에 있는 문자열을 그대로 써 주세요.")
 
 
 def _row(kind, *, path=None, anchor=None, repo=None, commit_sha=None, paths=None, captured=None) -> dict:
@@ -144,10 +144,10 @@ def _row(kind, *, path=None, anchor=None, repo=None, commit_sha=None, paths=None
 def _capture_git(repo_arg: str, paths: list[str], commit: str | None, anchor: str | None) -> dict:
     top = repo_top(_exists(repo_arg))
     if top is None:
-        raise ValidationError(f"git 저장소가 아니거나 git 을 실행하지 못했다: {repo_arg}")
+        raise ValidationError(f"git 저장소가 아니거나 git 을 실행하지 못했습니다: {repo_arg}")
     out = run_git(top, "rev-parse", "--verify", f"{commit or 'HEAD'}^{{commit}}")
     if out is None:
-        raise ValidationError(f"커밋을 찾지 못했다: {commit or 'HEAD'}")
+        raise ValidationError(f"커밋을 찾지 못했습니다: {commit or 'HEAD'}")
     commit_sha = out.strip()
     specs = [rel_spec(s, top) for s in (paths or ["."])]
     # 앵커는 경로 하나가 파일을 가리킬 때만 확인한다. 폴더·여러 경로·glob 은 어느 파일에서 찾을지 정할 수 없다
@@ -157,7 +157,7 @@ def _capture_git(repo_arg: str, paths: list[str], commit: str | None, anchor: st
     diff = _nul_list(run_git(top, "diff", "--name-only", "--no-renames", "-z", commit_sha, "--"))
     untr = _nul_list(run_git(top, "ls-files", "-o", "--exclude-standard", "-z"))
     if diff is None or untr is None:
-        raise ValidationError(f"git diff / ls-files 실행에 실패했다: {top}")
+        raise ValidationError(f"git diff / ls-files 실행에 실패했습니다: {top}")
     dirty = {f: hash_file(top / f) for f in diff if match(f)}
     untracked = {f: hash_file(top / f) for f in untr if match(f)}
     return _row("git", path=str(top / specs[0]) if len(specs) == 1 and specs[0] != "." else None,
@@ -169,7 +169,7 @@ def capture(spec: Mapping) -> dict:
     """근거 spec 을 evidence 테이블 열 값으로 만든다. 경로·저장소가 없으면 ValidationError."""
     kind = spec.get("kind") or "auto"
     if kind not in KINDS:
-        raise ValidationError(f"근거 형식은 {', '.join(KINDS)} 중 하나다. 받은 값: {kind}")
+        raise ValidationError(f"근거 형식은 {', '.join(KINDS)} 중 하나여야 합니다. 받은 값: {kind}")
     anchor = spec.get("anchor") or None
     if kind == "auto":
         p = _exists(spec.get("path"))
@@ -200,16 +200,16 @@ def capture(spec: Mapping) -> dict:
         head = (run_git(top, "rev-parse", "HEAD") or "").strip()
         branch = (run_git(top, "rev-parse", "--abbrev-ref", "HEAD") or "").strip()
         if not head:
-            raise ValidationError(f"HEAD 를 읽지 못했다: {top}")
+            raise ValidationError(f"HEAD 를 읽지 못했습니다: {top}")
         return _row("githead", repo=top.as_posix(), commit_sha=head, captured={"head": head, "branch": branch})
     if kind == "url":
         url = (spec.get("url") or spec.get("path") or "").strip()
         if not url:
-            raise ValidationError("url 근거에 주소가 없다.")
+            raise ValidationError("url 근거에 주소가 없습니다.")
         return _row("url", path=url, anchor=anchor)
     text = (spec.get("text") or "").strip()
     if not text:
-        raise ValidationError("note 근거에 내용이 없다. 누가 어떻게 확인했는지 적는다.")
+        raise ValidationError("note 근거에 내용이 없습니다. 누가 어떻게 확인했는지 적어 주세요.")
     return _row("note", anchor=anchor, captured={"text": text})
 
 
@@ -234,7 +234,7 @@ def accept_captured(row) -> dict:
             except ValueError:
                 raise ValidationError(f"captured 의 {k} 가 JSON 이 아니다.") from None
     if len(json.dumps(out, ensure_ascii=False).encode("utf-8")) > CAPTURED_MAX_BYTES:
-        raise ValidationError(f"captured 는 {CAPTURED_MAX_BYTES // 1024} KB 까지 받는다.")
+        raise ValidationError(f"captured 는 {CAPTURED_MAX_BYTES // 1024} KB 까지 받습니다.")
     return out
 
 
@@ -337,28 +337,28 @@ class Checker:
         if kind == "file":
             p = Path(row["path"])
             if not p.exists():
-                return "changed", f"{p.name} 파일이 없어졌다"
+                return "changed", f"{p.name} 파일이 없어졌습니다"
             h = hash_file(p)
             if h is None:
-                return "unknown", f"{p.name} 파일을 읽지 못했다"
+                return "unknown", f"{p.name} 파일을 읽지 못했습니다"
             if h == cap.get("sha256"):
                 return "same", ""
-            return "changed", f"{p.name} 내용이 바뀌었다" + _anchor_note(row.get("anchor"), [p])
+            return "changed", f"{p.name} 내용이 바뀌었습니다" + _anchor_note(row.get("anchor"), [p])
         if kind == "dir":
             p = Path(row["path"])
             if not p.exists():
-                return "changed", "폴더가 없어졌다"
+                return "changed", "폴더가 없어졌습니다"
             h, n = list_dir(p)
             if h == cap.get("list_hash"):
                 return "same", ""
-            return "changed", f"폴더 안 파일 목록·크기·수정시각이 바뀌었다 ({cap.get('count')} -> {n}개)"
+            return "changed", f"폴더 안 파일 목록·크기·수정시각이 바뀌었습니다 ({cap.get('count')} -> {n}개)"
         if kind == "git":
             repo = row["repo"]
             if not Path(repo).exists():
-                return "unknown", "저장소 경로가 없다"
+                return "unknown", "저장소 경로가 없습니다"
             diff, untr = self._diff_of(repo, row["commit_sha"]), self._untr_of(repo)
             if diff is None or untr is None:
-                return "unknown", "git 으로 비교하지 못했다(커밋이 없거나 git 실행 실패)"
+                return "unknown", "git 으로 비교하지 못했습니다(커밋이 없거나 git 실행 실패)"
             specs = json.loads(row["paths_json"] or '["."]')
             match = spec_matcher(specs)
             dirty, untracked = cap.get("dirty", {}), cap.get("untracked", {})
@@ -375,19 +375,19 @@ class Checker:
             uniq = list(dict.fromkeys(changed))
             more = f" 외 {len(uniq) - 3}개" if len(uniq) > 3 else ""
             files = [Path(repo) / s for s in specs if (Path(repo) / s).is_file()]
-            return "changed", ", ".join(uniq[:3]) + more + " 가 기록 뒤에 바뀌었다" + _anchor_note(row.get("anchor"), files)
+            return "changed", ", ".join(uniq[:3]) + more + " 가 기록 뒤에 바뀌었습니다" + _anchor_note(row.get("anchor"), files)
         if kind == "githead":
             repo = row["repo"]
             if not Path(repo).exists():
-                return "unknown", "저장소 경로가 없다"
+                return "unknown", "저장소 경로가 없습니다"
             head = run_git(repo, "rev-parse", "HEAD")
             branch = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
             if head is None or branch is None:
-                return "unknown", "git 으로 HEAD 를 읽지 못했다"
+                return "unknown", "git 으로 HEAD 를 읽지 못했습니다"
             if head.strip() == cap.get("head") and branch.strip() == cap.get("branch"):
                 return "same", ""
             return "changed", (f"HEAD 가 {cap.get('branch')}@{str(cap.get('head'))[:8]} 에서 "
-                               f"{branch.strip()}@{head.strip()[:8]} 로 바뀌었다")
+                               f"{branch.strip()}@{head.strip()[:8]} 로 바뀌었습니다")
         return "unknown", f"알 수 없는 근거 형식: {kind}"
 
 

@@ -43,7 +43,7 @@ def snapshot(conn: sqlite3.Connection) -> dict:
 def _word(value: str, what: str) -> str:
     w = clean(value or "")
     if not w:
-        raise ValidationError(f"{what}이(가) 비어 있다.")
+        raise ValidationError(f"{what}이(가) 비어 있습니다.")
     return w
 
 
@@ -51,7 +51,7 @@ def _archive(conn: sqlite3.Connection, table: str, id: int, actor: str) -> None:
     n = conn.execute(f"UPDATE {table} SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                      "WHERE id = ? AND deleted_at IS NULL", (actor, actor, id)).rowcount
     if n == 0:
-        raise ValidationError(f"사전 항목을 찾지 못했다: {table} {id}")
+        raise ValidationError(f"사전 항목을 찾지 못했습니다: {table} {id}")
 
 
 def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
@@ -62,14 +62,14 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
         group_id = kw.get("group_id")
         if group_id is None:
             if len(terms) < 2:
-                raise ValidationError("새 동의어 그룹은 단어가 2개 이상이어야 한다.")
+                raise ValidationError("새 동의어 그룹은 단어가 2개 이상이어야 합니다.")
             group_id = conn.execute("SELECT ifnull(max(group_id), 0) + 1 FROM synonym").fetchone()[0]
         else:
             if not conn.execute("SELECT 1 FROM synonym WHERE group_id = ? AND deleted_at IS NULL",
                                 (group_id,)).fetchone():
-                raise ValidationError(f"동의어 그룹을 찾지 못했다: {group_id}")
+                raise ValidationError(f"동의어 그룹을 찾지 못했습니다: {group_id}")
             if not terms:
-                raise ValidationError("추가할 동의어가 없다.")
+                raise ValidationError("추가할 동의어가 없습니다.")
         for t in terms:
             conn.execute(ins.format(t="synonym", cols="group_id, term", marks="?, ?"),
                          (group_id, t, actor, actor))
@@ -94,4 +94,4 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
                      "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                      (compute_version(load_user_words(conn)),))
         return True
-    raise ValidationError(f"알 수 없는 사전 동작이다: {action}")
+    raise ValidationError(f"알 수 없는 사전 동작입니다: {action}")

@@ -115,8 +115,8 @@ async def _recapture(remote: Remote, args: dict) -> types.CallToolResult:
 
 async def _recheck(remote: Remote, args: dict) -> types.CallToolResult:
     if not remote.device_id:
-        return text_result("credentials.json 에 device_id 가 없다. fast-question login(저장소 설치는 "
-                           "scripts/install.py --remote)으로 다시 만든다.", is_error=True)
+        return text_result("credentials.json 에 device_id 가 없습니다. fast-question login(저장소 설치는 "
+                           "scripts/install.py --remote)으로 다시 만들어 주세요.", is_error=True)
     params = {"origin": remote.device_id}
     if args.get("id") is not None:
         params["qa"] = str(args["id"])

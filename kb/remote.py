@@ -55,9 +55,9 @@ def save_credentials(url: str, token: str, path: Path | None = None, device_id: 
     """자격 증명을 쓴다. device_id·mode 를 주지 않으면 파일에 있던 것을 둔다. device_id 가 없으면 새로 만든다."""
     url, token = url.strip().rstrip("/"), token.strip()
     if not url.startswith(("https://", "http://")):
-        raise ValueError(f"서버 주소는 https:// 로 시작한다: {url}")
+        raise ValueError(f"서버 주소는 https:// 로 시작해야 합니다: {url}")
     if not token.startswith(TOKEN_PREFIX):
-        raise ValueError(f"개인 토큰은 {TOKEN_PREFIX} 로 시작한다.")
+        raise ValueError(f"개인 토큰은 {TOKEN_PREFIX} 로 시작해야 합니다.")
     if mode is not None and mode not in MODES:
         raise ValueError(f"mode 는 {', '.join(MODES)} 중 하나입니다: {mode}")
     path = path or credentials_path()

@@ -110,7 +110,7 @@ class SameOriginOnly:
     def __init__(self, app, hosts: set[str]):
         self.app = app
         self.hosts = hosts
-        self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받는다."
+        self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받습니다."
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope["path"] != HEALTH_PATH:
@@ -167,7 +167,7 @@ def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
     tree = store.categories()
     cat = next((c for t in tree for c in [t, *t["children"]] if c["id"] == category_id), None)
     if cat is None:
-        raise NotFoundError(f"분류를 찾지 못했다: {category_id}")
+        raise NotFoundError(f"분류를 찾지 못했습니다: {category_id}")
 
     def items(cid: int) -> list[str]:
         rows = store.conn.execute(
@@ -244,7 +244,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         mcp.opener = open_kb  # MCP 로 처음 연결한 계정도 기본 가이드를 받는다
 
     def unauthorized() -> JSONResponse:
-        return JSONResponse({"error": "로그인이 필요하다.", "code": "unauthorized"}, status_code=401)
+        return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
 
     job_cfg = cfg if db_path is None else dataclasses.replace(cfg, db_path=path)
 
@@ -298,10 +298,10 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             except KbError as e:
                 return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
             except sqlite3.OperationalError as e:  # busy_timeout(5초) 안에 쓰기 잠금을 얻지 못했다
-                return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+                return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
                                      "code": "busy"}, status_code=503)
             except (KeyError, TypeError, ValueError) as e:
-                return JSONResponse({"error": f"요청 값이 올바르지 않다: {e}"}, status_code=400)
+                return JSONResponse({"error": f"요청 값이 올바르지 않습니다: {e}"}, status_code=400)
             return JSONResponse(data)
         return handler
 
@@ -312,7 +312,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             return unauthorized()
         raw = request.query_params.get("category", "")
         if not raw.isdigit():
-            return JSONResponse({"error": "category 에 분류 id 가 필요하다."}, status_code=400)
+            return JSONResponse({"error": "category 에 분류 id 가 필요합니다."}, status_code=400)
 
         def work():
             conn = open_kb(db)
@@ -326,7 +326,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         except NotFoundError as e:
             return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
         except sqlite3.OperationalError as e:
-            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
                                  "code": "busy"}, status_code=503)
         name = re.sub(r'[\\/:*?"<>|]+', "_", cat_path.replace(" > ", "-")) + ".md"
         # 한글 파일 이름은 latin-1 헤더에 그대로 못 넣어 RFC 5987 형식으로 보낸다
@@ -352,7 +352,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         try:
             tmp = await run_in_threadpool(work)
         except sqlite3.OperationalError as e:
-            return JSONResponse({"error": f"DB 가 다른 쓰기로 잠겨 있다. 잠시 뒤 다시 시도한다. ({e})",
+            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
                                  "code": "busy"}, status_code=503)
         return FileResponse(tmp, media_type="application/vnd.sqlite3",
                             filename=f"fast-question-{datetime.now():%Y%m%d}.sqlite3",
