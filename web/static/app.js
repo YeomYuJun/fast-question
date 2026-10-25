@@ -559,6 +559,7 @@ function toggle(id, force) {
   if (prev && prev !== id) repaint(prev);
   repaint(id);
   setHash(open ? id : null);
+  document.dispatchEvent(new Event("fq-select")); // Claude 패널의 '함께 보냄' 칩이 듣는다
   if (open) {
     if (state.q) remember(state.q);
     loadDetail(id);
@@ -867,6 +868,7 @@ function finishEdit(id, it, msg) {
     state.details.delete(id);
     state.sel = null;
     setHash(null);
+    document.dispatchEvent(new Event("fq-select"));
     const r = rows.get(id);
     if (r) collapse(id, r);
   } else {
@@ -913,6 +915,7 @@ function openNew(question) {
     state.sel = it.id;
     state.details.set(it.id, it);
     setHash(it.id);
+    document.dispatchEvent(new Event("fq-select"));
     refreshCats();
     runSearch().then(() => scrollTo(it.id));
   }, close)));
@@ -947,15 +950,20 @@ function restoreFromUrl() {
   renderChip();
 }
 
-// 화면 밖이면 그 행이 보이게 스크롤한다. 위는 붙는 묶음 머리 높이(44px), 아래는 16px 를 비운다
+// 화면 밖이면 그 행이 보이게 스크롤한다. 위는 붙는 묶음 머리 높이(44px), 아래는 16px 를 비운다.
+// Claude 패널이 열려 있으면 페이지 대신 목록 칸(#app)이 스크롤한다
 function scrollTo(id) {
   const r = rows.get(id);
   if (!r) return;
+  const box = $("#app");
+  const own = getComputedStyle(box).overflowY === "auto";
+  const view = own ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
   const b = r.getBoundingClientRect();
-  const top = 44;
-  const bottom = window.innerHeight - 16;
-  if (b.top < top) window.scrollBy({ top: b.top - top, behavior: "smooth" });
-  else if (b.bottom > bottom) window.scrollBy({ top: Math.min(b.bottom - bottom, b.top - top), behavior: "smooth" });
+  const top = view.top + 44;
+  const bottom = view.bottom - 16;
+  const by = (dy) => (own ? box : window).scrollBy({ top: dy, behavior: "smooth" });
+  if (b.top < top) by(b.top - top);
+  else if (b.bottom > bottom) by(Math.min(b.bottom - bottom, b.top - top));
 }
 
 async function openFromHash() {
