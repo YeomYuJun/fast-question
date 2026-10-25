@@ -1080,13 +1080,13 @@ function showLogin(providers) {
   // 로그인 뒤 지금 주소(검색어·펼친 항목)로 돌아온다
   const next = encodeURIComponent(location.pathname + location.search + location.hash);
   fill($("#login-btns"), providers.map((name) =>
-    el("a", { class: "btn login-btn", href: `/auth/login/${name}?next=${next}` }, `${PROVIDERS[name] || name} 로 로그인`)));
+    el("a", { class: "pbtn", href: `/auth/login/${name}?next=${next}` }, `${PROVIDERS[name] || name} 로 계속하기`)));
   if (!providers.length) fill($("#login-btns"), el("p", { class: "login-none" }, "켜진 로그인 공급자가 없습니다."));
   $("#login-err").hidden = !code;
   $("#login-err").textContent = LOGIN_ERRORS[code] || "";
   for (const id of ["#app", "#toggle-side", "#new-btn", "#account"]) $(id).hidden = true;
   $(".keys").hidden = true;
-  document.body.classList.add("login-mode"); // 상단 로고·이름을 숨기고 테마 버튼만 남긴다
+  document.body.classList.add("login-mode"); // 상단은 테마 버튼만 남아 오른쪽 열 위에 뜬다
   $("#login").hidden = false;
 }
 

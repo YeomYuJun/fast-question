@@ -34,7 +34,7 @@ def add_basics(client):
 def test_index_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
-    assert "fast-question" in r.text
+    assert "<title>fast question</title>" in r.text
     assert r.text.index("/static/tokens.css") < r.text.index("/static/app.css")
     for path in ("/static/app.js", "/static/app.css", "/static/tokens.css",
                  "/static/fonts/Pretendard-Regular.woff2", "/static/fonts/JetBrainsMono-Regular.woff2"):

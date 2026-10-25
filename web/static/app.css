@@ -298,70 +298,118 @@ a.ibtn:hover { text-decoration: none; }
   .account { order: 9; flex: 1 0 100%; padding: var(--space-2) 0 0; border-left: 0; border-top: 1px solid var(--line); }
   .account-name { flex: 1 1 auto; max-width: none; }
 }
-/* 로그인 전: 상단에는 테마 버튼만 남고, 가운데 정렬 첫 화면 + 시작 단계 + 바닥줄 */
-body.login-mode .top { background: transparent; border-bottom: 0; padding: 12px var(--space-4); }
+/* 로그인 전: 좌우 분할. 상단은 테마 버튼만 남아 오른쪽 열 위에 뜬다 */
+body.login-mode .top { position: absolute; top: 0; right: 0; z-index: 1; background: transparent; border-bottom: 0; padding: 16px 20px; }
 body.login-mode .brand { display: none; }
-.login { min-height: calc(100vh - 52px); display: flex; flex-direction: column; }
-.login-main { flex: 1 0 auto; display: flex; flex-direction: column; align-items: center; gap: 72px; padding: 40px var(--space-4) 64px; }
-.login-hero { width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; gap: 32px; text-align: center; }
-.login-intro { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.login-names { display: flex; flex-direction: column; gap: 6px; }
-.login-name { margin: 0; font-size: 56px; line-height: 64px; font-weight: 700; letter-spacing: -0.03em; }
-.login-tag {
-  margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em;
-  background: linear-gradient(90deg, var(--accent), var(--claude)); -webkit-background-clip: text; background-clip: text; color: transparent;
+.login { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 100vh; }
+/* 왼쪽: data-theme="dark" 라 이 안의 토큰은 다크 값이다 */
+.lp {
+  position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 32px;
+  padding: 32px 40px 40px; background: var(--bg); color: var(--ink);
 }
-.login-sub { margin: 0; max-width: 480px; font-size: 16px; line-height: 27px; color: var(--muted); word-break: keep-all; }
-.login-card {
-  width: 100%; display: flex; flex-direction: column; gap: 14px; padding: 20px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
+.lp-brand { display: flex; align-items: center; gap: var(--space-2); font-weight: 700; letter-spacing: -0.01em; }
+.lp-intro { display: flex; flex-direction: column; gap: var(--space-3); }
+.lp-h { margin: 0; font-size: 30px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em; word-break: keep-all; }
+.lp-sub { margin: 0; max-width: 440px; font-size: 15px; line-height: 25px; color: var(--muted); word-break: keep-all; }
+.lp-stage { position: relative; flex: 1 0 auto; padding-bottom: 72px; }
+/* 예시 창: Claude Code 화면을 흉내 낸다 */
+.win {
+  position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
 }
+.win-bar {
+  display: flex; align-items: center; gap: var(--space-2); padding: 10px 14px; border-bottom: 1px solid var(--line);
+  font-size: 12px; line-height: 18px; color: var(--muted);
+}
+.win-bar b { font-weight: 600; color: var(--ink); }
+.win-bar .star { flex: none; color: var(--claude); }
+.win-bar .ex {
+  margin-left: auto; flex: none; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  font-size: 11px; line-height: 18px; color: var(--faint);
+}
+.win-body { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+.ex-u {
+  align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: var(--radius-lg); background: var(--surface-2);
+  font-size: 13.5px; line-height: 21px; word-break: keep-all;
+}
+.ex-c { font-size: 13.5px; line-height: 21px; word-break: keep-all; }
+.ex-c .ref { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+.ex-tool {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; padding: 4px 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); font-size: 12px; line-height: 18px; color: var(--muted);
+}
+.ex-tool .nm { font-family: var(--font-mono); color: var(--claude); }
+.ex-tool .arg { min-width: 0; font-family: var(--font-mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-tool .res { flex: none; font-family: var(--font-mono); color: var(--faint); }
+.ex-qa {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface);
+}
+.ex-qa .l { display: flex; gap: var(--space-2); align-items: baseline; }
+.ex-qa .tq, .ex-qa .ta { flex: none; width: 12px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+.ex-qa .tq { color: var(--accent); }
+.ex-qa .ta { color: var(--faint); }
+.ex-qa .q { font-size: 14px; line-height: 21px; font-weight: 600; }
+.ex-qa .a { font-size: 13px; line-height: 21px; word-break: keep-all; }
+.ex-qa .meta { padding-left: 20px; font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--faint); }
+/* 방금 등록한 Q&A: 예시 창 오른쪽 아래로 삐져나온다 */
+.ex-qa.new {
+  position: absolute; right: -16px; bottom: 0; width: 78%; gap: 4px; padding: 10px 14px;
+  border-color: var(--accent-line); box-shadow: var(--shadow-1);
+}
+.by-claude {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: var(--radius-pill);
+  background: var(--claude-soft); font-size: 11.5px; line-height: 20px; color: var(--claude);
+}
+/* 예시 애니메이션: 14초 주기 안에서 단계마다 아래에서 올라오며 나타나고 끝에 함께 사라진다 */
+.anim { opacity: 0; }
+@keyframes k1 { 0%, 2% { opacity: 0; transform: translateY(8px); } 6%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k2 { 0%, 12% { opacity: 0; transform: translateY(8px); } 16%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k3 { 0%, 22% { opacity: 0; transform: translateY(8px); } 26%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k4 { 0%, 32% { opacity: 0; transform: translateY(8px); } 36%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k5 { 0%, 48% { opacity: 0; transform: translateY(8px); } 52%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k6 { 0%, 58% { opacity: 0; transform: translateY(8px); } 62%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+@keyframes k7 { 0%, 68% { opacity: 0; transform: translateY(8px); } 72%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; transform: none; } }
+.a1 { animation: k1 14s ease infinite; }
+.a2 { animation: k2 14s ease infinite; }
+.a3 { animation: k3 14s ease infinite; }
+.a4 { animation: k4 14s ease infinite; }
+.a5 { animation: k5 14s ease infinite; }
+.a6 { animation: k6 14s ease infinite; }
+.a7 { animation: k7 14s ease infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .anim { animation: none; opacity: 1; transform: none; }
+}
+/* 오른쪽: 가운데 한 열 */
+.rp {
+  display: flex; align-items: center; justify-content: center; padding: 84px 24px 72px;
+  background: var(--surface); color: var(--ink);
+}
+.rp-col { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 24px; text-align: center; }
+.rp-head { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.rp-logo { display: block; margin-bottom: 12px; }
+.rp-h { margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em; }
+.rp-sub { margin: 0; font-size: 14px; line-height: 22px; color: var(--muted); word-break: keep-all; }
 .login-err {
   margin: 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--stale-soft);
   font-size: 13px; line-height: 20px; color: var(--stale); text-align: left; word-break: keep-all;
 }
-.login-btns { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.btn.login-btn { flex: 1 1 200px; padding: 11px 14px; font-size: 15px; line-height: 22px; font-weight: 600; text-align: center; color: var(--ink); }
-.btn.login-btn:hover { text-decoration: none; }
+.login-btns { display: flex; flex-direction: column; gap: var(--space-3); }
+.pbtn {
+  display: block; height: 48px; padding: 12px 16px; border: 1px solid var(--line-strong); background: var(--surface);
+  border-radius: var(--radius-md); font-size: 15px; line-height: 22px; font-weight: 600; text-align: center; color: var(--ink);
+}
+.pbtn:hover { border-color: var(--accent); text-decoration: none; }
+.pbtn:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .login-none {
-  flex: 1 1 auto; margin: 0; padding: 11px 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md);
+  margin: 0; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md);
   font-size: 13px; line-height: 20px; color: var(--muted);
 }
 .login-agree { margin: 0; font-size: 12px; line-height: 19px; color: var(--faint); word-break: keep-all; }
-.login-steps { width: 100%; max-width: 880px; display: flex; flex-direction: column; gap: var(--space-6); }
-.login-steps h2 { margin: 0; font-size: 12px; line-height: 18px; font-weight: 600; letter-spacing: .08em; color: var(--faint); text-align: center; }
-.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.step { display: flex; flex-direction: column; gap: 10px; padding-right: 28px; min-width: 0; }
-.step:last-child { padding-right: 0; }
-.step:last-child .wire { visibility: hidden; }
-.step-head { display: flex; align-items: center; gap: var(--space-3); }
-.login-steps .step-n {
-  flex: none; width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--accent-line);
-  background: var(--accent-soft); border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--accent);
-}
-.wire { flex: 1 1 auto; height: 1px; background: var(--line); }
-.step h3 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 700; }
-.step p { margin: 0; font-size: 14px; line-height: 23px; color: var(--muted); word-break: keep-all; }
-.step b { font-weight: 600; color: var(--ink); }
-.kbd {
-  font-family: var(--font-mono); font-size: 12px; line-height: 18px; padding: 0 6px; border: 1px solid var(--line-strong);
-  border-bottom-width: 2px; border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); white-space: nowrap;
-}
-.login-foot {
-  display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding: 20px var(--space-4);
-  border-top: 1px solid var(--line); text-align: center;
-}
-.login-foot p { margin: 0; max-width: 560px; font-size: 12px; line-height: 19px; color: var(--faint); word-break: keep-all; }
-.login-links { display: flex; gap: var(--space-3); font-size: 12px; }
-@media (max-width: 720px) {
-  .login-main { padding-top: var(--space-6); }
-  .login-name { font-size: 40px; line-height: 48px; }
-  .login-tag { font-size: 22px; line-height: 30px; }
-  .steps { grid-template-columns: minmax(0, 1fr); }
-  .step { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: 14px; row-gap: 2px; padding: 0 0 20px; }
-  .step-head { grid-row: 1 / span 2; flex-direction: column; align-self: stretch; }
-  .step .wire { width: 1px; height: auto; flex: 1 1 auto; margin: 6px 0 0; }
-  .step:last-child { padding-bottom: 0; }
+@media (max-width: 900px) {
+  .login { grid-template-columns: minmax(0, 1fr); }
+  .lp { display: none; }
+  .rp { align-items: flex-start; padding-top: 100px; }
 }
 
 /* 연결: 개인 토큰과 설치 명령 */
