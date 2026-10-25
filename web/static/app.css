@@ -55,6 +55,8 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .brand { display: flex; align-items: center; gap: var(--space-2); font-weight: 700; letter-spacing: -0.01em; margin-right: var(--space-3); }
 .brand svg { flex: none; }
 .grow { flex-grow: 1; }
+/* 상단 버튼을 28px 로 맞춰 상단 높이가 49px(Claude 패널 머리와 같은 높이)가 되게 한다 */
+.top .btn { line-height: 18px; }
 .keys { font-size: 12px; color: var(--faint); font-family: var(--font-mono); }
 
 /* ---------- 배치 ---------- */
@@ -278,7 +280,7 @@ a.ibtn:hover { text-decoration: none; }
 .toast {
   position: fixed; right: var(--space-4); bottom: var(--space-4); max-width: 520px; display: flex; gap: var(--space-3);
   align-items: center; padding: 8px 12px; border-radius: var(--radius-md); background: var(--ink); color: var(--bg);
-  opacity: 0; transition: opacity .2s; pointer-events: none; font-size: 13px; box-shadow: var(--shadow-1);
+  opacity: 0; transition: opacity .2s; pointer-events: none; font-size: 13px; box-shadow: var(--shadow-1); z-index: 30;
 }
 .toast.on { opacity: 1; pointer-events: auto; }
 .toast.err { background: var(--stale); color: var(--accent-ink); }
@@ -389,7 +391,7 @@ body.login-mode .brand { display: none; }
 .rp-head { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
 .rp-logo { display: block; margin-bottom: 12px; }
 .rp-h { margin: 0; font-size: 28px; line-height: 36px; font-weight: 700; letter-spacing: -0.02em; }
-.rp-sub { margin: 0; font-size: 14px; line-height: 22px; color: var(--muted); word-break: keep-all; }
+.rp-sub { margin: 0; font-size: 14px; line-height: 22px; color: var(--muted); word-break: keep-all; text-wrap: pretty; }
 .login-err {
   margin: 0; padding: 8px 12px; border-radius: var(--radius-md); background: var(--stale-soft);
   font-size: 13px; line-height: 20px; color: var(--stale); text-align: left; word-break: keep-all;
@@ -405,7 +407,7 @@ body.login-mode .brand { display: none; }
   margin: 0; padding: 12px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md);
   font-size: 13px; line-height: 20px; color: var(--muted);
 }
-.login-agree { margin: 0; font-size: 12px; line-height: 19px; color: var(--faint); word-break: keep-all; }
+.login-agree { margin: 0; font-size: 12px; line-height: 19px; color: var(--faint); word-break: keep-all; text-wrap: pretty; }
 @media (max-width: 900px) {
   .login { grid-template-columns: minmax(0, 1fr); }
   .lp { display: none; }
@@ -514,6 +516,9 @@ body.claude-open { height: 100vh; overflow: hidden; display: flex; flex-directio
 body.claude-open > .top { flex: none; }
 /* 남은 폭에서 상단이 두 줄로 꺾이지 않게(패널 머리 49px 와 한 줄로) 단축키 안내를 숨긴다 */
 body.claude-open .keys { display: none; }
+/* 남은 폭이 좁으면 분류 패널이 목록 위로 꺾인다. 그때 화면 높이를 다 차지하지 않게 하고, 목록은 360px 까지 옆에 둔다 */
+body.claude-open .side { min-height: 0; }
+body.claude-open .main { flex-basis: 360px; }
 body.claude-open > #app { flex: 1 1 auto; }
 body.claude-open > #app, .cl-log {
   min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -595,7 +600,7 @@ body.claude-open .toast { right: calc(440px + var(--space-4)); }
 .cl-table th { background: var(--surface-2); }
 .cl-code {
   margin: 0; padding: 8px 10px; background: var(--surface-2); border-radius: var(--radius-md);
-  font: var(--text-evidence); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto;
+  font: var(--text-evidence); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 .cl-think summary { width: fit-content; list-style: none; cursor: pointer; font-size: 12px; line-height: 18px; color: var(--faint); }
 .cl-think summary::-webkit-details-marker { display: none; }
@@ -624,7 +629,7 @@ a.cl-hit:hover .q { text-decoration: underline; }
 .cl-raw summary { width: fit-content; padding: 2px 0; cursor: pointer; }
 .cl-raw pre {
   margin: 4px 0 0; padding: 8px 10px; border-radius: var(--radius-md); background: var(--surface-2); font-family: var(--font-mono);
-  font-size: 11.5px; line-height: 17px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto;
+  font-size: 11.5px; line-height: 17px; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 /* 실행 중: 점 세 개. 동작 줄이기 설정에서도 정지 화면이 보인다 */
 .cl-dots { display: inline-flex; gap: 3px; margin-left: 2px; padding: 8px 0; }
@@ -683,4 +688,10 @@ a.cl-hit:hover .q { text-decoration: underline; }
   body.claude-open { padding-right: 0; }
   body.claude-open .toast { right: var(--space-4); }
   .claude-panel { width: 100%; border-left: 0; }
+}
+
+/* 화면에는 보이지 않고 스크린리더만 읽는 글(Claude 패널 상태 줄) */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }

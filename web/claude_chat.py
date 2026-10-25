@@ -237,7 +237,7 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
                 for b in tool_uses:
                     text, is_error = await _call(server, b.name, b.input)
                     yield _sse({"type": "tool_result", "id": b.id, "name": b.name, "input": b.input,
-                                "is_error": is_error, "text": text[:2000]})
+                                "is_error": is_error, "text": text[:TOOL_RESULT_MAX]})
                     results.append({"type": "tool_result", "tool_use_id": b.id, "content": text[:TOOL_RESULT_MAX],
                                     **({"is_error": True} if is_error else {})})
                 appended.append({"role": "user", "content": results})

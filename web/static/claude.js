@@ -13,7 +13,7 @@ const CL_WRITES = new Set(["kb_add", "kb_update", "kb_archive", "kb_restore", "k
 const CL_SUGS = ["최근 1주일 동안 등록한 질문을 정리해 줘", "비슷한 질문끼리 합칠 것을 찾아 줘", "열어 둔 항목의 답을 더 짧게 고쳐 줘"];
 // 목록에서 열어 둔 항목을 함께 보낼 때 사용자 말 앞에 붙이는 한 줄. 말풍선에는 보이지 않는다
 const CL_CTX = /^\[열어 둔 항목 #\d+\]\n/;
-const cl = { key: null, history: [], think: {}, running: false, abort: null, menu: null, ctxOff: null };
+const cl = { key: null, history: [], think: {}, running: false, abort: null, menu: null, ctxOff: null, draft: "" };
 
 Object.assign(ICONS, {
   search: ["M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14z", "M20 20l-3.5-3.5"],
@@ -30,22 +30,24 @@ Object.assign(ICONS, {
   next: ["M5 12h14", "M13 6l6 6-6 6"],
 });
 
-// 도구 줄의 화면 이름, 아이콘, 인자. MCP 이름(kb_search 등)은 '원본 보기' 안에만 보인다
+// 도구 줄의 화면 이름(busy 는 진행 중), 아이콘, 인자. MCP 이름(kb_search 등)은 '원본 보기' 안에만 보인다.
+// 인자는 모델이 만든 값이라 모양을 믿지 않는다(clArg 가 글자만 받는다)
 const clRef = (v) => (Number.isInteger(v) ? `#${v}` : "");
 const CL_TOOLS = {
-  kb_search: { label: "저장소 검색", icon: "search",
-    arg: (i) => i.query || (i.queries || []).join(", ") || (i.category ? `분류: ${i.category}` : "") },
-  kb_get: { label: "항목 읽기", icon: "doc", arg: (i) => clRef(i.id) },
-  kb_categories: { label: "분류 보기", icon: "folder" },
-  kb_add: { label: "새 Q&A 등록", icon: "plus", arg: (i) => i.category },
-  kb_update: { label: "Q&A 수정", icon: "pen", arg: (i) => clRef(i.id) },
-  kb_archive: { label: "Q&A 삭제", icon: "trash", arg: (i) => clRef(i.id) },
-  kb_restore: { label: "Q&A 복원", icon: "undo", arg: (i) => clRef(i.id) },
-  kb_link: { label: "관련 질문 연결", icon: "link", arg: (i) => [clRef(i.a), clRef(i.b)].filter(Boolean).join(" · ") },
-  kb_add_category: { label: "분류 추가", icon: "folder", arg: (i) => (i.parent ? `${i.parent} > ${i.name}` : i.name) },
-  kb_rename_category: { label: "분류 이름 변경", icon: "pen", arg: (i) => i.category },
-  kb_cleanup_list: { label: "정리 대상 보기", icon: "list" },
-  kb_cleanup_resolve: { label: "정리 완료", icon: "check", arg: (i) => clRef(i.finding_id) },
+  kb_search: { label: "저장소 검색", busy: "저장소 검색 중", icon: "search",
+    arg: (i) => i.query || (Array.isArray(i.queries) ? i.queries.join(", ") : "") || (i.category ? `분류: ${i.category}` : "") },
+  kb_get: { label: "항목 읽기", busy: "항목 읽는 중", icon: "doc", arg: (i) => clRef(i.id) },
+  kb_categories: { label: "분류 보기", busy: "분류 읽는 중", icon: "folder" },
+  kb_add: { label: "새 Q&A 등록", busy: "새 Q&A 등록 중", icon: "plus", arg: (i) => i.category },
+  kb_update: { label: "Q&A 수정", busy: "Q&A 수정 중", icon: "pen", arg: (i) => clRef(i.id) },
+  kb_archive: { label: "Q&A 삭제", busy: "Q&A 삭제 중", icon: "trash", arg: (i) => clRef(i.id) },
+  kb_restore: { label: "Q&A 복원", busy: "Q&A 복원 중", icon: "undo", arg: (i) => clRef(i.id) },
+  kb_link: { label: "관련 질문 연결", busy: "관련 질문 잇는 중", icon: "link",
+    arg: (i) => [clRef(i.a), clRef(i.b)].filter(Boolean).join(" · ") },
+  kb_add_category: { label: "분류 추가", busy: "분류 추가 중", icon: "folder", arg: (i) => (i.parent ? `${i.parent} > ${i.name}` : i.name) },
+  kb_rename_category: { label: "분류 이름 변경", busy: "분류 이름 바꾸는 중", icon: "pen", arg: (i) => i.category },
+  kb_cleanup_list: { label: "정리 대상 보기", busy: "정리 대상 찾는 중", icon: "list" },
+  kb_cleanup_resolve: { label: "정리 완료", busy: "정리 완료 처리 중", icon: "check", arg: (i) => clRef(i.finding_id) },
 };
 
 function clLoad() {
@@ -240,7 +242,7 @@ const clIsQa = (v) => v && Number.isInteger(v.id) && typeof v.question === "stri
 
 function clHits(list, link = true) {
   return (Array.isArray(list) ? list : []).filter(clIsQa).map((h) => el(link ? "a" : "span",
-    { class: "cl-hit", href: link ? `#qa/${h.id}` : null }, el("span", { class: "q" }, h.question),
+    { class: "cl-hit", href: link ? `#qa/${h.id}` : null, title: h.question }, el("span", { class: "q" }, h.question),
     el("span", { class: "id" }, `#${h.id}`)));
 }
 
@@ -274,15 +276,25 @@ function clSummary(name, data) {
   if (name === "kb_update" && clIsQa(data)) return { go: data.id, body: [clQa(data, true)] };
   if (name === "kb_restore" && clIsQa(data)) return { go: data.id, body: clHits([data]) };
   if (name === "kb_archive" && clIsQa(data)) return { body: clHits([data], false) };
+  if (name === "kb_categories" && Array.isArray(data.categories)) return { res: `· 대분류 ${data.categories.length}개` };
   return {};
 }
 
+function clArg(t, input) {
+  try {
+    const v = input && typeof input === "object" && t.arg ? t.arg(input) : "";
+    return typeof v === "string" ? v : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 function clToolRow(name, input, result) {
-  const t = CL_TOOLS[name] || { label: name, icon: "doc" };
+  const t = CL_TOOLS[name] || { label: name, busy: `${name} 실행 중`, icon: "doc" };
   const pending = result === undefined;
   const sum = pending || result.is_error ? {} : clSummary(name, clParse(result.text));
-  const arg = input && t.arg ? t.arg(input) : "";
-  const head = el("div", { class: "cl-act" }, clIcon(t.icon, 13), el("b", {}, pending ? `${t.label} 중` : t.label),
+  const arg = clArg(t, input);
+  const head = el("div", { class: "cl-act" }, clIcon(t.icon, 13), el("b", {}, pending ? t.busy : t.label),
     arg ? el("span", { class: "arg", title: arg }, arg) : null,
     sum.res ? el("span", { class: "res" }, sum.res) : null,
     pending ? clDots() : null,
@@ -328,7 +340,7 @@ function clMessages() {
       if (b.type === "thinking") turn.append(...[clThinking(b.thinking, cl.think[`${i}:${j}`])].filter(Boolean));
       else if (b.type === "text") turn.append(el("div", { class: "cl-md" }, mdRender(b.text)));
       else if (b.type === "tool_use") turn.append(clToolRow(b.name, b.input, results.get(b.id)));
-      else if (b.type === "fallback") turn.append(el("p", { class: "cl-note" }, `${b.to?.model || "다른 모델"} 가 이어서 답했습니다.`));
+      else if (b.type === "fallback") turn.append(el("p", { class: "cl-note" }, `${CL_MODELS[b.to?.model] || b.to?.model || "다른 모델"} 가 이어서 답했습니다.`));
     });
     out.push(turn);
   });
@@ -506,12 +518,23 @@ async function clSend(text) {
   clRenderLog(live.node, true);
   clBusy(true);
   cl.abort = new AbortController();
+  clStatus("응답을 기다리는 중입니다.");
   let finished = false;
   let wrote = false;
+  // 실패한 요청은 기록에 남기지 않고 보낸 말을 입력칸에 되돌린다. 응답을 기다리는 동안 새로 쓴 글이 있으면 그 앞에 둔다
+  const restore = () => {
+    cl.history.length = before;
+    const box = $("#cl-input");
+    if (box) {
+      box.value = box.value.trim() ? `${text}\n${box.value}` : text;
+      clGrow();
+    } else {
+      cl.draft = text;
+    }
+  };
   const fail = (msg) => {
-    cl.history.length = before; // 실패한 요청은 기록에 남기지 않는다. 입력은 되돌린다
-    input.value = text;
-    clGrow();
+    restore();
+    clStatus("");
     clRenderLog(el("p", { class: "cl-err", role: "alert" }, msg), true);
   };
   try {
@@ -519,8 +542,13 @@ async function clSend(text) {
       body: JSON.stringify({ messages: cl.history }), signal: cl.abort.signal });
     if (!r.ok) {
       const data = await r.json().catch(() => ({}));
-      if (data.code === "no_key") return clOpen();
-      return fail(r.status === 413 ? "대화가 길어 더 보낼 수 없습니다. 새 대화를 시작해 주세요." : (data.error || `HTTP ${r.status}`));
+      if (data.code === "no_key") {
+        restore();
+        cl.draft = text;
+        return clOpen();
+      }
+      return fail(r.status === 413 ? "대화가 길어 더 보낼 수 없습니다. 새 대화를 시작해 주세요."
+        : (data.error || `요청을 처리하지 못했습니다(HTTP ${r.status}).`));
     }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
@@ -545,17 +573,31 @@ async function clSend(text) {
           finished = true;
           fail(ev.text);
         } else {
-          live.on(ev);
+          // 멈춤으로 done 을 못 받아도 이미 실행한 쓰기는 목록에 반영한다
+          if (ev.type === "tool_result" && !ev.is_error && CL_WRITES.has(ev.name)) wrote = true;
+          try {
+            live.on(ev);
+          } catch (err) {
+            // 그리기 실패(예상 밖 모양의 도구 결과)로 대화를 끊지 않는다. 끝나면 기록으로 다시 그린다
+          }
         }
       }
     }
     if (!finished) fail("응답이 도중에 끊겼습니다. 다시 보내 주세요.");
     else if (cl.history.length > before + 1) {
       clSave();
+      clStatus("답이 왔습니다.");
       clRenderLog();
     }
   } catch (e) {
-    fail(e.name === "AbortError" ? "멈췄습니다. 이미 실행한 변경은 그대로 남습니다." : "서버에 연결하지 못했습니다.");
+    if (e.name !== "AbortError") cl.abort?.abort(); // 읽다가 실패하면 서버의 대화 반복도 멈춘다
+    if (!finished) {
+      fail(e.name === "AbortError" ? "멈췄습니다. 이미 실행한 변경은 그대로 남습니다." : "서버에 연결하지 못했습니다.");
+    } else if (cl.history.length > before + 1) {
+      // done 을 받은 뒤 끊겼으면 끝난 대화로 둔다
+      clSave();
+      clRenderLog();
+    }
   } finally {
     cl.abort = null;
     clBusy(false);
@@ -566,6 +608,12 @@ async function clSend(text) {
   }
 }
 
+// 스크린리더용 상태 한 줄. 대화 띠 전체를 live region 으로 두면 조각마다 다시 읽힌다
+function clStatus(text) {
+  const s = $("#cl-status");
+  if (s) s.textContent = text;
+}
+
 function clBusy(on) {
   cl.running = on;
   const send = $("#cl-send");
@@ -574,10 +622,10 @@ function clBusy(on) {
   send.setAttribute("aria-label", on ? "멈춤" : "보내기");
   send.title = on ? "멈춤" : "보내기 (Enter)";
   fill(send, on ? clStop() : clIcon("up", 15, 2.4));
-  const input = $("#cl-input");
-  input.disabled = on;
   for (const b of $("#claude").querySelectorAll("[data-busy-off]")) b.disabled = on;
-  if (!on && (!document.activeElement || document.activeElement === document.body)) input.focus();
+  // 응답 중에도 입력칸은 쓸 수 있다(다음 말을 미리 쓴다). 끝나면 포커스가 패널 안이나 빈 곳이었을 때만 입력칸으로 돌린다
+  const a = document.activeElement;
+  if (!on && (!a || a === document.body || $("#claude").contains(a))) $("#cl-input").focus();
 }
 
 // ---------- 입력 띠 ----------
@@ -612,7 +660,9 @@ function clCtx() {
 }
 
 function clComposer() {
-  const input = el("textarea", { id: "cl-input", rows: 2, "aria-label": "Claude 에게 보낼 말", placeholder: "무엇을 할까요?" });
+  const input = el("textarea", { id: "cl-input", rows: 2, "aria-label": "Claude 에게 보낼 말", placeholder: "무엇을 할까요?",
+    value: cl.draft });
+  cl.draft = ""; // 키를 다시 등록하느라 입력 띠가 사라졌던 동안 보관한 말
   input.addEventListener("input", clGrow);
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
@@ -663,7 +713,22 @@ function clMenu(kind) {
       (cl.key.models || Object.keys(CL_MODELS)).map((m) => el("button", { type: "button", role: "menuitemradio",
         "aria-checked": String(m === cl.key.model), onclick: () => clSetModel(m) },
       CL_MODELS[m] || m, m === cl.key.model ? clIcon("check", 14) : null)));
-  $("#claude").append(menu);
+  // 머리 띠 안에 넣어 Tab 순서가 여는 버튼 바로 뒤로 이어지게 한다. 위치는 패널 기준(absolute)이라 그대로다
+  menu.addEventListener("keydown", (e) => {
+    const items = [...menu.querySelectorAll("button")];
+    const i = items.indexOf(document.activeElement);
+    const go = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 }[e.key];
+    if (go !== undefined) {
+      e.preventDefault();
+      items[(go + items.length) % items.length].focus();
+    } else if (e.key === "Tab") {
+      clMenu(null);
+    }
+  });
+  menu.addEventListener("focusout", (e) => {
+    if (cl.menu && !menu.contains(e.relatedTarget) && !e.relatedTarget?.closest?.("[data-menu]")) clMenu(null);
+  });
+  $("#claude .cl-head").append(menu);
   menu.querySelector("button").focus();
 }
 
@@ -715,13 +780,14 @@ async function clOpen() {
     return;
   }
   if (!cl.key.set) return clKeyView(cl.key.stale, false);
-  const log = el("div", { id: "cl-log", class: "cl-log", "aria-live": "polite" });
+  const log = el("div", { id: "cl-log", class: "cl-log" });
   log.addEventListener("scroll", () => {
     if (clAtEnd(log)) $("#cl-latest").hidden = true;
   });
   const latest = el("button", { id: "cl-latest", class: "cl-latest", type: "button", hidden: true, onclick: clToEnd },
     clIcon("down", 13), "최신 메시지로");
-  fill(panel, clHead(), el("div", { class: "cl-scroll" }, log, latest), clComposer());
+  fill(panel, clHead(), el("div", { class: "cl-scroll" }, log, latest), clComposer(),
+    el("span", { id: "cl-status", class: "sr-only", role: "status" }));
   clCtx();
   clBusy(cl.running);
   clRenderLog(null, true);
@@ -730,13 +796,21 @@ async function clOpen() {
 
 function clToggle(open) {
   const panel = $("#claude");
+  const app = $("#app");
   if (cl.running && !open) cl.abort?.abort();
+  // 패널을 열고 닫으면 스크롤하는 곳이 페이지와 목록 칸(#app) 사이에서 바뀐다. 보던 위치를 옮겨 준다
+  const was = document.body.classList.contains("claude-open");
+  const y = was ? app.scrollTop : Math.max(0, window.scrollY - app.offsetTop);
+  const focusIn = panel.contains(document.activeElement) || document.activeElement === document.body;
   panel.hidden = !open;
   document.body.classList.toggle("claude-open", open);
+  if (open && !was) app.scrollTop = y;
+  else if (!open && was) document.scrollingElement.scrollTop = app.offsetTop + y; // window.scrollTo 는 app.js 의 scrollTo(id) 가 가린다
   $("#claude-btn").classList.toggle("on", open);
   $("#claude-btn").setAttribute("aria-expanded", String(open));
   store("fq-claude-open", open ? "1" : "0");
   if (open) clOpen();
+  else if (focusIn) $("#claude-btn").focus({ preventScroll: true }); // 패널 안에 있던 포커스를 여는 버튼으로 돌린다(보던 위치는 그대로)
 }
 
 clLoad();

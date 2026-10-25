@@ -518,6 +518,7 @@ function collapse(id, r) {
   if (state.sel === id) {
     state.sel = null;
     setHash(null);
+    document.dispatchEvent(new Event("fq-select"));
   }
   r.removeTimer = setTimeout(() => {
     r.remove();
@@ -567,7 +568,7 @@ function toggle(id, force) {
   document.dispatchEvent(new Event("fq-select")); // Claude 패널의 '함께 보냄' 칩이 듣는다
   if (open) {
     if (state.q) remember(state.q);
-    loadDetail(id);
+    return loadDetail(id);
   }
 }
 
@@ -915,6 +916,7 @@ function openNew(question) {
     toast(msg);
     state.q = "";
     $("#q").value = "";
+    syncRecentList();
     state.cat = null;
     state.pin = it.id;
     state.sel = it.id;
@@ -949,6 +951,7 @@ function restoreFromUrl() {
   const cat = Number(p.get("cat"));
   state.q = q;
   $("#q").value = q;
+  syncRecentList();
   state.cat = state.flat.some((c) => c.id === cat) ? cat : null;
   state.since = p.has("since");
   renderTree();
@@ -979,6 +982,7 @@ async function openFromHash() {
   if (!rows.has(id) || rows.get(id).classList.contains("out")) {
     state.q = "";
     $("#q").value = "";
+    syncRecentList();
     state.cat = null;
     state.since = false;
     renderTree();
@@ -1004,9 +1008,16 @@ function move(dir) {
   if (!ids.length) return;
   const i = ids.indexOf(state.sel);
   const next = ids[i < 0 ? (dir > 0 ? 0 : ids.length - 1) : Math.min(ids.length - 1, Math.max(0, i + dir))];
-  toggle(next, true);
-  // 펼친 내용이 그려진 뒤의 높이로 스크롤 위치를 정한다
-  requestAnimationFrame(() => scrollTo(next));
+  revealAfterOpen(next);
+}
+
+// 펼치면서 보이게 스크롤한다. 근거와 이력 줄은 상세를 읽은 뒤 늘어나므로 그때 한 번 더 맞춘다
+function revealAfterOpen(id) {
+  const loaded = toggle(id, true);
+  requestAnimationFrame(() => scrollTo(id));
+  loaded?.then(() => {
+    if (state.sel === id) requestAnimationFrame(() => scrollTo(id));
+  });
 }
 
 // 최근 검색어 10개(localStorage). 입력 중간값이 쌓이지 않게 입력이 2초 멈췄을 때, Enter, 결과 행 펼침, 칩 클릭 때만 남긴다
@@ -1026,6 +1037,14 @@ function renderRecent(list = recentList()) {
   fill($("#recent-q"), list.map((s) => el("option", { value: s })));
 }
 
+// 최근 검색어 제안은 검색창이 비었을 때만 붙인다(빈 검색창을 누르면 열린다).
+// 글자가 있을 때 브라우저의 제안 목록이 열려 있으면 그 목록이 위아래 화살표를 가져가 결과 행 이동이 막힌다
+function syncRecentList() {
+  const q = $("#q");
+  if (q.value) q.removeAttribute("list");
+  else q.setAttribute("list", "recent-q");
+}
+
 function remember(query) {
   clearTimeout(rememberTimer);
   const q = (query || "").trim();
@@ -1039,6 +1058,7 @@ function searchFor(query) {
   remember(query);
   const q = $("#q");
   q.value = query;
+  syncRecentList();
   state.q = query.trim();
   state.pin = null;
   q.focus();
@@ -1048,6 +1068,7 @@ function searchFor(query) {
 function clearSearch() {
   const q = $("#q");
   q.value = "";
+  syncRecentList();
   state.q = "";
   state.cat = null;
   state.since = false;
@@ -1085,6 +1106,9 @@ const LOGIN_ERRORS = {
 
 function showLogin(providers) {
   if (!$("#login").hidden) return;
+  // 세션이 끝나면 Claude 패널도 닫는다. 열어 둔 설정(fq-claude-open)은 두어 다시 로그인하면 다시 열린다
+  $("#claude").hidden = true;
+  document.body.classList.remove("claude-open");
   const p = new URLSearchParams(location.search);
   const code = p.get("login_error");
   p.delete("login_error");
@@ -1322,6 +1346,7 @@ function init() {
   const q = $("#q");
   // 검색어를 입력하면 펼친 행과 편집을 닫는다
   q.addEventListener("input", () => {
+    syncRecentList();
     state.q = q.value.trim();
     if (state.q) state.pin = null;
     if (state.editing) {
@@ -1354,10 +1379,7 @@ function init() {
       e.preventDefault();
       remember(q.value);
       const ids = visibleIds();
-      if (ids.length && !ids.includes(state.sel)) {
-        toggle(ids[0], true);
-        requestAnimationFrame(() => scrollTo(ids[0]));
-      }
+      if (ids.length && !ids.includes(state.sel)) revealAfterOpen(ids[0]);
     } else if (e.key === "Escape") {
       // 문법 도움말이 열려 있으면 그것만 닫는다. 아니면 펼친 행을 먼저 접고, 없으면 검색어·분류 필터·24시간 보기를 지운다
       if (!$("#help").hidden) openHelp(false);
