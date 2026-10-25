@@ -34,7 +34,7 @@ CLIENT_JSON_MAX = 8192  # 등록 한 건의 메타데이터 크기 상한(인증
 REDIRECT_MAX = 10
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 PROVIDER_LABELS = {"github": "GitHub", "google": "Google"}
-CONSENT = "Claude Code 가 당신의 KB 를 읽고 씁니다"
+CONSENT = "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다"
 
 log = logging.getLogger("fast-question.oauth")
 
@@ -184,7 +184,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} - fast-question</title>
+<title>{title} - fast question</title>
 <script src="/static/theme.js"></script>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/tokens.css">
@@ -192,7 +192,7 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <main>
-<div class="brand">{logo}<span class="name">fast-question</span><span class="host">{host}</span></div>
+<div class="brand">{logo}<span class="name">fast question</span><span class="host">{host}</span></div>
 {body}
 </main>
 </body>
@@ -217,15 +217,15 @@ def page(title: str, body: str, host: str, status: int = 200) -> HTMLResponse:
 
 
 def ended(host: str) -> HTMLResponse:
-    return page("요청이 끝났다", "<h1>연결 요청이 끝났다</h1>"
-                "<p>없거나 10분이 지났거나 이미 처리한 요청이다. Claude Code 에서 다시 연결한다.</p>", host, 400)
+    return page("요청이 끝났습니다", "<h1>연결 요청이 끝났습니다</h1>"
+                "<p>없거나 10분이 지났거나 이미 처리한 요청입니다. Claude Code 에서 다시 연결해 주세요.</p>", host, 400)
 
 
 def login_page(providers, path: str, host: str, status: int = 200) -> HTMLResponse:
     query = urlencode({"next": path})
     links = "".join(f'<a class="btn" href="/auth/login/{html.escape(name)}?{html.escape(query)}">'
                     f"{html.escape(PROVIDER_LABELS.get(name, name))} 로 로그인</a>" for name in sorted(providers))
-    body = ("<h1>로그인</h1><p>Claude Code 를 이 KB 에 연결하려면 먼저 로그인한다.</p>"
+    body = ("<h1>로그인</h1><p>Claude Code 를 내 질문·답변 저장소에 연결하려면 먼저 로그인해 주세요.</p>"
             + (f'<div class="logins">{links}</div>' if links else '<p class="none">켜진 로그인 공급자가 없습니다.</p>')
             + AGREE)
     return page("로그인", body, host, status)
@@ -234,7 +234,7 @@ def login_page(providers, path: str, host: str, status: int = 200) -> HTMLRespon
 def consent_page(client: OAuthClientInformationFull | None, params: dict, host: str) -> HTMLResponse:
     name = (client.client_name if client else None) or (client.client_id if client else "")
     body = (f"<h1>{html.escape(CONSENT)}</h1>"
-            "<p>승인하면 이 프로그램이 당신의 계정으로 KB 를 검색·등록·수정한다.</p>"
+            "<p>승인하면 이 프로그램이 내 계정으로 저장소를 검색·등록·수정합니다.</p>"
             f"<dl><div><dt>요청한 프로그램</dt><dd>{html.escape(name)}</dd></div>"
             f"<div><dt>승인 뒤 돌아갈 주소</dt><dd>{html.escape(params['redirect_uri'])}</dd></div></dl>"
             '<form method="post" class="actions">'
@@ -275,7 +275,7 @@ def routes(providers, control_path) -> list[Route]:
             return login_page(providers, path, host, 401)
         decision = (await request.form()).get("decision")
         if decision not in ("approve", "deny"):
-            return page("잘못된 요청", "<h1>잘못된 요청이다</h1><p>승인 또는 거부를 고른다.</p>", host, 400)
+            return page("잘못된 요청", "<h1>잘못된 요청입니다</h1><p>승인 또는 거부를 골라 주세요.</p>", host, 400)
         found = await run_in_threadpool(db, oauth_store.take_pending, pending_id)
         if found is None:
             return ended(host)

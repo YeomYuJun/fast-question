@@ -16,7 +16,7 @@ from web import auth
 
 REDIRECT = "http://localhost:33418/callback"
 RESOURCE = f"{URL}/mcp"
-CONSENT = "Claude Code 가 당신의 KB 를 읽고 씁니다"
+CONSENT = "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다"
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
 

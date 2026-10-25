@@ -59,7 +59,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} - fast-question</title>
+<title>{title} - fast question</title>
 <link rel="stylesheet" href="/static/tokens.css">
 <link rel="stylesheet" href="/cli/login.css">
 </head>
@@ -120,7 +120,7 @@ def consent_page(params: dict, account: dict) -> HTMLResponse:
     hidden = "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in params.items())
     who = account.get("display_name") or ", ".join(PROVIDER_LABELS.get(p, p) for p in account.get("providers", []))
     body = ("<h1>이 PC 를 연결할까요?</h1>"
-            "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 KB 를 검색·등록·수정합니다. "
+            "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 내 질문·답변 저장소를 검색·등록·수정합니다."
             "토큰은 180일 뒤 끝나고, 연결 패널의 토큰 목록에서 언제든 폐기할 수 있습니다.</p>"
             f"<dl><dt>PC 이름</dt><dd>{html.escape(params['device'])}</dd>"
             f"<dt>계정</dt><dd>{html.escape(who)}</dd></dl>"
