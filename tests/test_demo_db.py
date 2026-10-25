@@ -16,5 +16,7 @@ def test_demo_db_has_every_screen_state(tmp_path):
     assert authors == {"user", "claude"}
     assert conn.execute("SELECT count(*) FROM qa_link").fetchone()[0] >= 1
     assert conn.execute("SELECT max(length(question)) FROM qa").fetchone()[0] == 150
+    # 예시는 캔버스 Main 보드와 같은 웹 개발 내용이다
+    assert conn.execute("SELECT question FROM qa WHERE id = 1").fetchone()[0] == "API 를 부를 때 CORS 오류가 나는 이유는?"
     conn.close()
     assert build(tmp_path / "데모 폴더", port=8799) == cfg_path  # 다시 만들어도 된다
