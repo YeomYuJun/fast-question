@@ -1164,6 +1164,7 @@ async function logout() {
     toast(e.message, { err: true });
     return;
   }
+  document.dispatchEvent(new Event("fq-logout")); // Claude 패널 대화 기록을 지운다
   location.reload();
 }
 
@@ -1321,6 +1322,7 @@ function leaveForm() {
       toast(e.message, { err: true });
       return;
     }
+    document.dispatchEvent(new Event("fq-logout"));
     location.href = "/";
   } },
   el("span", { class: "cn-label" }, "탈퇴"),

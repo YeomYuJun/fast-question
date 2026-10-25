@@ -7,6 +7,7 @@
 
 const CL_HISTORY = "fq-claude-history";
 const CL_THINK = "fq-claude-think";
+const CL_OWNER = "fq-claude-owner"; // 대화 기록을 만든 계정 id
 const CL_MODELS = { "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5", "claude-haiku-5-5": "Haiku 5.5" };
 const CL_WRITES = new Set(["kb_add", "kb_update", "kb_archive", "kb_restore", "kb_link", "kb_add_category",
   "kb_rename_category"]);
@@ -57,6 +58,20 @@ function clLoad() {
   } catch (e) {
     cl.history = [];
     cl.think = {};
+  }
+}
+
+// 같은 탭에서 다른 계정으로 로그인했으면 지난 계정의 대화를 버린다. 로그아웃·탈퇴 때도 지운다(fq-logout)
+function clOwner(id) {
+  try {
+    if (sessionStorage.getItem(CL_OWNER) === String(id)) return;
+    cl.history = [];
+    cl.think = {};
+    clSave();
+    if (id == null) sessionStorage.removeItem(CL_OWNER);
+    else sessionStorage.setItem(CL_OWNER, String(id));
+  } catch (e) {
+    // 브라우저 저장소를 못 쓰면 기록도 남지 않는다
   }
 }
 
@@ -840,6 +855,8 @@ document.addEventListener("fq-select", () => {
 // 계정 표시가 켜질 때(원격 모드 로그인) 아이콘을 보인다. 지난번에 열어 둔 채였으면 다시 연다
 new MutationObserver(() => {
   const on = !$("#account").hidden;
+  if (on) clOwner(me?.account?.id);
   $("#claude-btn").hidden = !on;
   if (on && store("fq-claude-open") === "1" && $("#claude").hidden) clToggle(true);
 }).observe($("#account"), { attributes: true, attributeFilter: ["hidden"] });
+document.addEventListener("fq-logout", () => clOwner(null));
