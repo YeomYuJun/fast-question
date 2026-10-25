@@ -290,6 +290,8 @@ function renderChip() {
   const c = state.flat.find((x) => x.id === state.cat);
   chip.hidden = !c;
   chip.textContent = c ? `${c.path} ×` : "";
+  if (c) chip.setAttribute("aria-label", `분류 필터 해제: ${c.path}`);
+  else chip.removeAttribute("aria-label");
 }
 
 // 요약 줄의 "최근 24시간 N건" 칩. 켜져 있지 않고 0건이면 숨긴다
@@ -695,7 +697,7 @@ function detailEl(id) {
       ? el("div", { class: "dline" }, label("연결"),
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
-    el("div", { class: "dline" }, label("이력"), histLine(id, d),
+    el("div", { class: "dline hline" }, label("이력"), histLine(id, d),
       ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했다.")),
       ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했다.")),
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));

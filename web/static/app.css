@@ -35,6 +35,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
   background: transparent; border-radius: var(--radius-md); cursor: pointer; color: var(--muted);
 }
 .iconbtn:hover { border-color: var(--accent-line); color: var(--accent); }
+.iconbtn:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .fld {
   min-width: 0; border: 1px solid var(--line-strong); background: var(--surface);
   border-radius: var(--radius-md); padding: 4px 8px;
@@ -56,7 +57,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 .brand svg { flex: none; }
 .grow { flex-grow: 1; }
 /* 상단 버튼을 28px 로 맞춰 상단 높이가 49px(Claude 패널 머리와 같은 높이)가 되게 한다 */
-.top .btn { line-height: 18px; }
+.top .btn, .top .navbtn { line-height: 18px; }
 .keys { font-size: 12px; color: var(--faint); font-family: var(--font-mono); }
 
 /* ---------- 배치 ---------- */
@@ -249,6 +250,14 @@ a.ibtn:hover { text-decoration: none; }
 .erow select.fld { flex: none; padding: 4px 6px; max-width: 240px; }
 .erow .fe { flex: 1 1 220px; font: var(--text-evidence); }
 .erow .spacer { flex-grow: 1; }
+@media (max-width: 480px) {
+  /* 좁은 폭: 분류·근거 칸은 한 줄씩 쓰고 저장·취소·삭제는 그 아래 한 줄에 둔다 */
+  .erow select.fld, .erow .fe { flex: 1 1 100%; max-width: none; }
+  /* 이력 글이 잘리지 않게 복사·주소 복사·편집 버튼은 다음 줄 오른쪽으로 보낸다 */
+  .dline.hline { flex-wrap: wrap; row-gap: 4px; }
+  .dline.hline > .hist { flex-basis: calc(100% - 38px); }
+  .dline.hline > .hist + * { margin-left: auto; }
+}
 .emsg { padding-left: 20px; font-size: 12.5px; color: var(--stale); }
 .emsg:empty { display: none; }
 .similar { padding: 4px 0 0 20px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
@@ -313,7 +322,8 @@ body.login-mode .brand { display: none; }
 .lp-intro { display: flex; flex-direction: column; gap: var(--space-3); }
 .lp-h { margin: 0; font-size: 30px; line-height: 40px; font-weight: 700; letter-spacing: -0.02em; word-break: keep-all; }
 .lp-sub { margin: 0; max-width: 440px; font-size: 15px; line-height: 25px; color: var(--muted); word-break: keep-all; }
-.lp-stage { position: relative; flex: 1 0 auto; padding-bottom: 72px; }
+/* 예시 창 아래 칸에 새 Q&A 카드를 둔다. 높은 창에서는 왼쪽 열 바닥에 붙고, 낮은 창에서는 예시 창 모서리에만 걸친다(마지막 줄을 덮지 않는다) */
+.lp-stage { position: relative; flex: 1 0 auto; display: grid; grid-template-rows: auto 1fr; }
 /* 예시 창: Claude Code 화면을 흉내 낸다 */
 .win {
   position: relative; overflow: hidden; background: var(--surface); border: 1px solid var(--line);
@@ -356,7 +366,7 @@ body.login-mode .brand { display: none; }
 .ex-qa .meta { padding-left: 20px; font-family: var(--font-mono); font-size: 11px; line-height: 16px; color: var(--faint); }
 /* 방금 등록한 Q&A: 예시 창 오른쪽 아래로 삐져나온다 */
 .ex-qa.new {
-  position: absolute; right: -16px; bottom: 0; width: 78%; gap: 4px; padding: 10px 14px;
+  position: relative; align-self: end; justify-self: end; width: 78%; margin: -13px -16px 0 0; gap: 4px; padding: 10px 14px;
   border-color: var(--accent-line); box-shadow: var(--shadow-1);
 }
 .by-claude {
@@ -381,6 +391,10 @@ body.login-mode .brand { display: none; }
 .a7 { animation: k7 14s ease infinite; }
 @media (prefers-reduced-motion: reduce) {
   .anim { animation: none; opacity: 1; transform: none; }
+}
+/* 낮은 창: 왼쪽 열 간격을 줄여 페이지가 덜 길어지게 한다 */
+@media (max-height: 760px) {
+  .lp { gap: 20px; padding: 24px 40px 28px; }
 }
 /* 오른쪽: 가운데 한 열 */
 .rp {
@@ -516,6 +530,18 @@ body.claude-open { height: 100vh; overflow: hidden; display: flex; flex-directio
 body.claude-open > .top { flex: none; }
 /* 남은 폭에서 상단이 두 줄로 꺾이지 않게(패널 머리 49px 와 한 줄로) 단축키 안내를 숨긴다 */
 body.claude-open .keys { display: none; }
+/* 패널 옆에 남은 폭이 좁아도 상단은 한 줄. 계정 이름만 줄어들고(말줄임), 1100px 이하는 로고 글자를, 1000px 이하는 계정 이름을 숨긴다 */
+@media (min-width: 901px) {
+  body.claude-open .top { flex-wrap: nowrap; }
+  body.claude-open .top > * { flex-shrink: 0; }
+  body.claude-open .top > .account { flex-shrink: 1; }
+}
+@media (min-width: 901px) and (max-width: 1100px) {
+  body.claude-open .brand span { display: none; }
+}
+@media (min-width: 901px) and (max-width: 1000px) {
+  body.claude-open .account-name { display: none; }
+}
 /* 남은 폭이 좁으면 분류 패널이 목록 위로 꺾인다. 그때 화면 높이를 다 차지하지 않게 하고, 목록은 360px 까지 옆에 둔다 */
 body.claude-open .side { min-height: 0; }
 body.claude-open .main { flex-basis: 360px; }
