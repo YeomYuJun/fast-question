@@ -798,14 +798,16 @@ function clToggle(open) {
   const panel = $("#claude");
   const app = $("#app");
   if (cl.running && !open) cl.abort?.abort();
-  // 패널을 열고 닫으면 스크롤하는 곳이 페이지와 목록 칸(#app) 사이에서 바뀐다. 보던 위치를 옮겨 준다
+  // 패널을 열고 닫으면 스크롤하는 곳이 페이지와 목록 칸(#app) 사이에서 바뀐다.
+  // 목록 내용의 맨 위가 화면에서 놓인 높이를 재어 두고, 바꾼 뒤 같은 높이에 오게 스크롤한다(행이 제자리에 있다)
   const was = document.body.classList.contains("claude-open");
-  const y = was ? app.scrollTop : Math.max(0, window.scrollY - app.offsetTop);
+  const contentTop = () => app.getBoundingClientRect().top - (document.body.classList.contains("claude-open") ? app.scrollTop : 0);
+  const before = contentTop();
   const focusIn = panel.contains(document.activeElement) || document.activeElement === document.body;
   panel.hidden = !open;
   document.body.classList.toggle("claude-open", open);
-  if (open && !was) app.scrollTop = y;
-  else if (!open && was) document.scrollingElement.scrollTop = app.offsetTop + y; // window.scrollTo 는 app.js 의 scrollTo(id) 가 가린다
+  if (open && !was) app.scrollTop = app.getBoundingClientRect().top - before;
+  else if (!open && was) document.scrollingElement.scrollTop += contentTop() - before; // window.scrollTo 는 app.js 의 scrollTo(id) 가 가린다
   $("#claude-btn").classList.toggle("on", open);
   $("#claude-btn").setAttribute("aria-expanded", String(open));
   store("fq-claude-open", open ? "1" : "0");
