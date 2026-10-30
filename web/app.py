@@ -417,6 +417,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         # 약관·처리방침은 로그인 없이 연다(로그인 화면과 OAuth 로그인 카드가 링크한다)
         Route("/terms", lambda r: FileResponse(STATIC / "terms.html", headers=NO_CACHE)),
         Route("/privacy", lambda r: FileResponse(STATIC / "privacy.html", headers=NO_CACHE)),
+        # 검색 엔진·일부 브라우저는 <link rel="icon"> 대신 이 주소를 먼저 찾는다
+        Route("/favicon.ico", lambda r: FileResponse(STATIC / "favicon.ico", media_type="image/x-icon")),
         Route(HEALTH_PATH, healthz),
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),

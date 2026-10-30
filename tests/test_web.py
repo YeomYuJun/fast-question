@@ -34,7 +34,9 @@ def add_basics(client):
 def test_index_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
-    assert "<title>fast question</title>" in r.text
+    assert "<title>fast question - Claude 와 같이 쓰는 Q&amp;A 저장소</title>" in r.text
+    assert '<meta name="description" content="' in r.text  # 검색 결과 요약이 로그인 화면 견본 문장을 잘라 쓰지 않게
+    assert "noindex" not in r.text
     assert r.text.index("/static/tokens.css") < r.text.index("/static/app.css")
     for path in ("/static/app.js", "/static/app.css", "/static/tokens.css",
                  "/static/fonts/Pretendard-Regular.woff2", "/static/fonts/JetBrainsMono-Regular.woff2"):
@@ -74,9 +76,20 @@ def test_terms_and_privacy_pages(client):
         assert "<style" not in r.text and " style=" not in r.text
         assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", r.text) == []
         assert r.text.index('<script src="/static/theme.js"></script>') < r.text.index("/static/tokens.css")
+        assert '<meta name="robots" content="noindex">' in r.text, path  # 검색 결과에는 첫 화면만 나온다
     assert "운영자는 장애 대응·백업 복구를 위해" in client.get("/privacy").text
     for path in ("/static/doc.js", "/static/favicon.svg"):
         assert client.get(path).status_code == 200, path
+
+
+def test_favicon_ico_at_root(client):
+    """검색 엔진은 SVG 대신 /favicon.ico 를 찾기도 한다. 48px 배수 크기를 담는다."""
+    r = client.get("/favicon.ico")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/x-icon"
+    assert r.content[:4] == bytes([0, 0, 1, 0])
+    sizes = {r.content[6 + 16 * i] for i in range(int.from_bytes(r.content[4:6], "little"))}
+    assert sizes == {16, 32, 48}
+    assert 'rel="icon" href="/favicon.ico"' in client.get("/").text
 
 
 def test_plugin_install_commands_match_marketplace():
