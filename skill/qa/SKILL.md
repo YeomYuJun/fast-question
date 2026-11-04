@@ -38,7 +38,7 @@ fast-question 은 사용자가 작업 중 생긴 질문 한 줄과 짧은 답을
    - 이 세션에서 직접 읽은 로컬 파일로 확인한 사실: `{"kind": "auto", "path": "<절대경로>", "anchor": "<심볼이나 찾을 문자열>"}`. git 저장소 안이면 자동으로 git 근거가 된다.
 <!-- /local -->
 <!-- remote -->
-   - 웹 문서로 확인한 사실: `{"kind": "url", "url": "<주소>"}`
+   - 웹 문서로 확인한 사실: `{"kind": "url", "url": "<주소>"}`. GitHub 저장소의 파일이면 `{"kind": "github", "url": "https://github.com/<owner>/<repo>/blob/<ref>/<경로>", "anchor": "<찾을 문자열>"}` 로 달면 서버가 바뀜을 판정한다.
 <!-- /remote -->
    - 사람에게 확인한 사실: `{"kind": "note", "text": "누가 어떻게 확인했는지"}`
    - 일반 지식(k8s 개념, 수학 등): 근거 없이 등록한다.

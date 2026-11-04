@@ -27,7 +27,7 @@ from kb.remote import judge
 from mcp_server.instructions import INSTRUCTIONS
 from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE
 
-SERVER_KINDS = ("url", "note")  # 서버가 직접 만드는 근거
+SERVER_KINDS = ("url", "note", "github")  # 서버가 직접 만드는 근거(github 는 서버가 GitHub API 로 기록·판정한다)
 LOCAL_DOCS = {"kb_add_many": ADD_MANY_DOC + ADD_MANY_FILE}
 
 

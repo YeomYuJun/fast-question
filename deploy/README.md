@@ -33,6 +33,7 @@
 3. `deploy/.env` 에 `FQ_DOMAIN=<도메인>`(https:// 없이)을 적는다. Caddyfile 은 고치지 않는다(서버의 git pull 이 충돌하지 않게).
 4. 비밀값은 config 에 넣지 않는다. `compose.yaml` 이 다음 환경 변수를 컨테이너로 넘긴다. `deploy/.env` 파일(`이름=값` 한 줄씩)이나 셸 환경 변수로 준다.
    - `FQ_GITHUB_SECRET`, `FQ_GOOGLE_SECRET`: 로그인 공급자의 client secret
+   - `FQ_GITHUB_TOKEN`(선택): GitHub 주소 근거를 판정할 때 쓰는 GitHub 토큰(읽기 권한만). 없으면 비인증 한도(시간당 60회)로 판정한다
    - `AWS_DEFAULT_REGION`: S3 리전(기본 `ap-northeast-2`)
    - 인스턴스 역할이 없는 환경은 `deploy/aws.env` 에 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` 를 적는다. 파일이 없으면 건너뛴다(`env_file` 의 `required: false`, Docker Compose 2.24 이상).
 
@@ -57,7 +58,7 @@ docker compose -f deploy/compose.yaml up -d --build
 - 웹 Claude 패널: 사용자가 등록한 Anthropic API 키는 제어 DB 에 암호화해 두고, 암호 키는 처음 등록할 때 `/data/claude-key.secret` 으로 생긴다. 이 파일은 S3 로 올리지 않는다. 잃거나 바꾸면 저장된 키를 풀 수 없어 사용자가 키를 다시 등록해야 한다.
 - 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업, 공개 DB 재색인을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
   배포로 기본 가이드(`kb/default_guide.json`)가 바뀌면 사용자 DB 마다 한 번 다시 넣는다. 사용자나 Claude 가 고친 가이드 항목은 그대로 둔다.
-  하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트, 등록하고 하루 안에 토큰을 받지 않은 OAuth 클라이언트, 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
+  하루 한 번 GitHub 주소 근거(`https://github.com/<owner>/<repo>/blob/<ref>/<경로>`)를 GitHub API 로 판정하고(blob sha 비교, 바뀌면 앵커 유무 설명), 30일 넘게 판정되지 않은 파일·폴더·git 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트, 등록하고 하루 안에 토큰을 받지 않은 OAuth 클라이언트, 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
   하루 한 번 사용자 DB 마다 정리 대상(질문이 비슷한 항목, 지금 형식 규칙에 어긋나는 Claude 등록분)을 찾아 `cleanup_finding` 표에 둔다. 항목은 고치지 않는다. 처리는 Claude 가 MCP `kb_cleanup_list`·`kb_cleanup_resolve` 로 한다.
   사용자 DB 의 첫 탐지는 전부를 비교해 2만 건에 약 20초 CPU 를 쓰고, 그 뒤로는 바뀐 항목만 본다.
 - 계정당 상한: Q&A 20,000건, 분류 500개, 근거 100,000행(삭제한 것 포함), DB 파일 200 MB(보관·복원·연결 끊기 외의 쓰기를 막는다), 개인 토큰 10개, 공개 링크 200개. OAuth 연결은 20개이고, 넘으면 가장 오래 안 쓴 연결을 끊는다.

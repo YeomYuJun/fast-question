@@ -185,7 +185,7 @@ def test_stopwords_seeded_once(tmp_path):
     c = connect(path)
     words = sorted(r[0] for r in c.execute("SELECT word FROM stopword"))
     assert words == ["경우", "때"]
-    assert get_meta(c, "schema_version") == "4"
+    assert get_meta(c, "schema_version") == "5"
     c.close()
 
 
@@ -196,7 +196,7 @@ def test_connect_existing_db_takes_no_write_lock(tmp_path):
     t0 = time.perf_counter()
     c = connect(path)
     assert time.perf_counter() - t0 < 1.0
-    assert get_meta(c, "schema_version") == "4"
+    assert get_meta(c, "schema_version") == "5"
     holder.execute("ROLLBACK")
     c.close()
     holder.close()
@@ -288,7 +288,7 @@ def test_old_answer_line_check_relaxed_on_connect(tmp_path):
         add_qa(c, cid, a="1\n2\n3\n4\n5\n6\n7")
     add_qa(c, cid, a="1\n2\n3\n4\n5\n6")
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert get_meta(c, "schema_version") == "4"
+    assert get_meta(c, "schema_version") == "5"
     c.close()
 
 
@@ -299,6 +299,29 @@ def test_old_schema_triggers_replaced_on_connect(tmp_path):
     set_meta(c, "schema_version", "1")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "4"
+    assert get_meta(c, "schema_version") == "5"
     assert c.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'qa_insert_guard'").fetchone()[0] == 1
+    c.close()
+
+
+def test_schema_4_evidence_kinds_widened_on_connect(tmp_path):
+    from kb import db
+    path = tmp_path / "kb.sqlite3"
+    c = connect(path)
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'evidence'").fetchone()[0]
+    ver = c.execute("PRAGMA schema_version").fetchone()[0]
+    c.execute("PRAGMA writable_schema = ON")
+    c.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'evidence'", (sql.replace(db._NEW_EVIDENCE_KINDS, db._OLD_EVIDENCE_KINDS),))
+    c.execute(f"PRAGMA schema_version = {ver + 1}")
+    c.execute("PRAGMA writable_schema = OFF")
+    set_meta(c, "schema_version", "4")
+    cid = add_cat(c, "가")
+    qid = add_qa(c, cid)
+    with pytest.raises(sqlite3.IntegrityError):
+        c.execute("INSERT INTO evidence(qa_id, kind, path, created_by, updated_by) VALUES (?, 'github', 'u', 'claude', 'claude')", (qid,))
+    c.close()
+    c = connect(path)
+    c.execute("INSERT INTO evidence(qa_id, kind, path, created_by, updated_by) VALUES (?, 'github', 'u', 'claude', 'claude')", (qid,))
+    assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert get_meta(c, "schema_version") == "5"
     c.close()

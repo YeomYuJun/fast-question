@@ -44,7 +44,7 @@ def add(s, q, a="rename 으로 확정한다.", cat="이관 > NAS", **kw):
 # ---------- 스키마 ----------
 
 def test_schema_4_creates_cleanup_table(conn):
-    assert get_meta(conn, "schema_version") == "4"
+    assert get_meta(conn, "schema_version") == "5"
     cols = {r[1] for r in conn.execute("PRAGMA table_info(cleanup_finding)")}
     assert {"qa_id", "other_qa_id", "rule", "detail", "qa_version", "content_hash", "found_at",
             "resolved_at", "resolution", "resolved_by", "note"} <= cols
@@ -57,7 +57,7 @@ def test_schema_3_db_gets_cleanup_table_on_connect(tmp_path):
     set_meta(c, "schema_version", "3")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "4"
+    assert get_meta(c, "schema_version") == "5"
     assert c.execute("SELECT count(*) FROM cleanup_finding").fetchone()[0] == 0
     c.close()
 

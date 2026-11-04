@@ -153,7 +153,8 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
         """Q&A 를 등록한다. 비슷한 질문이 있으면 등록하지 않고 status=similar_found 와 후보를 돌려준다.
         후보와 다른 질문이 맞으면 force=true 로 다시 부른다.
         evidence 형식: {"kind": "auto"|"file"|"dir", "path", "anchor"?}, {"kind": "git", "repo", "paths": [...]},
-        {"kind": "githead", "repo"}, {"kind": "url", "url"}, {"kind": "note", "text"}."""
+        {"kind": "githead", "repo"}, {"kind": "url", "url"}, {"kind": "github", "url": "https://github.com/<owner>/<repo>/blob/<ref>/<경로>", "anchor"?}
+        (서버가 GitHub API 로 바뀜을 판정한다), {"kind": "note", "text"}."""
         def go(s: Store):
             check_claude_qa(question, answer, evidence)
             res = s.add_qa(category, question, answer, evidence=evidence, links=links, force=force)

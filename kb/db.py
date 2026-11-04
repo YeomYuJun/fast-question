@@ -33,6 +33,7 @@ def connect(path: Path | str) -> sqlite3.Connection:
         conn.execute("BEGIN IMMEDIATE")
         try:
             _relax_answer_lines(conn)
+            _widen_evidence_kinds(conn)
         except BaseException:
             conn.execute("ROLLBACK")
             raise
@@ -57,6 +58,26 @@ def _relax_answer_lines(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'qa'",
                      (row[0].replace(_OLD_ANSWER_LINES, _NEW_ANSWER_LINES),))
+        conn.execute(f"PRAGMA schema_version = {ver + 1}")
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
+
+
+_OLD_EVIDENCE_KINDS = "CHECK (kind IN ('file','dir','git','githead','url','note'))"
+_NEW_EVIDENCE_KINDS = "CHECK (kind IN ('file','dir','git','githead','url','note','github'))"
+
+
+def _widen_evidence_kinds(conn: sqlite3.Connection) -> None:
+    """스키마 4 이하의 evidence 표는 근거 종류에 github 가 없다. _relax_answer_lines 와 같은 writable_schema 절차로
+    표 정의 문자열의 CHECK 만 넓힌다(기존 행은 그대로 맞는다)."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'evidence'").fetchone()
+    if row is None or _OLD_EVIDENCE_KINDS not in row[0]:
+        return
+    ver = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'evidence'",
+                     (row[0].replace(_OLD_EVIDENCE_KINDS, _NEW_EVIDENCE_KINDS),))
         conn.execute(f"PRAGMA schema_version = {ver + 1}")
     finally:
         conn.execute("PRAGMA writable_schema = OFF")

@@ -89,6 +89,21 @@ def _expire_job(conn: sqlite3.Connection, now: datetime) -> list:
     return [("expire", job)]
 
 
+def _github_job(conn: sqlite3.Connection, now: datetime) -> list:
+    """원격 모드 사용자 DB: GitHub 주소 근거를 하루 한 번 서버가 판정한다(근거가 있을 때만 API 를 부른다)."""
+    if not _due(conn, "last_github_check", CLEANUP_EVERY_HOURS, now):
+        return []
+    if not conn.execute("SELECT 1 FROM evidence WHERE kind = 'github' AND deleted_at IS NULL LIMIT 1").fetchone():
+        _mark(conn, "last_github_check")
+        return []
+
+    def job() -> dict:
+        results = Store(conn, "system", remote=True).recheck()
+        _mark(conn, "last_github_check")
+        return {"checked": len(results), "changed": sum(r["changed"] for r in results)}
+    return [("github", job)]
+
+
 def _guide_job(conn: sqlite3.Connection, remote_guide: dict | None, analyzer) -> list:
     """원격 모드 사용자 DB: 서버의 기본 가이드가 이 DB 에 넣은 판과 다르면 다시 넣는다(사람이 고친 항목은 그대로)."""
     if remote_guide is None or get_meta(conn, "guide_hash") == remote_guide["fingerprint"]:
@@ -199,7 +214,7 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
                 jobs.append(("backup", lambda: {"path": str(backup(conn, backup_dir, cfg.backup_keep))}))
             jobs += _guide_job(conn, remote_guide, analyzer)
             result = _run(jobs + _reindex_job(conn, analyzer) + _expire_job(conn, now)
-                          + _cleanup_scan_job(conn, now), label)
+                          + _github_job(conn, now) + _cleanup_scan_job(conn, now), label)
             result.update(_run(uploader.job(result, lambda p, f: s3backup.user_key(p, account_id, f)), label))
             if result:
                 users[account_id] = result

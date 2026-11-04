@@ -11,7 +11,7 @@
 
 import re
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 BUMP = f"version = version + 1, updated_at = {NOW}"
 ACTORS = "('user','claude','system')"
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     id INTEGER PRIMARY KEY,
     qa_id INTEGER NOT NULL REFERENCES qa(id),
     kind TEXT NOT NULL CONSTRAINT evidence_kind
-        CHECK (kind IN ('file','dir','git','githead','url','note')),
+        CHECK (kind IN ('file','dir','git','githead','url','note','github')),
     path TEXT,
     anchor TEXT,
     repo TEXT,

@@ -189,7 +189,7 @@ def _ensure_category(s: Store, name: str, parent: str | None, description: str) 
 def _evidence_specs(src: sqlite3.Connection, qa_id: int, origin: str = "") -> list[dict]:
     specs = []
     for r in src.execute("SELECT * FROM evidence WHERE qa_id = ? AND deleted_at IS NULL ORDER BY id", (qa_id,)):
-        if r["kind"] in ("url", "note"):
+        if r["kind"] in ("url", "note", "github"):
             specs.append(spec_of(r))  # 서버가 직접 만드는 근거다
             continue
         row = {k: r[k] for k in ROW_KEYS}

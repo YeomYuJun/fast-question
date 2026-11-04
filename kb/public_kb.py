@@ -60,7 +60,7 @@ def detail(pub: Store, qa_id: int) -> dict:
     if item["archived"]:
         raise NotFoundError(f"공개 항목을 찾지 못했습니다: {qa_id}")
     item.pop("revisions", None)
-    item["evidence"] = [e for e in item["evidence"] if e["kind"] in ("url", "note")]
+    item["evidence"] = [e for e in item["evidence"] if e["kind"] in ("url", "note", "github")]
     return {**item, "scope": SCOPE}
 
 
@@ -84,6 +84,6 @@ def copy_to(pub: Store, store: Store, qa_id: int, *, category: str | None = None
     item = detail(pub, qa_id)
     descriptions = {c["path"]: c["description"] for t in pub.categories() for c in [t, *t["children"]]}
     cid = ensure_category(store, category or item["category_path"], descriptions)
-    evidence = [{"kind": e["kind"], "url": e["path"]} if e["kind"] == "url" else {"kind": "note", "text": e["text"]}
-                for e in item["evidence"]]
+    evidence = [{"kind": "note", "text": e["text"]} if e["kind"] == "note" else {"kind": "url", "url": e["path"]}
+                for e in item["evidence"]]  # github 근거는 url 로 옮긴다(복사할 때 GitHub API 를 부르지 않는다)
     return store.add_qa(cid, item["question"], item["answer"], evidence=evidence or None, force=force)

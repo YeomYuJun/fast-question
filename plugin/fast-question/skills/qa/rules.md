@@ -102,6 +102,7 @@ A. 공백으로 나눈 단어는 모두 들어 있어야 찾고(AND), kb/query.p
 | 문서 파일(xlsx, hwp, pdf, docx) | `auto` + `path`. 시트 이름이나 절 제목을 `anchor` 로 쓴다 |
 | git 이력(커밋) | 그 사실이 지금 남아 있는 파일을 `auto` 로 달고, 답변에 커밋 sha 앞 7자리를 쓴다 |
 | 웹 문서 | `{"kind": "url", "url": "<주소>"}` |
+| GitHub 저장소의 파일 | `{"kind": "github", "url": "https://github.com/<owner>/<repo>/blob/<브랜치 또는 커밋>/<경로>", "anchor": "<찾을 문자열>"}`. 서버가 blob sha 로 바뀜을 판정한다(원격 서버에서도 된다). 그 밖의 웹 주소는 `url` 이다 |
 | 사람에게 확인 | `{"kind": "note", "text": "누가 어떻게 확인했는지"}` |
 | 일반 지식 | 근거 없음. 학습 문서·공식 문서처럼 출처 주소가 있으면 `url` 근거를 단다 |
 

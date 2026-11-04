@@ -148,7 +148,6 @@ def test_url_and_note_evidence_still_work(cfg, app):
 
 @pytest.mark.parametrize("name, args, needle", [
     ("kb_add_many", {"file": "C:/x.json"}, "로컬 프록시"),
-    ("kb_recheck", {}, "로컬 검사기"),
     ("kb_dict", {"action": "user_word_add", "word": "망연계"}, "사용자 단어"),
 ])
 def test_server_side_file_work_is_refused(cfg, app, name, args, needle):

@@ -38,6 +38,7 @@ def db_bytes(conn: sqlite3.Connection) -> int:
                         "(SELECT freelist_count FROM pragma_freelist_count())").fetchone()[0]
     return used * conn.execute("PRAGMA page_size").fetchone()[0]
 
+SERVER_KINDS = ("url", "note", "github")  # 원격 서버가 사용자 PC 없이 직접 만드는 근거
 REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없습니다. "
                         "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 써 주세요.")
 
@@ -66,10 +67,10 @@ class Store:
             return capture(spec)
         if "captured" in spec:
             row = accept_captured(spec["captured"])
-            if row["kind"] in ("url", "note"):  # 서버가 직접 만들 수 있고, 형식 규칙이 spec 의 글을 검사한다
-                raise ValidationError("url·note 근거는 captured 없이 보내 주세요.")
+            if row["kind"] in SERVER_KINDS:  # 서버가 직접 만들 수 있고, 형식 규칙이 spec 의 글을 검사한다
+                raise ValidationError("url·note·github 근거는 captured 없이 보내 주세요.")
             return row
-        if (spec.get("kind") or "auto") not in ("url", "note"):
+        if (spec.get("kind") or "auto") not in SERVER_KINDS:
             raise ValidationError(REMOTE_PATH_EVIDENCE)
         return capture(spec)
 
@@ -427,18 +428,19 @@ class Store:
     def recheck(self, qa_id: int | None = None) -> list[dict]:
         """근거를 다시 판정한다. 판정이 바뀐 근거만 고치고, 항목 상태가 바뀌면 qa 를 고친다.
         판정 변화는 근거 파일이 바뀌어 생긴 것이므로 누가 재검증을 눌렀든 system 주체로 기록한다."""
-        if self.remote:
-            raise ValidationError("원격 서버는 근거 파일을 읽을 수 없어 재검증할 수 없습니다. 사용자 PC 의 로컬 검사기가 판정합니다.")
+        # 원격 서버는 사용자 PC 의 파일을 읽을 수 없어 github 근거만 판정한다(파일·폴더·git 근거는 로컬 검사기가 판정한다)
         sql = (f"SELECT e.{self.EV_COLS.replace(', ', ', e.')} FROM evidence e JOIN qa q ON q.id = e.qa_id "
                "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL")
         params: tuple = ()
+        if self.remote:
+            sql += " AND e.kind = 'github'"
         if qa_id is not None:
             sql += " AND e.qa_id = ?"
             params = (qa_id,)
         rows = self.conn.execute(sql, params).fetchall()
         checker = Checker()
         judged = [(r, *checker.check(dict(r))) for r in rows]  # git·파일 판정은 트랜잭션 밖에서
-        return self._write_verdicts(judged, mark_recheck=qa_id is None)
+        return self._write_verdicts(judged, mark_recheck=qa_id is None and not self.remote)
 
     def _write_verdicts(self, judged: list[tuple], mark_recheck: bool = False) -> list[dict]:
         """(근거 행, 판정, 설명) 목록을 쓴다. 판정 변화는 system 주체로 남긴다."""
@@ -544,7 +546,7 @@ class Store:
         rest, keep = [], []
         for spec in specs:
             key = (spec.get("path") or spec.get("repo"), spec.get("anchor") or None)
-            if "captured" not in spec and (spec.get("kind") or "auto") not in ("url", "note") and key in existing:
+            if "captured" not in spec and (spec.get("kind") or "auto") not in SERVER_KINDS and key in existing:
                 keep.append(existing.pop(key))
             else:
                 rest.append(spec)

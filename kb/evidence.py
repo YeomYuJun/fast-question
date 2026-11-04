@@ -1,17 +1,31 @@
 """근거 캡처와 판정. 판정 결과는 모든 검사가 명시적으로 통과할 때만 same 이고, git 실패·경로 없음·
 읽기 실패는 unknown 이다.
+
+github 근거: kind 가 github 이고 주소가 GitHub 파일 주소(https://github.com/<owner>/<repo>/blob/<ref>/<경로>)인 근거.
+url 근거는 주소가 GitHub 이어도 그대로 url(판정 없음)이다(기본 가이드처럼 API 를 부르지 않아야 하는 곳이 있다).
+서버(원격 모드)도 PC 파일 없이 판정할 수 있는 근거다. 기록할 때 GitHub API 로 그 ref 의 blob sha 를 받아 두고,
+판정 때 비교 ref(ref 가 커밋이면 저장소 기본 브랜치, 아니면 그 ref)의 blob sha 와 견준다. 다르면 changed 이고,
+raw 본문을 받아 앵커 유무를 설명에 붙인다. API 호출은 환경 변수 FQ_GITHUB_TOKEN 이 있으면 그 토큰으로 한다
+(없으면 비인증 한도 시간당 60회).
 """
 import hashlib
 import json
 import os
 import re
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Callable, Mapping
 
 from kb.errors import ValidationError
 
-KINDS = ("auto", "file", "dir", "git", "githead", "url", "note")
+KINDS = ("auto", "file", "dir", "git", "githead", "url", "note", "github")
+GITHUB_BLOB = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/blob/([^/]+)/([^#?]+)")
+GITHUB_API = "https://api.github.com"
+GITHUB_RAW = "https://raw.githubusercontent.com"
+GITHUB_TIMEOUT_S = 8.0
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 DIR_SKIP = {".git", "node_modules"}
 DIR_CAP = 50000
 BINARY_DOCS = {".xlsx", ".xls", ".xlsm", ".docx", ".doc", ".pptx", ".ppt", ".hwp", ".hwpx", ".pdf"}
@@ -133,6 +147,53 @@ def _check_anchor(anchor: str | None, p: Path) -> None:
         raise ValidationError(f"앵커 '{anchor}' 가 {p.name} 에 없습니다. 파일에 있는 문자열을 그대로 써 주세요.")
 
 
+def github_get(url: str, raw: bool = False) -> dict | bytes | None:
+    """GitHub API(JSON) 또는 raw 본문(bytes). 404 는 None, 그 밖의 실패는 RuntimeError. 테스트가 바꿔 끼운다."""
+    headers = {"User-Agent": "fast-question", "Accept": "application/vnd.github+json"}
+    token = os.environ.get("FQ_GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=GITHUB_TIMEOUT_S) as r:  # noqa: S310 - github.com 고정 주소만
+            data = r.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise RuntimeError(f"GitHub 응답 {e.code}") from None
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        raise RuntimeError(f"GitHub 에 닿지 못했습니다: {e}") from None
+    return data if raw else json.loads(data.decode("utf-8"))
+
+
+def parse_github_url(url: str) -> dict | None:
+    m = GITHUB_BLOB.match(url.strip())
+    if not m:
+        return None
+    owner, repo, ref, file = m.groups()
+    return {"owner": owner, "repo": repo.removesuffix(".git"), "ref": ref, "file": file.rstrip("/")}
+
+
+def _github_blob(owner: str, repo: str, ref: str, file: str) -> str | None:
+    got = github_get(f"{GITHUB_API}/repos/{owner}/{repo}/contents/{file}?ref={ref}")
+    if not got or not isinstance(got, dict) or got.get("type") != "file":
+        return None
+    return got.get("sha")
+
+
+def _capture_github(url: str, anchor: str | None) -> dict:
+    g = parse_github_url(url)
+    try:
+        blob = _github_blob(g["owner"], g["repo"], g["ref"], g["file"])
+    except RuntimeError as e:
+        raise ValidationError(f"GitHub 에서 파일을 읽지 못해 근거를 기록할 수 없습니다: {e}") from None
+    if blob is None:
+        raise ValidationError(f"GitHub 에 그 파일이 없습니다: {url}")
+    captured = {"owner": g["owner"], "repo": g["repo"], "ref": g["ref"], "file": g["file"], "blob_sha": blob}
+    return _row("github", path=url, anchor=anchor, repo=f"{g['owner']}/{g['repo']}",
+                commit_sha=g["ref"] if _HEX40.match(g["ref"]) else None, paths=[g["file"]], captured=captured)
+
+
 def _row(kind, *, path=None, anchor=None, repo=None, commit_sha=None, paths=None, captured=None) -> dict:
     return {
         "kind": kind, "path": path, "anchor": anchor, "repo": repo, "commit_sha": commit_sha,
@@ -202,10 +263,14 @@ def capture(spec: Mapping) -> dict:
         if not head:
             raise ValidationError(f"HEAD 를 읽지 못했습니다: {top}")
         return _row("githead", repo=top.as_posix(), commit_sha=head, captured={"head": head, "branch": branch})
-    if kind == "url":
+    if kind in ("url", "github"):
         url = (spec.get("url") or spec.get("path") or "").strip()
         if not url:
             raise ValidationError("url 근거에 주소가 없습니다.")
+        if kind == "github":
+            if not parse_github_url(url):
+                raise ValidationError("github 근거는 https://github.com/<owner>/<repo>/blob/<ref>/<경로> 주소여야 합니다.")
+            return _capture_github(url, anchor)
         return _row("url", path=url, anchor=anchor)
     text = (spec.get("text") or "").strip()
     if not text:
@@ -267,6 +332,9 @@ def line_of(evidence: list[Mapping]) -> str:
         if e["kind"] == "url":
             parts.append(e["path"])
             continue
+        if e["kind"] == "github":
+            parts.append(f"{e['path']} #{e['anchor']}" if e.get("anchor") else e["path"])
+            continue
         if e["kind"] == "note":
             parts.append(f"{NOTE_PREFIX} {e['text']}")
             continue
@@ -287,6 +355,8 @@ def spec_of(row: Mapping) -> dict:
         return {"kind": "note", "text": json.loads(row["captured_json"] or "{}").get("text", "")}
     if kind == "url":
         return {"kind": "url", "url": row["path"]}
+    if kind == "github":
+        return {"kind": "github", "url": row["path"], "anchor": row["anchor"]}
     return {"kind": kind, "path": row["path"], "anchor": row["anchor"]}
 
 
@@ -311,6 +381,43 @@ class Checker:
     def __init__(self):
         self._diff: dict[tuple[str, str], list[str] | None] = {}
         self._untr: dict[str, list[str] | None] = {}
+        self._default_branch: dict[str, str | None] = {}
+        self._blob: dict[tuple[str, str, str], str | None] = {}
+
+    def _branch_of(self, owner: str, repo: str) -> str | None:
+        k = f"{owner}/{repo}"
+        if k not in self._default_branch:
+            got = github_get(f"{GITHUB_API}/repos/{owner}/{repo}")
+            self._default_branch[k] = (got or {}).get("default_branch") if isinstance(got, dict) else None
+        return self._default_branch[k]
+
+    def _blob_of(self, owner: str, repo: str, ref: str, file: str) -> str | None:
+        k = (f"{owner}/{repo}", ref, file)
+        if k not in self._blob:
+            self._blob[k] = _github_blob(owner, repo, ref, file)
+        return self._blob[k]
+
+    def _check_github(self, row: Mapping, cap: dict) -> tuple[str, str]:
+        owner, repo, ref, file = cap.get("owner"), cap.get("repo"), cap.get("ref"), cap.get("file")
+        if not all((owner, repo, ref, file)) or not cap.get("blob_sha"):
+            return "unknown", "GitHub 근거의 기록값이 비어 있습니다"
+        try:
+            compare = self._branch_of(owner, repo) if _HEX40.match(ref) else ref
+            if not compare:
+                return "unknown", "GitHub 저장소를 찾지 못했습니다"
+            blob = self._blob_of(owner, repo, compare, file)
+            if blob is None:
+                return "changed", f"{file} 이 {compare} 에 없습니다"
+            if blob == cap["blob_sha"]:
+                return "same", ""
+            note = ""
+            if row.get("anchor"):
+                body = github_get(f"{GITHUB_RAW}/{owner}/{repo}/{compare}/{file}", raw=True)
+                if isinstance(body, bytes):
+                    note = f" (앵커 '{row['anchor']}' {'있음' if row['anchor'].encode('utf-8') in body else '없음'})"
+            return "changed", f"{file} 내용이 {compare} 에서 바뀌었습니다" + note
+        except RuntimeError as e:
+            return "unknown", f"GitHub 을 읽지 못했습니다: {e}"
 
     def _diff_of(self, repo: str, commit: str):
         k = (repo, commit)
@@ -334,6 +441,8 @@ class Checker:
         cap = json.loads(row["captured_json"]) if row.get("captured_json") else {}
         if kind in ("url", "note"):
             return "external", ""
+        if kind == "github":
+            return self._check_github(row, cap)
         if kind == "file":
             p = Path(row["path"])
             if not p.exists():

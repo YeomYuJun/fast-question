@@ -20,6 +20,7 @@ services:
     environment:
       FQ_GITHUB_SECRET: ${FQ_GITHUB_SECRET:-}
       FQ_GOOGLE_SECRET: ${FQ_GOOGLE_SECRET:-}
+      FQ_GITHUB_TOKEN: ${FQ_GITHUB_TOKEN:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-ap-northeast-2}
     env_file:
       - path: ./aws.env

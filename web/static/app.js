@@ -112,7 +112,7 @@ function kst(s) {
   return { md: `${p.month}-${p.day}`, hm: `${p.hour}:${p.minute}`, full: `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}` };
 }
 
-const KIND = { file: "FILE", dir: "DIR", git: "GIT", githead: "HEAD", url: "URL", note: "메모" };
+const KIND = { file: "FILE", dir: "DIR", git: "GIT", githead: "HEAD", url: "URL", github: "GITHUB", note: "메모" };
 const OP = { insert: "생성", update: "수정", archive: "삭제", restore: "복원" };
 const FIELD = { question: "질문", answer: "답변", category_id: "분류", evidence_state: "근거 상태" };
 
@@ -664,6 +664,9 @@ function evidenceText(d) {
       const repo = e.repo.replace(/[\\/]$/, "");
       f.append(el("span", { class: "target" }, repo,
         (e.paths || []).flatMap((p) => [" ", /[*?[]/.test(p) ? p : evLink(`${repo}/${p}`, p)])));
+    } else if (e.kind === "url" || e.kind === "github") {
+      f.append(el("span", { class: "target" }, el("a", { href: e.path, target: "_blank", rel: "noopener", class: "evlink",
+        onclick: (ev) => ev.stopPropagation() }, e.path)));
     } else {
       const target = e.kind === "note" ? e.text
         : e.kind === "githead" ? e.repo
