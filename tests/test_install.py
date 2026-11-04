@@ -26,11 +26,14 @@ def test_install_hook_keeps_other_hooks_and_writes_without_bom(tmp_path, monkeyp
     raw = p.read_bytes()
     assert not raw.startswith(b"\xef\xbb\xbf")
     data = json.loads(raw.decode("utf-8"))
-    assert data["model"] == "x" and data["hooks"]["Stop"] == [{"hooks": [OTHER]}]
+    assert data["model"] == "x" and data["hooks"]["Stop"][0] == {"hooks": [OTHER]}
     assert data["hooks"]["UserPromptSubmit"][0] == {"hooks": [OTHER]}
     (hook,) = _ours(data)
     assert hook["type"] == "command" and hook["timeout"] == 10
     assert "python.exe" in hook["command"] and "hooks/ask_kb.py" in hook["command"]
+    # 세션 끝 수확 훅은 Stop 에 더해진다
+    (stop,) = [h for g in data["hooks"]["Stop"] for h in g["hooks"] if "stop_harvest.py" in h["command"]]
+    assert stop["timeout"] == 10
     assert (tmp_path / "settings.json.fast-question.bak").exists()
 
 

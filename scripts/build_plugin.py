@@ -36,7 +36,7 @@ PLUGIN_DIR = ROOT / "plugin" / NAME
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 HOOK_TIMEOUT_S = 10
 DESCRIPTION = ("fast-question 지식 DB 연결: 원격 서버 MCP(파일 근거를 이 PC 에서 캡처), qa·qa-harvest Skill, "
-               "질문하면 KB 를 먼저 찾아 주는 즉석 질문 훅")
+               "질문하면 KB 를 먼저 찾아 주는 즉석 질문 훅, 응답을 마칠 때 확인한 사실의 등록을 권하는 수확 훅")
 
 README = """# fast-question Claude Code 플러그인
 
@@ -48,6 +48,7 @@ README = """# fast-question Claude Code 플러그인
 - MCP 서버 `fast-question`: 원격 서버의 `kb_*` 도구를 그대로 씁니다. 파일·git 근거는 이 PC 에서 캡처하고 판정합니다.
 - Skill `/fast-question:qa`(등록·검색), `/fast-question:qa-harvest`(프로젝트 폴더에서 Q&A 구축)
 - 즉석 질문 훅: 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다.
+- 세션 끝 수확 훅: 응답을 마칠 때 이 세션에서 파일로 확인한 사실이 KB 에 없으면 등록하도록 Claude 에게 한 번 권합니다(KB 에 있는 프로젝트 폴더에서만).
 
 MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question=={version}` 을 `uvx` 로 실행합니다.
 
@@ -102,10 +103,14 @@ def plugin_files(spec: str) -> dict[str, bytes]:
             "homepage": SITE_URL, "repository": REPO_URL, "keywords": ["knowledge-base", "qa", "mcp"]}),
         ".mcp.json": _json({"mcpServers": {NAME: {"command": "uvx", "args": client_command(spec)[1:] + ["mcp"]}}}),
         "hooks/hooks.json": _json({
-            "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다",
-            "hooks": {"UserPromptSubmit": [{"hooks": [{
-                "type": "command", "command": "uvx", "args": client_command(spec)[1:] + ["hook"],
-                "timeout": HOOK_TIMEOUT_S}]}]}}),
+            "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣고, 응답을 마칠 때 확인한 사실의 등록을 권합니다",
+            "hooks": {
+                "UserPromptSubmit": [{"hooks": [{
+                    "type": "command", "command": "uvx", "args": client_command(spec)[1:] + ["hook"],
+                    "timeout": HOOK_TIMEOUT_S}]}],
+                "Stop": [{"hooks": [{
+                    "type": "command", "command": "uvx", "args": client_command(spec)[1:] + ["stop-hook"],
+                    "timeout": HOOK_TIMEOUT_S}]}]}}),
         "README.md": README.format(site=SITE_URL, version=__version__, owner=OWNER, name=NAME).encode("utf-8"),
     }
     marks = {CLI_MARK: shell_command(spec), RULES_MARK: "${CLAUDE_PLUGIN_ROOT}/skills/qa/rules.md"}

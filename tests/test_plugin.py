@@ -34,6 +34,8 @@ def test_plugin_pins_the_client_version():
     assert mcp == {"command": "uvx", "args": ["--from", f"fast-question=={__version__}", "fast-question", "mcp"]}
     (hook,) = json.loads(files["hooks/hooks.json"])["hooks"]["UserPromptSubmit"][0]["hooks"]
     assert hook["command"] == "uvx" and hook["args"][-1] == "hook" and f"fast-question=={__version__}" in hook["args"]
+    (stop,) = json.loads(files["hooks/hooks.json"])["hooks"]["Stop"][0]["hooks"]
+    assert stop["command"] == "uvx" and stop["args"][-1] == "stop-hook"
     harvest = files["skills/qa-harvest/SKILL.md"].decode("utf-8")
     assert f"uvx --from fast-question=={__version__} fast-question lint-draft" in harvest
     assert "${CLAUDE_PLUGIN_ROOT}/skills/qa/rules.md" in harvest

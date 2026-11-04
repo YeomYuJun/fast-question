@@ -11,7 +11,8 @@
 mode 가 local 이면(scripts/install.py --local) 자격 증명이 있어도 로컬 DB 를 쓴다.
 어떤 실패든 아무것도 출력하지 않고 0 으로 끝나 사용자 입력을 막지 않는다.
 
-설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다.
+설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다. 세션 끝 수확 훅은 hooks/stop_harvest.py 다.
+편집기가 끼워 넣는 태그(<ide_opened_file> 등)는 strip_system_tags 로 벗긴 뒤 판정·검색한다.
 설정 파일: 환경 변수 FAST_QUESTION_CONFIG, 없으면 저장소의 config.json.
 PC 클라이언트 패키지(`fast-question hook`, fq_client/cli.py)는 main(remote_only=True) 로 원격 경로만 쓴다(mode 를 보지 않는다).
 """
@@ -47,8 +48,18 @@ _QUESTION_WORDS = {"왜", "뭐야", "뭐지", "뭔가", "뭔데", "뭐임", "무
                    "어디서", "누가", "뭐", "무슨", "어느", "what", "why", "how", "when", "where", "which", "who"}
 
 
+# 편집기·Claude Code 가 사용자 글 앞뒤에 끼워 넣는 태그. 사용자가 쓴 글이 아니라 질문 판정·검색어에서 뺀다.
+# VS Code 는 열린 파일을 <ide_opened_file>, 선택 영역을 <ide_selection> 으로 넣고, 붙여 넣은 글은 <pasted_content id=".."> 줄로 감싼다
+_SYSTEM_BLOCK = re.compile(r"<(ide_opened_file|ide_selection|system-reminder)\b[^>]*>.*?</\1>", re.DOTALL)
+_PASTE_TAG = re.compile(r"</?pasted_content\b[^>]*>")
+
+
+def strip_system_tags(prompt: str) -> str:
+    return _PASTE_TAG.sub("", _SYSTEM_BLOCK.sub("", prompt)).strip()
+
+
 def is_question(prompt: str) -> bool:
-    p = prompt.strip()
+    p = strip_system_tags(prompt)
     if not p or p.startswith("/") or "```" in p:
         return False
     if len(p) > MAX_CHARS or p.count("\n") >= MAX_LINES:
@@ -60,7 +71,7 @@ def is_question(prompt: str) -> bool:
 
 def to_query(prompt: str) -> str:
     """검색어. 물음표와 의문사를 뺀다. 의문사는 답 문장에 없어서 정확히 일치·형태소 AND 를 0건으로 만든다."""
-    words = [w.rstrip("?？.!~") for w in prompt.split()]  # 앞쪽 점은 .part 같은 이름의 일부다
+    words = [w.rstrip("?？.!~") for w in strip_system_tags(prompt).split()]  # 앞쪽 점은 .part 같은 이름의 일부다
     return " ".join(w for w in words if w and w.lower() not in _QUESTION_WORDS)
 
 

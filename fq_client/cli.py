@@ -4,6 +4,7 @@
   login [--url <주소>]   브라우저 승인으로 개인 토큰을 받아 credentials.json 에 저장(fq_client/login.py)
   mcp                   Claude Code 가 띄우는 로컬 프록시 MCP(stdio, mcp_server/proxy.py)
   hook                   즉석 질문 훅(UserPromptSubmit, hooks/ask_kb.py). 표준 입력으로 훅 JSON 을 받는다
+  stop-hook              세션 끝 수확 훅(Stop, hooks/stop_harvest.py). 표준 입력으로 훅 JSON 을 받는다
   inventory <폴더> ... [--since <json>] [--out <json>]  qa-harvest 대상 폴더 목록(fq_client/inventory.py)
   lint-draft <draft.json>  qa-harvest 초안 검사(fq_client/lint_draft.py)
 서버 주소·개인 토큰·device_id 는 %USERPROFILE%\\.fast-question\\credentials.json(kb/remote.py)에서 읽는다.
@@ -36,6 +37,11 @@ def _hook(_args) -> int:
     return main(remote_only=True)
 
 
+def _stop_hook(_args) -> int:
+    from hooks.stop_harvest import main
+    return main(remote_only=True)
+
+
 def _login(args) -> int:
     from fq_client.login import main
     return main(args.url)
@@ -61,6 +67,7 @@ def parser() -> argparse.ArgumentParser:
     login.set_defaults(run=_login)
     sub.add_parser("mcp", help="로컬 프록시 MCP(stdio)").set_defaults(run=_mcp)
     sub.add_parser("hook", help="즉석 질문 훅(UserPromptSubmit)").set_defaults(run=_hook)
+    sub.add_parser("stop-hook", help="세션 끝 수확 훅(Stop)").set_defaults(run=_stop_hook)
     inv = sub.add_parser("inventory", help="qa-harvest 대상 폴더 목록(fq_client/inventory.py 와 같은 인자)")
     inv.add_argument("rest", nargs=argparse.REMAINDER)
     inv.set_defaults(run=_inventory)

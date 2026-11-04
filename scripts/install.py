@@ -41,6 +41,8 @@ IS_WINDOWS = os.name == "nt"
 ENTRY = ROOT / "run_mcp.py"
 HOOK = ROOT / "hooks" / "ask_kb.py"
 HOOK_EVENT = "UserPromptSubmit"
+# 이벤트 → 훅 스크립트. 즉석 질문 훅(UserPromptSubmit)과 세션 끝 수확 훅(Stop, hooks/stop_harvest.py)
+HOOKS = {HOOK_EVENT: HOOK, "Stop": ROOT / "hooks" / "stop_harvest.py"}
 HOOK_TIMEOUT_S = 10
 NAME = "fast-question"
 # Skill 원본 md 의 자리표시. 설치 방식마다 값이 다르다(이 스크립트는 로컬 설치, scripts/build_plugin.py 는 플러그인)
@@ -129,12 +131,13 @@ def install_skills(src_root: Path = SKILLS_SRC, dst_root: Path = SKILLS_DST,
             if d.is_dir() and (d / "SKILL.md").exists()]
 
 
-def hook_command() -> str:
-    return shell_command(venv_python(), HOOK)
+def hook_command(script: Path | None = None) -> str:
+    return shell_command(venv_python(), script or HOOK)  # 테스트가 HOOK 을 바꿔 끼우므로 호출 시점에 읽는다
 
 
 def _is_ours(hook: dict) -> bool:
-    return "hooks/ask_kb.py" in str(hook.get("command", "")).replace("\\", "/")
+    cmd = str(hook.get("command", "")).replace("\\", "/")
+    return any(f"hooks/{p.name}" in cmd for p in HOOKS.values())
 
 
 def _read(settings: Path) -> dict:
@@ -153,31 +156,42 @@ def _write(settings: Path, data: dict) -> None:
 
 
 def install_hook(settings: Path = SETTINGS) -> str:
+    """HOOKS 의 이벤트마다 우리 훅이 없으면 더한다. 다른 훅은 그대로 둔다."""
     data = _read(settings)
-    groups = data.setdefault("hooks", {}).setdefault(HOOK_EVENT, [])
-    if any(_is_ours(h) for g in groups for h in g.get("hooks", [])):
-        return f"훅 이미 등록됨: {settings} {HOOK_EVENT}"
-    groups.append({"hooks": [{"type": "command", "command": hook_command(), "timeout": HOOK_TIMEOUT_S}]})
+    added = []
+    for event, script in HOOKS.items():
+        groups = data.setdefault("hooks", {}).setdefault(event, [])
+        if any(_is_ours(h) for g in groups for h in g.get("hooks", [])):
+            continue
+        groups.append({"hooks": [{"type": "command", "command": hook_command(script), "timeout": HOOK_TIMEOUT_S}]})
+        added.append(event)
+    if not added:
+        return f"훅 이미 등록됨: {settings} {'·'.join(HOOKS)}"
     _write(settings, data)
-    return f"훅 등록: {settings} {HOOK_EVENT} (처음 고치기 전 원본: {settings.name}.fast-question.bak)"
+    return f"훅 등록: {settings} {'·'.join(added)} (처음 고치기 전 원본: {settings.name}.fast-question.bak)"
 
 
 def remove_hook(settings: Path = SETTINGS) -> str:
     data = _read(settings)
-    groups = data.get("hooks", {}).get(HOOK_EVENT, [])
-    kept = []
-    for g in groups:
-        hooks = [h for h in g.get("hooks", []) if not _is_ours(h)]
-        if hooks:
-            kept.append(dict(g, hooks=hooks))
-    if kept == groups:
+    removed = []
+    for event in HOOKS:
+        groups = data.get("hooks", {}).get(event, [])
+        kept = []
+        for g in groups:
+            hooks = [h for h in g.get("hooks", []) if not _is_ours(h)]
+            if hooks:
+                kept.append(dict(g, hooks=hooks))
+        if kept == groups:
+            continue
+        if kept:
+            data["hooks"][event] = kept
+        else:
+            del data["hooks"][event]
+        removed.append(event)
+    if not removed:
         return f"훅 없음: {settings}"
-    if kept:
-        data["hooks"][HOOK_EVENT] = kept
-    else:
-        del data["hooks"][HOOK_EVENT]
     _write(settings, data)
-    return f"훅 제거: {settings} {HOOK_EVENT}"
+    return f"훅 제거: {settings} {'·'.join(removed)}"
 
 
 def registered_remote(run=None, claude: str | None = None) -> bool:

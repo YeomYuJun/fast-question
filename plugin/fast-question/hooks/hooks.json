@@ -1,5 +1,5 @@
 {
-  "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다",
+  "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣고, 응답을 마칠 때 확인한 사실의 등록을 권합니다",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -9,9 +9,26 @@
             "command": "uvx",
             "args": [
               "--from",
-              "fast-question==0.1.3",
+              "fast-question==0.1.4",
               "fast-question",
               "hook"
+            ],
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx",
+            "args": [
+              "--from",
+              "fast-question==0.1.4",
+              "fast-question",
+              "stop-hook"
             ],
             "timeout": 10
           }

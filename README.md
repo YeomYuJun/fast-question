@@ -28,6 +28,7 @@ claude plugin install fast-question@fast-question
 - MCP 서버 `fast-question`: 원격 서버의 `kb_*` 도구를 로컬 프록시로 쓴다. 파일·git 근거는 이 PC 에서 캡처하고 판정한다.
 - Skill `/fast-question:qa`(등록·검색), `/fast-question:qa-harvest`(프로젝트 폴더에서 Q&A 구축)
 - 즉석 질문 훅(UserPromptSubmit): 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣는다.
+- 세션 끝 수확 훅(Stop): 응답을 마칠 때 이 세션에서 파일로 확인한 사실이 KB 에 없으면 등록하도록 Claude 에게 한 번 권한다(KB 에 있는 프로젝트 폴더에서만).
 
 MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question` 을 `uvx` 로 실행한다. 설치 뒤 아래 PC 로그인을 한 번 하고 Claude Code 를 다시 시작한다. 자세한 것은 [plugin/fast-question/README.md](plugin/fast-question/README.md).
 
@@ -92,7 +93,7 @@ python3 -m venv .venv
 - `scripts/install.py` 가 하는 일
   - `skill/` 의 qa·qa-harvest Skill 을 `~/.claude/skills` 로 복사한다.
   - `run_mcp.py` 를 MCP 서버 `fast-question` 으로 Claude Code 사용자 범위에 등록한다(`claude` CLI 가 PATH 에 있어야 한다).
-  - 즉석 질문 훅(`hooks/ask_kb.py`)을 `~/.claude/settings.json` 의 UserPromptSubmit 에 등록한다. 처음 고치기 전 원본은 `settings.json.fast-question.bak` 으로 남긴다.
+  - 즉석 질문 훅(`hooks/ask_kb.py`)과 세션 끝 수확 훅(`hooks/stop_harvest.py`)을 `~/.claude/settings.json` 의 UserPromptSubmit·Stop 에 등록한다. 처음 고치기 전 원본은 `settings.json.fast-question.bak` 으로 남긴다.
   - DB 에 기본 사용 가이드를 넣는다.
   - MCP·훅·Skill 명령은 저장소의 `.venv` python 으로 실행된다. 저장소를 옮기면 다시 실행한다.
 - `run_web.py` 는 http://127.0.0.1:8765 에 웹 화면을 띄운다. 설정은 저장소의 `config.json`(DB 경로, 포트, 백업·로그 폴더)이고, `--config "<다른 config.json>"` 으로 바꾼다.
