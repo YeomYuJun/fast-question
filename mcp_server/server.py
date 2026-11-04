@@ -61,6 +61,11 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
     def detail(item: dict) -> dict:
         return {**_detail(item), "url": link(item["id"])}
 
+    def with_hint(s: Store, out: dict, force: bool = False) -> dict:
+        """열린 정리 건이 있고 마지막 정리가 오래됐으면(또는 force) cleanup_hint 를 붙인다. Skill 이 사용자에게 정리를 권한다."""
+        h = cleanup.hint(s.conn, force=force)
+        return {**out, "cleanup_hint": h} if h else out
+
     def run(fn: Callable[[Store], Any]) -> Any:
         store = open_store()
         try:
@@ -92,9 +97,9 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                 head = {"query": res["query"]}
             marks = cleanup.open_rules(s.conn, [h["id"] for h in res["hits"]])
             hits = [{**hit(h), "cleanup": marks[h["id"]]} if h["id"] in marks else hit(h) for h in res["hits"]]
-            return {**head, "total": res["total"], "groups": res["groups"],
-                    "hits": hits, "similar": [hit(h) for h in res["similar"]],
-                    "morph": res["morph"]}
+            return with_hint(s, {**head, "total": res["total"], "groups": res["groups"],
+                                 "hits": hits, "similar": [hit(h) for h in res["similar"]],
+                                 "morph": res["morph"]})
         return run(go)
 
     @server.tool()
@@ -123,8 +128,9 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             check_claude_qa(question, answer, evidence)
             res = s.add_qa(category, question, answer, evidence=evidence, links=links, force=force)
             if res["status"] == "similar_found":
-                return {"status": "similar_found", "similar": [hit(i) for i in res["similar"]]}
-            return {"status": "created", "item": detail(res["item"])}
+                # 비슷한 질문을 막 발견한 순간은 쌓인 중복도 함께 정리할 때라 마지막 정리 시점과 상관없이 권한다
+                return with_hint(s, {"status": "similar_found", "similar": [hit(i) for i in res["similar"]]}, force=True)
+            return with_hint(s, {"status": "created", "item": detail(res["item"])})
         return run(go)
 
     @server.tool()

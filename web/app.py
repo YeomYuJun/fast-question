@@ -43,7 +43,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from kb import control, guide, tenant
+from kb import cleanup, control, guide, tenant
 from kb import search as search_mod
 from kb.config import Config, load_config
 from kb.control import connect_control
@@ -423,6 +423,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/search", api(search)),
         Route("/api/categories", api(lambda s, r, b: {"categories": s.categories()})),
         Route("/api/projects", api(lambda s, r, b: s.project_sources())),
+        # 요약 줄의 "정리 대상 N" 칩. 처리는 Claude(MCP·웹 패널)가 한다
+        Route("/api/cleanup/summary", api(lambda s, r, b: cleanup.summary(s.conn))),
         Route("/api/evidence/check", api(evidence_check)),
         Route("/api/evidence/verdicts", api(verdicts), methods=["POST"]),
         Route("/api/categories", api(lambda s, r, b: s.add_category(

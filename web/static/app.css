@@ -46,6 +46,7 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
   padding: 0 8px; font: var(--text-chip); cursor: pointer; color: var(--muted); white-space: nowrap;
 }
 .chip.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.chip.warn { color: var(--ink); border-color: var(--line-strong); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---------- 상단 ---------- */

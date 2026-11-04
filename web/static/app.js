@@ -303,6 +303,30 @@ function renderSince(n) {
   chip.setAttribute("aria-pressed", String(state.since));
 }
 
+// 요약 줄의 "정리 대상 N" 칩. 열린 정리 건이 있을 때만 보이고, 누르면 Claude 패널(원격 모드)에 정리 요청을 채운다.
+// 패널이 없는 로컬 모드는 Claude Code 에서 하는 법을 알린다
+let cleanupSummary = null;
+async function renderCleanup() {
+  const chip = $("#cleanup-chip");
+  try {
+    cleanupSummary = await api("GET", "/api/cleanup/summary");
+  } catch {
+    chip.hidden = true;
+    return;
+  }
+  chip.hidden = !cleanupSummary.open;
+  chip.textContent = `정리 대상 ${cleanupSummary.open}건`;
+}
+
+function askCleanup() {
+  const ask = "정리 대상을 kb_cleanup_list 로 보고 규칙대로 정리해 줘.";
+  if (!$("#claude-btn").hidden) { // 원격 모드 로그인 상태에서만 패널 아이콘이 보인다(claude.js 가 이벤트를 받는다)
+    document.dispatchEvent(new CustomEvent("fq-claude-ask", { detail: ask }));
+  } else {
+    toast("Claude Code 에서 \"qa 정리해\" 라고 하면 정리합니다.");
+  }
+}
+
 function setSince(on) {
   state.since = on;
   state.pin = null;
@@ -389,6 +413,7 @@ async function runSearch() {
   const [counts, recentN] = await Promise.all([searchCounts(res), sinceCount(res)]);
   if (my !== searchSeq) return; // 늦게 도착한 이전 응답은 버린다
   renderSince(recentN);
+  if (cleanupSummary === null) renderCleanup(); // 첫 검색 때 한 번. 정리는 하루 단위라 검색마다 다시 묻지 않는다
   state.counts = counts;
   renderTree();
   render(res);
@@ -696,6 +721,11 @@ function detailEl(id) {
     d.links.length
       ? el("div", { class: "dline" }, label("연결"),
         dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
+      : null,
+    // 같은 분류의 다른 항목(최근 수정순, 연결 항목 제외). 검색 한 번으로 그 주제의 이웃 항목까지 읽는다
+    (d.related || []).length
+      ? el("div", { class: "dline" }, label("관련"),
+        dline("관련", d.related.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     el("div", { class: "dline hline" }, label("이력"), histLine(id, d),
       ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했습니다.")),
@@ -1405,6 +1435,7 @@ function init() {
   $("#empty-new").addEventListener("click", () => openNew(state.q));
   $("#cat-chip").addEventListener("click", () => setCat(null));
   $("#since-chip").addEventListener("click", () => setSince(!state.since));
+  $("#cleanup-chip").addEventListener("click", askCleanup);
   $("#toggle-side").addEventListener("click", () => openSide($("#side").hidden));
   $("#cat-add").addEventListener("click", () => {
     $("#cat-form").hidden = false;

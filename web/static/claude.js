@@ -860,3 +860,15 @@ new MutationObserver(() => {
   if (on && store("fq-claude-open") === "1" && $("#claude").hidden) clToggle(true);
 }).observe($("#account"), { attributes: true, attributeFilter: ["hidden"] });
 document.addEventListener("fq-logout", () => clOwner(null));
+// 요약 줄의 "정리 대상" 칩: 패널을 열고 정리 요청을 입력칸에 채운다(보내는 것은 사용자가 한다)
+document.addEventListener("fq-claude-ask", async (e) => {
+  if ($("#claude").hidden) clToggle(true);
+  else await clOpen();
+  // clOpen 은 키 확인을 기다린 뒤 입력칸을 만든다. 입력칸이 생길 때까지 잠깐 기다린다
+  for (let i = 0; i < 20 && !$("#cl-input"); i++) await new Promise((r) => setTimeout(r, 50));
+  const input = $("#cl-input");
+  if (!input) return;
+  input.value = e.detail;
+  input.dispatchEvent(new Event("input"));
+  input.focus();
+});

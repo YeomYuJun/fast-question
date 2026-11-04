@@ -364,3 +364,55 @@ def test_list_evidence_detail_carries_verdict_detail(claude, conn, tmp_path):
                             "detail": "30일 넘게 사용자 PC 에서 판정하지 않았습니다"}])
     out = cleanup.open_list(claude, rule="evidence_unknown")
     assert "30일 넘게 사용자 PC 에서 판정하지 않았습니다" in out["findings"][0]["detail"]
+
+
+# ---------- 관련 항목·정리 권장 ----------
+
+def test_kept_duplicate_links_the_two_items_and_marks_last_resolved(claude, conn):
+    a = add(claude, ".part 확장자에 먼저 쓰는 이유는?")
+    b = add(claude, ".part 확장자에 먼저 쓰는 이유는 무엇인가?")
+    cleanup.scan(conn)
+    assert cleanup.summary(conn) == {"open": 1, "last_resolved_at": None}
+    fid = findings(conn, "duplicate")[0]["id"]
+    cleanup.resolve(claude, fid, "kept", note="묻는 대상이 다르다")
+    assert [l["id"] for l in claude.get_qa(a["id"])["links"]] == [b["id"]]
+    assert cleanup.summary(conn)["open"] == 0 and cleanup.summary(conn)["last_resolved_at"]
+
+
+def test_hint_only_when_open_and_stale_or_forced(claude, conn):
+    assert cleanup.hint(conn) is None
+    add(claude, ".part 확장자에 먼저 쓰는 이유는?")
+    add(claude, ".part 확장자에 먼저 쓰는 이유는 무엇인가?")
+    cleanup.scan(conn)
+    assert cleanup.hint(conn)["open"] == 1  # 정리한 적이 없으면 바로 권한다
+    set_meta(conn, cleanup.LAST_RESOLVED_KEY, "2099-01-01T00:00:00Z")  # 최근에 정리했다
+    assert cleanup.hint(conn) is None
+    assert cleanup.hint(conn, force=True)["open"] == 1  # 비슷한 질문을 발견한 순간은 예외
+    set_meta(conn, cleanup.LAST_RESOLVED_KEY, "2000-01-01T00:00:00Z")
+    assert "정리 대상이 1건" in cleanup.hint(conn)["message"]
+
+
+def test_related_items_are_same_category_neighbors_without_links(claude):
+    a = add(claude, "NAS 에 .part 확장자를 쓰는 이유는?")
+    b = add(claude, "NAS 의 rename 이 원자적인 조건은?")
+    c = add(claude, "NAS 쓰기 전에 여유 공간을 검사하는 이유는?")
+    add(claude, "Pod 와 Deployment 의 차이는?", cat="일반 지식")
+    claude.link(a["id"], b["id"])
+    d = claude.get_qa(a["id"])
+    assert [l["id"] for l in d["links"]] == [b["id"]]
+    assert [r["id"] for r in d["related"]] == [c["id"]]
+
+
+def test_mcp_search_and_add_carry_cleanup_hint(server):
+    path, srv = server
+    call(srv, "kb_add_category", {"name": "이관"})
+    for q in (".part 확장자에 먼저 쓰는 이유는?", ".part 확장자에 먼저 쓰는 이유는 무엇인가?"):
+        call(srv, "kb_add", {"category": "이관", "question": q, "answer": "rename 으로 확정한다.", "force": True})
+    assert "cleanup_hint" not in call(srv, "kb_search", {"query": "확장자"})[1]
+    conn = connect(path)
+    cleanup.scan(conn)
+    conn.close()
+    assert call(srv, "kb_search", {"query": "확장자"})[1]["cleanup_hint"]["open"] == 1
+    err, res = call(srv, "kb_add", {"category": "이관", "question": ".part 확장자에 먼저 쓰는 이유는 뭔가?",
+                                    "answer": "rename 으로 확정한다."})
+    assert not err and res["status"] == "similar_found" and res["cleanup_hint"]["open"] == 1

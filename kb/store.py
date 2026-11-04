@@ -326,9 +326,17 @@ class Store:
             "WHERE (a_id = ? OR b_id = ?) AND deleted_at IS NULL ORDER BY id", (id, id, id))]
         item["links"] = [{"id": i["id"], "question": i["question"], "category_path": i["category_path"],
                           "archived": i["archived"]} for i in self.items(link_ids)]
+        item["related"] = self.related(id, item["category_id"], exclude=set(link_ids))
         item["evidence"] = self._evidence_list(id)
         item["revisions"] = self.history("qa", id)
         return item
+
+    def related(self, id: int, category_id: int, *, exclude: set[int] = frozenset(), limit: int = 5) -> list[dict]:
+        """같은 분류의 살아 있는 다른 항목(최근 수정순). 연결 항목(exclude)과 자기 자신은 뺀다. 화면 펼침의 관련 목록."""
+        rows = self.conn.execute(
+            "SELECT id, question FROM qa WHERE category_id = ? AND deleted_at IS NULL AND id != ? "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?", (category_id, id, limit + len(exclude)))
+        return [{"id": r["id"], "question": r["question"]} for r in rows if r["id"] not in exclude][:limit]
 
     # ---------- 근거 ----------
 

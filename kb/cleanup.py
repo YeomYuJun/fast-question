@@ -17,6 +17,7 @@ import inspect
 import json
 import sqlite3
 from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from itertools import combinations
 
@@ -304,4 +305,36 @@ def resolve(store, finding_id: int, resolution: str, note: str | None = None) ->
     with tx(conn) as c:
         c.execute(f"UPDATE cleanup_finding SET resolved_at = {NOW}, resolution = ?, resolved_by = ?, note = ? "
                   "WHERE id = ? AND resolved_at IS NULL", (resolution, store.actor, note, finding_id))
+        set_meta(c, LAST_RESOLVED_KEY, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        # 중복으로 올라왔지만 다른 사실로 판정한 두 항목은 같은 주제라 관련 항목으로 잇는다(화면 펼침의 연결 줄)
+        if resolution == "kept" and row["rule"] == "duplicate" and row["other_qa_id"]:
+            live = _live(c, [row["qa_id"], row["other_qa_id"]])
+            if len(live) == 2:
+                store._link(row["qa_id"], row["other_qa_id"])
     return _finding(conn.execute(f"SELECT {FINDING_COLS} FROM cleanup_finding WHERE id = ?", (finding_id,)).fetchone())
+
+
+LAST_RESOLVED_KEY = "cleanup_last_resolved"
+HINT_AFTER_DAYS = 7
+
+
+def summary(conn: sqlite3.Connection) -> dict:
+    """열린 정리 건 수(표의 건만. 근거 상태 건은 세지 않는다)와 마지막으로 정리 건을 닫은 시각."""
+    n = conn.execute("SELECT count(*) FROM cleanup_finding f JOIN qa q ON q.id = f.qa_id "
+                     "WHERE f.resolved_at IS NULL AND q.deleted_at IS NULL").fetchone()[0]
+    return {"open": n, "last_resolved_at": get_meta(conn, LAST_RESOLVED_KEY)}
+
+
+def hint(conn: sqlite3.Connection, *, force: bool = False, now: datetime | None = None) -> dict | None:
+    """정리를 권할 때 MCP 응답에 붙이는 안내. 열린 건이 있고 마지막 정리가 HINT_AFTER_DAYS 일보다 오래됐을 때(또는
+    force: 비슷한 질문을 막 발견한 순간) 돌려준다. 없으면 None."""
+    s = summary(conn)
+    if not s["open"]:
+        return None
+    last = s["last_resolved_at"]
+    if not force and last:
+        at = datetime.fromisoformat(last.replace("Z", "+00:00"))
+        if (now or datetime.now(timezone.utc)) - at < timedelta(days=HINT_AFTER_DAYS):
+            return None
+    return {"open": s["open"], "last_resolved_at": last,
+            "message": f"정리 대상이 {s['open']}건 있습니다. 지금 일을 마친 뒤 사용자에게 정리를 권하고, 동의하면 kb_cleanup_list 로 처리합니다."}
