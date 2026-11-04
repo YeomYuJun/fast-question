@@ -727,3 +727,9 @@ a.cl-hit:hover .q { text-decoration: underline; }
 .public { margin-top: 18px; }
 .public .pub-head .top-name { color: var(--accent); }
 .public .row.sel .item { border-color: var(--line-strong); }
+
+/* 공개 링크 페이지(/s/<토큰>): 문서 페이지 틀에 질문·답변 목록 */
+.share-items { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.share-item { display: flex; flex-direction: column; gap: 4px; padding: var(--space-4) 0; border-bottom: 1px solid var(--line); }
+.share-item .line { display: flex; align-items: baseline; gap: var(--space-2); }
+.share-path { font: var(--text-meta); color: var(--faint); padding-left: 20px; }

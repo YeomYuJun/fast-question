@@ -12,7 +12,7 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, PC 로그인 승인 /cli/authorize 와 토큰 교환 POST /api/cli/token(계정 대신 1회용 코드로
 받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에, 웹 Claude 패널
-/api/claude/key·/api/claude/chat 은 web/claude_chat.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+/api/claude/key·/api/claude/chat 은 web/claude_chat.py 에, 공개 링크 /s/<토큰>·/api/share·/api/account/shares 는 web/share.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
 /healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
 형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
@@ -55,7 +55,7 @@ from kb.jobs import run_due, run_due_all
 from kb.morph import Analyzer
 from kb.store import Store
 from mcp_server.http import RemoteMcp
-from web import auth, cli_login, importer, oauth_as
+from web import auth, cli_login, importer, oauth_as, share
 from web.auth import ACCOUNT_KEY
 from web.limits import BodyLimit, RateLimit
 
@@ -517,6 +517,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         routes[1:1] = auth.routes(cfg, auth.providers_from(cfg, http_transport), control_file)
         routes[1:1] = oauth_as.routes(auth.providers_from(cfg), control_file)  # /oauth/continue/<id>
         routes[1:1] = cli_login.routes(auth.providers_from(cfg), control_file)  # /cli/authorize, /api/cli/token
+        routes[1:1] = share.routes(control_file, cfg.data_dir, open_kb, cfg.public_url)  # /s/<토큰>, /api/share, /api/account/shares
         routes[1:1] = importer.routes(db_for, cfg.data_dir / "tmp", analyzer, db_lock,
                                        lambda: guide.load_remote(cfg.public_url), importing)
         from web import claude_chat  # anthropic 은 서버 의존성(requirements-server.txt)이라 원격 모드에서만 읽는다

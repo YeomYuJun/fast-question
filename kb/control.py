@@ -174,9 +174,24 @@ CREATE TABLE IF NOT EXISTS claude_key (
 );
 """
 
+# 공개 링크(kb/share.py): 항목·분류 하나를 로그인 없이 읽는 주소. 토큰은 sha256 만 둔다
+SHARE_DDL = """
+CREATE TABLE IF NOT EXISTS share (
+    id INTEGER PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    account_id INTEGER NOT NULL REFERENCES account(id),
+    kind TEXT NOT NULL CHECK (kind IN ('qa', 'category')),
+    target_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS share_account ON share(account_id, revoked_at);
+"""
+
 # 기능을 더하면 그 기능의 DDL 상수를 만들어 끝에 붙인다
 DDL_PARTS = (ACCOUNT_DDL, SESSION_DDL, TOKEN_DDL, OAUTH_DDL, SIGNUP_DDL, GLOBAL_WORD_DDL, LINK_DDL, CLI_GRANT_DDL,
-             CLAUDE_KEY_DDL)
+             CLAUDE_KEY_DDL, SHARE_DDL)
 DDL = "".join(DDL_PARTS)
 CONTROL_SCHEMA_VERSION = hashlib.sha256(DDL.encode("utf-8")).hexdigest()[:16]
 
@@ -423,7 +438,7 @@ def token_account(conn: sqlite3.Connection, token: str, now: datetime | None = N
 
 def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | None = None) -> None:
     """탈퇴: 계정에 탈퇴 시각을 적고 표시 이름을 지우고 세션·개인 토큰·OAuth 토큰·인가 코드·PC 로그인 승인 코드·
-    Anthropic API 키를 모두 지운다. 신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
+    Anthropic API 키를 모두 지우고 공개 링크를 폐기한다. 신원 행은 사용자 폴더와 같이 30일 남아(purge_closed_accounts) 그동안 다시 로그인하면 거부된다."""
     t = _iso(_now(now))
     with tx(conn):
         conn.execute("UPDATE account SET deleted_at = ?, display_name = '' WHERE id = ? AND deleted_at IS NULL",
@@ -434,6 +449,7 @@ def delete_account(conn: sqlite3.Connection, account_id: int, now: datetime | No
         conn.execute("DELETE FROM auth_code WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM cli_grant WHERE account_id = ?", (account_id,))
         conn.execute("DELETE FROM claude_key WHERE account_id = ?", (account_id,))
+        conn.execute("UPDATE share SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL", (t, account_id))
 
 
 def put_claude_key(conn: sqlite3.Connection, account_id: int, secret: str, last4: str, model: str,

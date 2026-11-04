@@ -27,6 +27,7 @@ const ICONS = {
   copy: ["M9 9h10v10H9z", "M5 15V5h10"],
   download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
   link: ["M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"],
+  share: ["M12 3v12", "M8 7l4-4 4 4", "M5 13v6h14v-6"],
   help: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18z", "M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.6", "M12 17h.01"],
 };
 function icon(name) {
@@ -194,6 +195,7 @@ function renderTreeEdit() {
       // 내보내기는 링크다. 파일 이름은 서버의 Content-Disposition 이 정한다
       el("a", { class: "ibtn dl", href: `/api/export?category=${c.id}`, download: "",
         "aria-label": `${c.path} Markdown 내보내기`, title: "Markdown 내보내기" }, icon("download")),
+      me && me.mode === "remote" ? ibtn("rn", "share", `${c.path} 공개 링크 만들기`, "공개 링크", () => makeShare("category", c.id)) : null,
       ibtn("rn", "pen", `${c.path} 이름 변경`, "이름 변경", () => { state.catRenaming = c.id; renderTree(); }),
       ibtn("del", "trash", `${c.path} 삭제`, "삭제", () => deleteCategory(c)));
   };
@@ -731,6 +733,7 @@ function detailEl(id) {
     el("div", { class: "dline hline" }, label("이력"), histLine(id, d),
       ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했습니다.")),
       ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했습니다.")),
+      me && me.mode === "remote" ? ibtn("cp", "share", "공개 링크 만들기", "공개 링크(로그인 없이 보는 주소)", () => makeShare("qa", id)) : null,
       el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
 }
 
@@ -1366,6 +1369,38 @@ async function disconnectApp(a) {
   renderConnect();
 }
 
+// 공개 링크: 항목·분류 하나를 로그인 없이 보는 주소. 만들면 바로 복사하고, 목록·폐기는 연결 패널에 있다
+async function makeShare(kind, id) {
+  try {
+    const made = await api("POST", "/api/account/shares", { kind, id });
+    await copy(made.url, "공개 링크를 복사했습니다. 이 주소를 아는 사람은 로그인 없이 볼 수 있습니다.");
+  } catch (e) {
+    toast(e.message, { err: true });
+  }
+}
+
+async function revokeShare(s) {
+  if (!window.confirm(`"${s.title}" 의 공개 링크를 폐기합니다. 그 주소는 바로 열리지 않게 됩니다.\n폐기하시겠습니까?`)) return;
+  try {
+    await api("DELETE", `/api/account/shares/${s.id}`);
+    toast("공개 링크를 폐기했습니다.");
+    renderConnect();
+  } catch (e) {
+    toast(e.message, { err: true });
+  }
+}
+
+function sharesBlock(shares) {
+  return el("div", { class: "cn-sec tokens" },
+    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "공개 링크"), el("span", { class: "cn-count" }, shares.length)),
+    shares.length
+      ? el("ul", { class: "token-list" }, shares.map((s) => el("li", { class: "token-item" },
+        el("div", { class: "tk" }, el("span", { class: "name" }, s.title),
+          el("span", { class: "meta mono" }, s.kind === "qa" ? "질문 하나" : "분류", ` · 만든 날 ${(s.created_at || "").slice(0, 10)}`)),
+        el("button", { class: "btn small", type: "button", "aria-label": `${s.title} 공개 링크 폐기`, onclick: () => revokeShare(s) }, "폐기"))))
+      : el("p", { class: "connect-note" }, "펼친 항목의 공유 아이콘이나 분류 편집의 공유 아이콘으로 만듭니다. 주소를 아는 사람은 로그인 없이 그 내용을 읽습니다."));
+}
+
 function appsBlock(apps) {
   return el("div", { class: "cn-sec tokens" },
     el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "연결된 앱"), el("span", { class: "cn-count" }, apps.length)),
@@ -1383,11 +1418,14 @@ function appsBlock(apps) {
 async function renderConnect() {
   let tokens = [];
   let apps = [];
-  const [tk, ap] = await Promise.allSettled([api("GET", "/api/account/tokens"), api("GET", "/api/account/apps")]);
+  let shares = [];
+  const [tk, ap, sh] = await Promise.allSettled([api("GET", "/api/account/tokens"), api("GET", "/api/account/apps"),
+    api("GET", "/api/account/shares")]);
   if (tk.status === "fulfilled") tokens = tk.value.tokens;
   else toast(tk.reason.message, { err: true });
   if (ap.status === "fulfilled") apps = ap.value.apps;
   else if (tk.status === "fulfilled") toast(ap.reason.message, { err: true });
+  if (sh.status === "fulfilled") shares = sh.value.shares;
   const day = (iso) => (iso || "").slice(0, 10);
   // 휴대폰, 태블릿(마우스 없이 터치만)에서는 Claude Code 를 돌릴 수 없어 연결 명령을 빼고 안내만 둔다.
   // 브라우저 이름(UA) 대신 입력 장치로 판단한다. Safari, Chrome, Edge, Firefox 모두 이 미디어 쿼리를 지원한다
@@ -1421,6 +1459,7 @@ async function renderConnect() {
           ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
         : el("p", { class: "connect-note" }, "아직 만든 토큰이 없습니다.")),
     appsBlock(apps),
+    sharesBlock(shares),
     loginBlock(),
     el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "내보내기"),
       el("p", { class: "connect-note" }, "내 저장소 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 설정(config.json)의 db_path 로 지정하면 그대로 열립니다."),
