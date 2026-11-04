@@ -722,3 +722,8 @@ a.cl-hit:hover .q { text-decoration: underline; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* 공개 지식: 내 결과 아래 따로 두는 묶음. 머리에 공개 표시, 행 오른쪽은 날짜 대신 중분류 이름 */
+.public { margin-top: 18px; }
+.public .pub-head .top-name { color: var(--accent); }
+.public .row.sel .item { border-color: var(--line-strong); }

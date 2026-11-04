@@ -53,9 +53,9 @@ docker compose -f deploy/compose.yaml up -d --build
 
 - 상태 점검: `https://<도메인>/healthz` 가 200 이면 정상, 503 이면 응답 JSON 의 `db`·`disk_free`·`morph` 중 실패한 항목을 본다. 컨테이너의 `HEALTHCHECK` 도 같은 경로를 1분마다 부른다.
 - 로그: 앱 로그는 표준 에러로 나가 `docker compose -f deploy/compose.yaml logs app` 로 본다. `/data/logs/web.log` 에도 남는다.
-- 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본).
+- 데이터: 볼륨 `fq-data` 의 `/data/control.sqlite3`(계정·세션·토큰), `/data/users/<id>/kb.sqlite3`(사용자 KB), `/data/users/<id>/backup/`, `/data/backup/`(제어 DB 사본), `/data/public/kb.sqlite3`(공개 지식 층, 아래 절), `/data/tmp/`(가져오기·내보내기 임시 파일).
 - 웹 Claude 패널: 사용자가 등록한 Anthropic API 키는 제어 DB 에 암호화해 두고, 암호 키는 처음 등록할 때 `/data/claude-key.secret` 으로 생긴다. 이 파일은 S3 로 올리지 않는다. 잃거나 바꾸면 저장된 키를 풀 수 없어 사용자가 키를 다시 등록해야 한다.
-- 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
+- 주기 작업: 10분마다 기한이 된 사용자별 백업(하루 1번)·재색인과 제어 DB 백업, 공개 DB 재색인을 돌린다. 근거 재검증은 사용자 PC 에서 한다.
   배포로 기본 가이드(`kb/default_guide.json`)가 바뀌면 사용자 DB 마다 한 번 다시 넣는다. 사용자나 Claude 가 고친 가이드 항목은 그대로 둔다.
   하루 한 번 30일 넘게 판정되지 않은 근거를 unknown 으로 바꾸고, 1년 안 쓴 OAuth 클라이언트, 등록하고 하루 안에 토큰을 받지 않은 OAuth 클라이언트, 30일 지난 탈퇴 폴더(`/data/deleted/`)를 지운다.
   하루 한 번 사용자 DB 마다 정리 대상(질문이 비슷한 항목, 지금 형식 규칙에 어긋나는 Claude 등록분)을 찾아 `cleanup_finding` 표에 둔다. 항목은 고치지 않는다. 처리는 Claude 가 MCP `kb_cleanup_list`·`kb_cleanup_resolve` 로 한다.
@@ -94,6 +94,21 @@ cat ~/.ssh/fq_deploy
   - `DEPLOY_SSH_KEY`: `cat ~/.ssh/fq_deploy` 출력 전체
 - secret 을 넣은 뒤 서버의 개인키 `~/.ssh/fq_deploy` 는 지운다(`rm ~/.ssh/fq_deploy`). 공개키와 authorized_keys 줄은 남긴다.
 - 키를 바꾸거나 끊으려면 authorized_keys 에서 `fq-github-deploy` 줄을 지운다.
+
+## 공개 지식 층
+
+운영자가 따로 쌓은 Q&A 를 모든 계정의 검색 결과에 읽기 전용으로 합쳐 보이는 층이다. 파일은 볼륨의 `/data/public/kb.sqlite3` 하나이고, 없으면 공개 층은 없다.
+
+```powershell
+docker compose -f deploy/compose.yaml cp <내려받은 저장소 파일.sqlite3> app:/tmp/public-src.sqlite3
+docker compose -f deploy/compose.yaml exec app python scripts/public_db.py --config /etc/fq/config.json set /tmp/public-src.sqlite3
+docker compose -f deploy/compose.yaml exec app python scripts/public_db.py --config /etc/fq/config.json info
+docker compose -f deploy/compose.yaml exec app python scripts/public_db.py --config /etc/fq/config.json remove
+```
+
+- 적재할 파일은 공개할 내용만 둔 계정의 연결 패널 `저장소 파일 받기`(또는 로컬 모드의 `data/kb.sqlite3`) 결과다. 가져오기와 같은 검사(무결성·스키마 버전·표 목록·뷰 없음)를 하고, system 이 만든 항목(기본 가이드)은 빼고 넣는다.
+- 사용자와 Claude 는 공개 DB 를 읽기만 한다(웹 `GET /api/public/qa/<id>`, MCP `kb_get(id, public=true)`, 검색 결과의 `public` 묶음). 쓰기 경로가 없다. 고치려면 자기 저장소로 복사한다(웹 `내 저장소로` 버튼, MCP 는 `kb_add`).
+- 주기 작업이 형태소 분석기 버전에 맞춰 공개 DB 를 재색인한다. 내용을 바꾸려면 이 명령으로 다시 적재한다.
 
 ## 형태소 사용자 단어
 

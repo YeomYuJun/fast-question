@@ -232,7 +232,7 @@ def test_search_syntax_queries_and_regex(server):
     err, res = call(server, "kb_search", {"query": r"\(\d{3}\)", "regex": True})
     assert not err and [h["question"] for h in res["hits"]] == ["TypeHandler 가 맡는 일"]
     err, text = call(server, "kb_search", {"query": "(a+)+", "regex": True})
-    assert err and "중첩" in text
+    assert err and "반복" in text
 
 
 def test_add_many_reports_each_item(server):

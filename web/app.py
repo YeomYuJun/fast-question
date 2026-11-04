@@ -43,7 +43,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from kb import cleanup, control, guide, tenant
+from kb import cleanup, control, guide, public_kb, tenant
 from kb import search as search_mod
 from kb.config import Config, load_config
 from kb.control import connect_control
@@ -131,7 +131,8 @@ CSP = "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors '
 
 
 class SecurityHeaders:
-    """모든 HTTP 응답에 Content-Security-Policy 를 붙인다. 가장 바깥 미들웨어라 다른 미들웨어의 거부 응답에도 붙는다."""
+    """모든 HTTP 응답에 Content-Security-Policy, X-Content-Type-Options, Referrer-Policy 를 붙인다.
+    가장 바깥 미들웨어라 다른 미들웨어의 거부 응답에도 붙는다."""
 
     def __init__(self, app):
         self.app = app
@@ -143,7 +144,10 @@ class SecurityHeaders:
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message)["Content-Security-Policy"] = CSP
+                headers = MutableHeaders(scope=message)
+                headers["Content-Security-Policy"] = CSP
+                headers["X-Content-Type-Options"] = "nosniff"
+                headers.setdefault("Referrer-Policy", "same-origin")  # OAuth·CLI 승인 화면은 자기 값을 둔다
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
@@ -334,17 +338,36 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
     async def export_db(request: Request) -> Response:
-        """내 DB 전체를 SQLite 파일 하나로 내려준다. 로컬 모드 config.json 의 db_path 로 그대로 열린다."""
+        """내 DB 전체를 SQLite 파일 하나로 내려준다. 로컬 모드 config.json 의 db_path 로 그대로 열린다.
+        사본(최대 200 MB)은 데이터 디스크의 tmp 에 두고(디스크 여유를 /healthz 가 본다), 한 계정은 한 번에 하나만 내려받는다
+        (가져오기와 같은 importing 집합. 응답을 읽지 않는 요청을 겹쳐 열어 디스크를 채우지 못하게 한다)."""
         db = db_for(request)
         if db is None:
             return unauthorized()
+        if db in importing:
+            return JSONResponse({"error": "이 계정의 가져오기나 내보내기가 진행 중입니다. 끝난 뒤 다시 시도해 주세요.",
+                                 "code": "busy"}, status_code=409)
+        importing.add(db)
+
+        def done(tmp: str) -> None:
+            importing.discard(db)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
         def work() -> str:
-            fd, tmp = tempfile.mkstemp(prefix="fq-export-", suffix=".sqlite3")
+            tmp_dir = cfg.data_dir / "tmp" if remote else None
+            if tmp_dir:
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(prefix="fq-export-", suffix=".sqlite3", dir=tmp_dir)
             os.close(fd)
             conn = open_kb(db)
             try:
                 copy_db(conn, Path(tmp))
+            except BaseException:
+                os.unlink(tmp)
+                raise
             finally:
                 conn.close()
             return tmp
@@ -352,11 +375,15 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         try:
             tmp = await run_in_threadpool(work)
         except sqlite3.OperationalError as e:
+            importing.discard(db)
             return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
                                  "code": "busy"}, status_code=503)
+        except BaseException:
+            importing.discard(db)
+            raise
         return FileResponse(tmp, media_type="application/vnd.sqlite3",
                             filename=f"fast-question-{datetime.now():%Y%m%d}.sqlite3",
-                            background=BackgroundTask(os.unlink, tmp))
+                            background=BackgroundTask(done, tmp))
 
     def health_checks() -> dict:
         out: dict = {"db": "ok"}
@@ -387,13 +414,47 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     def pid(request: Request, name: str = "id") -> int:
         return int(request.path_params[name])
 
+    def open_public() -> Store | None:
+        """공개 지식 층(kb/public_kb.py). 원격 모드에서 공개 DB 파일이 있을 때만."""
+        return public_kb.public_store(cfg.data_dir, analyzer) if remote else None
+
+    def with_public(fn):
+        """공개 DB Store 를 둘째 인자로 받는 처리. 공개 DB 가 없으면 404."""
+        def go(s: Store, r: Request, b: dict):
+            pub = open_public()
+            if pub is None:
+                raise NotFoundError("공개 지식이 없습니다.")
+            try:
+                return fn(s, pub, r, b)
+            finally:
+                pub.conn.close()
+        return go
+
     def search(s: Store, r: Request, _):
         qp = r.query_params
         # since: 그 시간 안에 등록된 항목만. relax=1: 단어 빼기 제안을 붙인다(화면의 본 검색만 켠다.
         # 즉석 질문 훅·건수만 세는 요청은 넘기지 않아 단어 수만큼의 추가 검색을 하지 않는다)
-        return s.search(qp.get("q", ""), category_id=int(qp["category"]) if qp.get("category") else None,
-                        limit=int(qp.get("limit", 200)), relax=qp.get("relax") == "1",
-                        since_hours=float(qp["since"]) if qp.get("since") else None)
+        q = qp.get("q", "")
+        res = s.search(q, category_id=int(qp["category"]) if qp.get("category") else None,
+                       limit=int(qp.get("limit", 200)), relax=qp.get("relax") == "1",
+                       since_hours=float(qp["since"]) if qp.get("since") else None)
+        # public=1: 공개 지식 층의 결과를 따로 붙인다(화면의 본 검색만. 분류·기간 필터는 사용자 DB 의 것이라 넘기지 않는다)
+        if qp.get("public") == "1" and q.strip():
+            pub = open_public()
+            if pub is not None:
+                try:
+                    found = public_kb.search(pub, q, limit=int(qp.get("public_limit", 20)))
+                finally:
+                    pub.conn.close()
+                res["public"] = {"total": found["total"],
+                                 "hits": [public_kb.mark(h, cfg.web_url) for h in found["hits"]]}
+        return res
+
+    def public_copy(s: Store, pub: Store, r: Request, b: dict):
+        res = public_kb.copy_to(pub, s, pid(r), category=b.get("category"), force=bool(b.get("force")))
+        if res["status"] == "created":
+            _qa_out(res["item"])
+        return res
 
     def evidence_check(s: Store, r: Request, _):
         """로컬 검사기(scripts/local_check.py, 로컬 프록시 kb_recheck)가 판정할 이 PC 의 근거."""
@@ -437,6 +498,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
             pid(r), b["version"])), methods=["POST"]),
         Route("/api/qa", api(add_qa), methods=["POST"]),
+        Route("/api/public/qa/{id:int}", api(with_public(lambda s, pub, r, b: public_kb.detail(pub, pid(r))))),
+        Route("/api/public/qa/{id:int}/copy", api(with_public(public_copy)), methods=["POST"]),
         Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.get_qa(pid(r))))),
         Route("/api/qa/{id:int}", api(lambda s, r, b: _qa_out(s.update_qa(
             pid(r), b["version"], question=b.get("question"), answer=b.get("answer"),

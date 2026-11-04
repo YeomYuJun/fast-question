@@ -211,8 +211,12 @@ def test_regex_guard(store):
     from kb.errors import ValidationError
     with pytest.raises(ValidationError, match="200자"):
         store.search("a" * 201, regex=True)
-    with pytest.raises(ValidationError, match="중첩"):
-        store.search("(a+)+$", regex=True)
+    for bad in ("(a+)+$", "(a|a)+$", "(?:a|aa)*b", "(ab){2,}"):
+        with pytest.raises(ValidationError, match="반복"):
+            store.search(bad, regex=True)
+    with pytest.raises(ValidationError, match="500자"):
+        store.search("가 " * 300)
+    assert store.search("(nas|NAS) 안", regex=True)["total"] >= 1  # 반복 없는 그룹은 된다
 
 
 def test_search_many_ranks_by_matched_queries(store):

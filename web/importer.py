@@ -3,7 +3,7 @@ POST /api/import/db/plan 은 같은 파일을 받아 쓰기 없이 처리 방식
 
 요청 본문은 SQLite 파일 그대로(application/octet-stream)이고 IMPORT_MAX_BYTES 까지 받는다. 사용자 PC 쪽은
 scripts/push_local.py 가 온라인 백업 사본을 만들어 개인 토큰으로 올린다. 브라우저 세션으로도 부를 수 있다.
-받은 파일은 integrity_check → meta.schema_version(이 서버와 같아야 한다) → 표 목록(kb/schema.py 와 같아야 한다)
+받은 파일은 integrity_check → meta.schema_version(이 서버와 같아야 한다) → 표 목록(kb/schema.py 와 같아야 한다) → 뷰 없음
 순서로 검사하고, 하나라도 틀리면 400 으로 거부하고 사용자 DB 를 건드리지 않는다.
 검사를 통과한 파일에서 system 이 만든 Q&A(올린 PC 의 로컬 기본 가이드)를 행째 지운다(kb.dbcopy.prune).
 로컬 가이드는 로컬 화면 주소와 저장소 파일 근거를 담고 있어 원격 계정에 맞지 않는다.
@@ -97,6 +97,10 @@ def validate(path: Path) -> None:
         if tables != expected_tables():
             diff = sorted(tables ^ expected_tables())
             raise ImportRefused(f"표 목록이 이 서버의 스키마와 다릅니다: {', '.join(diff)}")
+        # 뷰는 서버 스키마에 없다. 올린 파일의 트리거는 prune 이 서버 것으로 바꾸지만 뷰는 남으므로 받지 않는다
+        views = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'view'")]
+        if views:
+            raise ImportRefused(f"이 서버의 스키마에 없는 뷰가 있습니다: {', '.join(sorted(views)[:5])}")
     finally:
         conn.close()
 

@@ -14,7 +14,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from kb import cleanup, control, guide, oauth_store, s3backup, tenant
+from kb import cleanup, control, guide, oauth_store, public_kb, s3backup, tenant
 from kb.config import Config
 from kb.control import connect_control
 from kb.db import NOW, connect, get_meta, set_meta
@@ -210,6 +210,19 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
             conn.close()
     if users:
         done["users"] = users
+    public_db = public_kb.public_path(cfg.data_dir)
+    if public_db.is_file():  # 공개 지식 층도 분석기 버전이 바뀌면 다시 색인한다(쓰기는 이것뿐이다)
+        try:
+            conn = connect(public_db)
+            try:
+                result = _run(_reindex_job(conn, analyzer), "public ")
+                if result:
+                    done["public"] = result
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001
+            log.exception("공개 DB 작업 실패")
+            done["public"] = {"open": {"error": f"{type(e).__name__}: {e}"}}
     try:
         conn = connect_control(tenant.control_path(cfg.data_dir))
         try:

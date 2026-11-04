@@ -26,8 +26,10 @@ SIMILAR_MIN = 0.5
 SIMILAR_LIMIT = 20
 RECENT_LIMIT = 50
 REGEX_MAX = 200
-# (a+)+ 처럼 반복 안에 반복이 든 패턴은 역추적으로 검색 시간이 끝없이 늘 수 있다
-_NESTED_REPEAT = re.compile(r"\([^()]*[+*][^()]*\)\s*[+*{]")
+QUERY_MAX = 500  # 검색어 길이. 형태소 분석과 FTS 질의가 그대로 받으므로 상한을 둔다
+# 반복되는 그룹 (a+)+, (a|a)+, (a|aa)* 는 역추적으로 검색 시간이 끝없이 늘 수 있다(Python re 는 시간 제한이 없다).
+# 그룹 뒤에 반복 기호가 오면 안쪽 내용과 상관없이 거부한다
+_REPEATED_GROUP = re.compile(r"\)\s*[+*{]")
 FTS_COLUMNS = {"q": "{question question_ns}", "a": "{answer answer_ns}"}
 
 
@@ -192,8 +194,8 @@ def _bigrams(text: str) -> set[str]:
 def _regex(q: str, case_sensitive: bool) -> re.Pattern:
     if len(q) > REGEX_MAX:
         raise ValidationError(f"정규식은 {REGEX_MAX}자까지 쓸 수 있습니다. 지금 {len(q)}자입니다.")
-    if _NESTED_REPEAT.search(q):
-        raise ValidationError("정규식에 중첩 반복((a+)+ 같은 형태)을 쓸 수 없습니다. 검색 시간이 끝없이 늘 수 있습니다.")
+    if _REPEATED_GROUP.search(q):
+        raise ValidationError("정규식에 반복되는 그룹((a+)+, (a|b)* 같은 형태)을 쓸 수 없습니다. 검색 시간이 끝없이 늘 수 있습니다.")
     try:
         return re.compile(q, 0 if case_sensitive else re.IGNORECASE)
     except re.error as e:
@@ -209,6 +211,8 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
     t0 = time.perf_counter()
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
+    if len(q) > QUERY_MAX:
+        raise ValidationError(f"검색어는 {QUERY_MAX}자까지 쓸 수 있습니다. 지금 {len(q)}자입니다.")
     ok = _filter(store, include_archived, category_id, since_hours)
     # 빈 검색(최근 목록)에는 형태소가 필요 없으므로 Kiwi 를 띄우지 않는다
     morph_on = bool(q and analyzer is not None and analyzer.ready(conn))

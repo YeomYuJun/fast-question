@@ -62,6 +62,7 @@ def test_page_has_csp_and_no_inline_code(client):
     assert r.text.index('<script src="/static/theme.js"></script>') < r.text.index("/static/tokens.css")
     assert client.get("/static/theme.js").status_code == 200
     assert "default-src 'self'" in client.get("/api/me").headers["content-security-policy"]
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["referrer-policy"] == "same-origin"
 
 
 def test_terms_and_privacy_pages(client):

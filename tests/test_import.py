@@ -145,6 +145,12 @@ def _extra_table(tmp_path):
     return snapshot(conn, tmp_path / "extra-upload.sqlite3")
 
 
+def _with_view(tmp_path):
+    conn = local_db(tmp_path, "view.sqlite3")
+    conn.execute("CREATE VIEW peek AS SELECT question FROM qa")
+    return snapshot(conn, tmp_path / "view-upload.sqlite3")
+
+
 def _truncated(tmp_path):
     conn = local_db(tmp_path, "cut.sqlite3")
     for i in range(300):
@@ -158,6 +164,7 @@ def _truncated(tmp_path):
     (_truncated, "손상"),
     (_schema_mismatch, "스키마 버전"),
     (_extra_table, "표 목록"),
+    (_with_view, "뷰"),
 ])
 def test_import_rejects_bad_files_and_keeps_db(cfg, app, tmp_path, make, needle):
     with client_for(app, 1) as c:

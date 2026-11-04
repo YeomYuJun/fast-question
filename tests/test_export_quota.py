@@ -90,3 +90,19 @@ def test_api_reports_size_cap_as_quota(app, monkeypatch):
         monkeypatch.setattr(store_mod, "DB_MAX_BYTES", 0)
         r = c.post("/api/categories", json={"name": "이관"})
     assert r.status_code == 400 and r.json()["code"] == "quota"
+
+
+def test_export_db_is_one_at_a_time_per_account_and_uses_data_tmp(app, cfg):
+    with TestClient(app, base_url=URL) as c:
+        login(c)
+        c.post("/api/categories", json={"name": "이관"})
+        db = app.state.db_lock  # noqa: F841 - 앱이 떠 있는지만 본다
+        from kb import tenant
+        path = tenant.db_path_for(cfg.data_dir, 1)
+        app.state.importing.add(path)  # 가져오기(또는 내보내기)가 진행 중인 척
+        r = c.get("/api/export/db")
+        assert r.status_code == 409 and r.json()["code"] == "busy"
+        app.state.importing.discard(path)
+        assert c.get("/api/export/db").status_code == 200
+    assert not list((cfg.data_dir / "tmp").glob("fq-export-*")), "응답을 보낸 뒤 사본을 지운다"
+    assert path not in app.state.importing

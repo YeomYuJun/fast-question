@@ -398,7 +398,7 @@ async function runSearch() {
   syncUrl();
   let res;
   try {
-    res = await api("GET", "/api/search?" + searchParams({ relax: 1 }));
+    res = await api("GET", "/api/search?" + searchParams({ relax: 1, public: 1 }));
     if (state.pin && !state.q && !state.cat && !state.since && !res.hits.some((h) => h.id === state.pin)) {
       const it = await api("GET", `/api/qa/${state.pin}`).catch(() => null);
       if (it && !it.archived) {
@@ -452,6 +452,7 @@ function render(res) {
   }
 
   summarize(res, similar, order.length);
+  renderPublic(res.public);
   const empty = !res.hits.length;
   state.empty = empty;
   $("#empty").hidden = !empty || Boolean($("#new-slot").firstChild);
@@ -920,6 +921,91 @@ function finishEdit(id, it, msg) {
   runSearch();
 }
 
+// ---------- 공개 지식 ----------
+// 운영자가 적재한 공개 DB 의 검색 결과. 내 결과 아래에 따로 보이고, 항목을 펼치면 내 DB 로 복사할 수 있다.
+// 공개 항목의 번호는 내 항목 번호와 겹치므로 본 목록(rows)에 섞지 않는다
+
+const pub = { open: null, details: new Map(), last: null };
+
+function renderPublic(found) {
+  pub.last = found;
+  const box = $("#public");
+  const hits = (found && found.hits) || [];
+  box.hidden = !hits.length;
+  if (!hits.length) {
+    box.replaceChildren();
+    return;
+  }
+  const head = el("div", { class: "grp-head pub-head" }, el("span", { class: "top-name" }, "공개 지식"),
+    el("span", { class: "rule" }), el("span", { class: "grp-n" }, found.total));
+  fill(box, head, el("div", { class: "grp-rows" }, ...hits.map(pubRowEl)));
+}
+
+function pubRowEl(h) {
+  const open = pub.open === h.id;
+  const r = el("div", { class: "row pub-row" + (open ? " sel" : ""), "data-pub": h.id },
+    el("div", { class: "in" }, el("div", { class: "item" },
+      el("button", { class: "rowbtn", type: "button", "aria-expanded": String(open), onclick: () => togglePub(h.id) },
+        el("span", { class: "qa" },
+          el("span", { class: "line" }, el("span", { class: "tag-q" }, "Q"),
+            el("span", { class: "qtext" }, marked(h.question, h.spans && h.spans.question))),
+          el("span", { class: "line" }, el("span", { class: "tag-a" }, "A"),
+            el("span", { class: "atext" + (open ? "" : " clamp2") }, marked(h.answer, (h.spans && h.spans.answer) || [])))),
+        el("span", { class: "date", title: h.category_path }, h.category_path.split(" > ").pop())),
+      open ? pubDetailEl(h) : null)));
+  return r;
+}
+
+function togglePub(id) {
+  pub.open = pub.open === id ? null : id;
+  renderPublicKeep();
+}
+
+function pubDetailEl(h) {
+  const label = (s) => el("span", { class: "label" }, s);
+  const d = pub.details.get(h.id);
+  if (!d) {
+    api("GET", `/api/public/qa/${h.id}`).then((got) => {
+      pub.details.set(h.id, got);
+      if (pub.open === h.id) renderPublicKeep();
+    }).catch((e) => toast(e.message, { err: true }));
+  }
+  const ev = d && d.evidence.length
+    ? d.evidence.map((e) => e.kind === "url" ? el("a", { href: e.path, target: "_blank", rel: "noopener" }, e.path) : el("span", {}, e.text)).flatMap((n, i) => (i ? [" · ", n] : [n]))
+    : "없음";
+  return el("div", { class: "detail" },
+    el("div", { class: "dline" }, label("분류"), el("span", { class: "val" }, h.category_path)),
+    el("div", { class: "dline" }, label("근거"), el("span", { class: "val wrap" }, ...[].concat(ev))),
+    el("div", { class: "dline hline" }, label(""), el("span", { class: "val hist" }, "운영자가 적재한 공개 항목입니다. 고치려면 내 저장소로 복사합니다."),
+      ibtn("cp", "copy", "복사", "질문과 답 복사", () => copy("Q:\t" + h.question + "\r\nA:\t" + h.answer, "Q&A 를 복사했습니다.")),
+      el("button", { class: "btn small", type: "button", onclick: () => copyPublic(h) }, "내 저장소로")));
+}
+
+// 펼침·상세 도착 때 마지막 검색 결과의 공개 묶음을 같은 데이터로 다시 그린다
+function renderPublicKeep() {
+  renderPublic(pub.last);
+}
+
+async function copyPublic(h, force) {
+  let res;
+  try {
+    res = await api("POST", `/api/public/qa/${h.id}/copy`, force ? { force: true } : {});
+  } catch (e) {
+    toast(e.message, { err: true });
+    return;
+  }
+  if (res.status === "similar_found") {
+    const first = res.similar[0];
+    if (window.confirm(`내 저장소에 비슷한 질문이 있습니다.\n\n${first.question}\n\n그래도 복사하시겠습니까?`)) return copyPublic(h, true);
+    return;
+  }
+  const it = res.item;
+  toast(`내 저장소에 등록했습니다: ${it.category_path}`);
+  state.details.set(it.id, it);
+  refreshCats();
+  runSearch();
+}
+
 // ---------- 새 질문 ----------
 
 function openNew(question) {
@@ -1007,6 +1093,20 @@ function scrollTo(id) {
 }
 
 async function openFromHash() {
+  const pm = location.hash.match(/^#pub\/(\d+)$/);
+  if (pm) {
+    const id = Number(pm[1]);
+    try {
+      const d = await api("GET", `/api/public/qa/${id}`);
+      pub.details.set(id, d);
+      pub.open = id;
+      renderPublic({ total: 1, hits: [d] });
+      $("#public").scrollIntoView({ block: "center" });
+    } catch (e) {
+      toast(e.message, { err: true });
+    }
+    return;
+  }
   const m = location.hash.match(/^#qa\/(\d+)$/);
   if (!m) return;
   const id = Number(m[1]);

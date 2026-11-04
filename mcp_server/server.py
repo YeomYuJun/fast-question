@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
 
-from kb import cleanup
+from kb import cleanup, public_kb
 from kb.db import connect
 from kb.errors import ConflictError, KbError
 from kb.morph import reindex
@@ -47,10 +47,20 @@ def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
 
 
 def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool = False, auth=None,
-                 auth_server_provider=None) -> MCPServer:
+                 auth_server_provider=None, open_public: Callable[[], Store | None] | None = None) -> MCPServer:
+    """open_public: 공개 지식 층(kb/public_kb.py)의 Store 를 여는 함수(원격 서버). 없거나 None 을 돌려주면 공개 층이 없다."""
     server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth,
                        auth_server_provider=auth_server_provider)
     base = web_url.rstrip("/")
+
+    def public() -> Store | None:
+        return open_public() if open_public else None
+
+    def public_store_or_error() -> Store:
+        pub = public()
+        if pub is None:
+            raise KbError("이 서버에는 공개 지식이 없습니다.")
+        return pub
 
     def link(qa_id: int) -> str:
         return f"{base}/#qa/{qa_id}"
@@ -85,7 +95,9 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
         queries 에 표현 여러 개를 주면 한 번에 찾고, 항목마다 걸린 질의(matched)와 걸린 질의 수 순으로 돌려준다.
         regex=true 면 query 를 정규식(200자 이하, 중첩 반복 금지)으로 질문·답변에서 찾는다. 문법·동의어·형태소는 쓰지 않는다.
         hits 의 tier 는 exact(그대로 일치), synonym(동의어), morph(형태소: 활용형·조사 차이)다.
-        hits 가 0건이면 similar 에 비슷한 결과가 온다. category 는 "대분류" 또는 "대분류 > 중분류"."""
+        hits 가 0건이면 similar 에 비슷한 결과가 온다. category 는 "대분류" 또는 "대분류 > 중분류".
+        서버에 공개 지식 층이 있으면 public.hits 에 운영자가 적재한 공개 Q&A(scope=public, 읽기 전용)가 따로 온다.
+        공개 항목을 쓰려면 kb_get(id, public=true) 로 읽고, 내 DB 에 두려면 kb_add 로 등록한다."""
         def go(s: Store):
             cid = s.resolve_category(category) if category else None
             opts = {"category_id": cid, "include_archived": include_archived, "limit": limit}
@@ -97,15 +109,33 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                 head = {"query": res["query"]}
             marks = cleanup.open_rules(s.conn, [h["id"] for h in res["hits"]])
             hits = [{**hit(h), "cleanup": marks[h["id"]]} if h["id"] in marks else hit(h) for h in res["hits"]]
-            return with_hint(s, {**head, "total": res["total"], "groups": res["groups"],
-                                 "hits": hits, "similar": [hit(h) for h in res["similar"]],
-                                 "morph": res["morph"]})
+            out = {**head, "total": res["total"], "groups": res["groups"],
+                   "hits": hits, "similar": [hit(h) for h in res["similar"]], "morph": res["morph"]}
+            pub = public()
+            if pub is not None and not regex:
+                try:
+                    found = public_kb.search(pub, " ".join(queries) if queries else query, limit=limit)
+                finally:
+                    pub.conn.close()
+                if found["hits"]:
+                    out["public"] = {"total": found["total"],
+                                     "hits": [public_kb.mark(_hit(h), base) for h in found["hits"]]}
+            return with_hint(s, out)
         return run(go)
 
     @server.tool()
-    def kb_get(id: int) -> dict:
-        """Q&A 한 건을 근거, 관련 질문, 최근 이력 5건과 함께 읽는다. 고치기 전에 version 을 여기서 읽는다."""
-        return run(lambda s: detail(s.get_qa(id)))
+    def kb_get(id: int, public: bool = False) -> dict:
+        """Q&A 한 건을 근거, 관련 질문, 최근 이력 5건과 함께 읽는다. 고치기 전에 version 을 여기서 읽는다.
+        public=true 면 공개 지식 층의 항목을 읽는다(읽기 전용. 고치려면 kb_add 로 내 DB 에 등록한다)."""
+        def go(s: Store):
+            if not public:
+                return detail(s.get_qa(id))
+            pub = public_store_or_error()
+            try:
+                return {**public_kb.detail(pub, id), "url": f"{base}/#pub/{id}"}
+            finally:
+                pub.conn.close()
+        return run(go)
 
     @server.tool()
     def kb_categories() -> dict:

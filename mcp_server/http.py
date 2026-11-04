@@ -15,7 +15,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
 from mcp.server.transport_security import TransportSecuritySettings
 
-from kb import tenant
+from kb import public_kb, tenant
 from kb.config import Config
 from kb.db import connect
 from kb.store import Store
@@ -48,7 +48,8 @@ class RemoteMcp:
                                                                   default_scopes=[SCOPE]),
             revocation_options=RevocationOptions(enabled=True))
         server = build_server(self.open_store, web_url=self.cfg.web_url, remote=True, auth=auth,
-                              auth_server_provider=KbAuthProvider(self.control_path, url))
+                              auth_server_provider=KbAuthProvider(self.control_path, url),
+                              open_public=lambda: public_kb.public_store(self.cfg.data_dir, self.analyzer))
         host = url.split("://", 1)[1]
         security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=[host],
                                              allowed_origins=[url])
