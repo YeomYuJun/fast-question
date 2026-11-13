@@ -17,10 +17,9 @@ jobs:
       - run: pip install -r requirements.txt -r requirements-server.txt
       - run: python -m pytest -q
 
-  # 화면 테스트(실제 Chromium). Linux 러너에서 통과가 확인될 때까지는 실패해도 배포·게시를 막지 않는다
+  # 화면 테스트(실제 Chromium)
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
