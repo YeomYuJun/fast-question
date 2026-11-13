@@ -11,7 +11,7 @@ Skill 은 skill/ 원본의 자리표시를 플러그인 값으로 바꿔 복사�
 서버 주소는 플러그인에 두지 않는다. `fast-question login` 이 credentials.json 에 쓴 주소를 MCP·훅이 함께 읽는다.
 릴리스 순서(플러그인이 고정한 버전이 PyPI 에 없으면 uvx 가 모두 실패한다):
   1. fq_client/__init__.py 의 __version__ 을 올리고 이 스크립트로 플러그인을 다시 만들어 커밋한다.
-  2. 태그 v<버전> 을 push 한다. .github/workflows/publish-client.yml 이 PyPI 에 올린다.
+  2. 태그 v<버전> 을 push 한다. .github/workflows/publish-client.yml 이 테스트를 돌린 뒤 PyPI 에 올린다.
   3. PyPI 에 그 버전이 보인 뒤에 main 에 병합한다(마켓플레이스는 기본 브랜치를 읽는다).
   클라이언트 코드·Skill·훅 설정 중 하나라도 바뀌면 버전을 올린다. 사용자는 버전이 바뀌어야 새 플러그인을 받는다.
 """

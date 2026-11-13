@@ -1,0 +1,18 @@
+# 전체 테스트(Linux). feat/service 에 push 하면 돌고, deploy.yml(main)·publish-client.yml(태그)이 앞 단계로 부른다.
+name: test
+
+on:
+  push:
+    branches: [feat/service]
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-server.txt
+      - run: python -m pytest -q

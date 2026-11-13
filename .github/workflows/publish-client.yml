@@ -1,4 +1,4 @@
-# PC 클라이언트 패키지(fast-question)를 PyPI 에 올린다. 태그 v<버전> 을 push 하면 돈다.
+# PC 클라이언트 패키지(fast-question)를 PyPI 에 올린다. 태그 v<버전> 을 push 하면 테스트(test.yml)를 돌리고, 통과하면 올린다.
 # 버전은 fq_client/__init__.py 의 __version__ 하나이고, 태그와 다르면 올리지 않는다.
 # PyPI 인증은 Trusted Publishing(이 저장소·이 파일·환경 pypi 를 PyPI 프로젝트 설정에 등록)이라 비밀값이 없다.
 name: publish-client
@@ -8,7 +8,11 @@ on:
     tags: ["v*"]
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
