@@ -43,7 +43,8 @@ from kb.dbcopy import prune
 from kb.errors import KbError
 from kb.evidence import ROW_KEYS, spec_of
 from kb.schema import SCHEMA_VERSION
-from kb.store import SIMILAR_MIN, Store, bigrams, dice
+from kb.store import Store
+from kb.text import SIMILAR_MIN, bigrams, dice
 
 IMPORT_MAX_BYTES = 200 * 1024 * 1024
 CHECKED_KINDS = ("file", "dir", "git", "githead")
@@ -110,13 +111,6 @@ def is_empty(conn: sqlite3.Connection) -> bool:
                    for t in AUDITED_BY)
 
 
-def _drop_cache(db: Path) -> None:
-    """검색 메모리 사본은 revision·qa 최대 id 로 갱신을 판정한다. 파일을 바꾸면 우연히 같을 수 있어 지운다."""
-    with search_mod._LOCK:
-        for key in [k for k in search_mod._CACHE if Path(k).resolve() == db.resolve()]:
-            del search_mod._CACHE[key]
-
-
 def _stamp_origin(conn: sqlite3.Connection, origin: str) -> None:
     kinds = ", ".join(f"'{k}'" for k in CHECKED_KINDS)
     with tx(conn):
@@ -162,7 +156,7 @@ def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[], d
     finally:
         dst.close()
         src.close()
-    _drop_cache(db)
+    search_mod.drop_cache(db)
     return {"mode": "replaced", "items": items}
 
 

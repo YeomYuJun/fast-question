@@ -30,17 +30,29 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = open_db(path)
     conn.create_function("regexp", 2, _regexp, deterministic=True)
     if _schema_version(conn) != SCHEMA_VERSION:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            _relax_answer_lines(conn)
-            _widen_evidence_kinds(conn)
-        except BaseException:
-            conn.execute("ROLLBACK")
-            raise
-        conn.execute("COMMIT")
-        # 두 프로세스가 동시에 처음 열어도 한쪽만 만들도록 스크립트 전체를 IMMEDIATE 트랜잭션으로 감싼다
-        conn.executescript("BEGIN IMMEDIATE;\n" + ddl() + "\nCOMMIT;")
+        _upgrade(conn)
     return conn
+
+
+def _upgrade(conn: sqlite3.Connection) -> None:
+    """스키마가 없으면 만들고, 옛 버전이면 MIGRATIONS 의 단계를 버전 순으로 적용한 뒤 ddl() 로 트리거·새 표·버전을 맞춘다.
+    이 코드보다 새 버전의 DB 는 열지 않는다(그대로 열면 ddl() 이 버전을 낮춰 적고 옛 트리거로 바꾼다)."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        have = _schema_version(conn)  # 잠금을 얻는 사이 다른 프로세스가 올렸을 수 있어 다시 읽는다
+        if have is not None and have.isdigit() and int(have) > int(SCHEMA_VERSION):
+            raise sqlite3.DatabaseError(
+                f"이 저장소의 스키마 버전({have})이 프로그램의 버전({SCHEMA_VERSION})보다 높습니다. 프로그램을 최신으로 올려 주세요.")
+        if have is not None:
+            for below, step in MIGRATIONS:
+                if not have.isdigit() or int(have) < below:
+                    step(conn)
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
+    # 두 프로세스가 동시에 처음 열어도 한쪽만 만들도록 스크립트 전체를 IMMEDIATE 트랜잭션으로 감싼다
+    conn.executescript("BEGIN IMMEDIATE;\n" + ddl() + "\nCOMMIT;")
 
 
 _OLD_ANSWER_LINES = "length(answer) - length(replace(answer, char(10), '')) <= 1 AND"
@@ -81,6 +93,15 @@ def _widen_evidence_kinds(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA schema_version = {ver + 1}")
     finally:
         conn.execute("PRAGMA writable_schema = OFF")
+
+
+# (이 버전 미만의 DB 에 적용, 단계 함수). 버전 순으로 둔다. 표를 새로 만들거나 트리거를 바꾸는 변경은 ddl() 이 하므로
+# 단계가 필요 없다. 기존 표의 정의·데이터를 바꾸는 변경만 SCHEMA_VERSION 을 올리면서 여기에 단계를 더한다.
+# 단계는 _upgrade 의 트랜잭션 안에서 돌고, 이미 적용된 DB 에 다시 돌아도 바뀌는 것이 없어야 한다.
+MIGRATIONS = [
+    (3, _relax_answer_lines),
+    (5, _widen_evidence_kinds),
+]
 
 
 def _schema_version(conn: sqlite3.Connection) -> str | None:

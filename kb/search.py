@@ -12,17 +12,20 @@ import time
 import unicodedata
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from kb.dictionary import load_stopwords, load_synonyms
 from kb.errors import ValidationError
 from kb.query import Query, Term, _tokens, parse
+from kb.text import bigrams
 
 if TYPE_CHECKING:
     from kb.store import Store
 
 TIER_RANK = {"exact": 0, "synonym": 1, "morph": 2}
-SIMILAR_MIN = 0.5
+# 0건일 때 내는 비슷한 결과의 하한. 등록할 때의 중복 판정(kb.text.SIMILAR_MIN, 0.6)보다 넓게 잡는다
+SEARCH_SIMILAR_MIN = 0.5
 SIMILAR_LIMIT = 20
 RECENT_LIMIT = 50
 REGEX_MAX = 200
@@ -83,6 +86,14 @@ def _corpus(conn) -> dict[int, Doc]:
         _CACHE.move_to_end(db)
         _evict()
     return docs
+
+
+def drop_cache(db_path) -> None:
+    """그 DB 파일의 사본을 지운다. 파일을 통째로 바꾸면 revision·qa 최대 id 가 우연히 같을 수 있어 가져오기가 부른다."""
+    target = Path(db_path).resolve()
+    with _LOCK:
+        for key in [k for k in _CACHE if Path(k).resolve() == target]:
+            del _CACHE[key]
 
 
 def _evict() -> None:
@@ -184,11 +195,6 @@ def _spans(text: str, patterns: list[re.Pattern]) -> list[list[int]]:
         else:
             merged.append([s, e])
     return merged
-
-
-def _bigrams(text: str) -> set[str]:
-    s = _flat(text)
-    return {s[i:i + 2] for i in range(len(s) - 1)} or ({s} if s else set())
 
 
 def _regex(q: str, case_sensitive: bool) -> re.Pattern:
@@ -369,17 +375,17 @@ def _morph_ids(conn, analyzer, docs: dict[int, Doc], q: str, parsed: Query,
 
 def _similar(store: "Store", docs: dict[int, Doc], ok, q: str, analyzer) -> list[dict]:
     """2글자 조각 겹침율과 형태소 OR 일치율 중 큰 값이 0.5 이상인 항목."""
-    grams = list(_bigrams(q))
+    grams = list(bigrams(q))
     scores: dict[int, float] = {}
     if grams:
-        need = len(grams) * SIMILAR_MIN
+        need = len(grams) * SEARCH_SIMILAR_MIN
         for i, d in docs.items():
             n = sum(g in d.flat for g in grams)
             if n >= need and ok(d):
                 scores[i] = n / len(grams)
     if analyzer is not None:
         for i, r in analyzer.match_ratio(store.conn, q).items():
-            if r >= SIMILAR_MIN and i in docs and ok(docs[i]):
+            if r >= SEARCH_SIMILAR_MIN and i in docs and ok(docs[i]):
                 scores[i] = max(scores.get(i, 0.0), r)
     top = sorted(scores, key=lambda i: (-scores[i], -i))[:SIMILAR_LIMIT]
     return [dict(item, tier="similar", score=round(scores[item["id"]], 2), in_question=False,

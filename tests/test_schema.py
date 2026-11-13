@@ -325,3 +325,32 @@ def test_schema_4_evidence_kinds_widened_on_connect(tmp_path):
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert get_meta(c, "schema_version") == "5"
     c.close()
+
+
+def test_newer_schema_is_not_opened(tmp_path):
+    """이 코드보다 새 버전의 DB 는 열지 않는다(열면 버전을 낮춰 적고 트리거를 옛 것으로 바꾼다)."""
+    path = tmp_path / "kb.sqlite3"
+    c = connect(path)
+    set_meta(c, "schema_version", "999")
+    c.close()
+    with pytest.raises(sqlite3.DatabaseError, match="999"):
+        connect(path)
+    c = sqlite3.connect(path)
+    assert c.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "999"
+    c.close()
+
+
+def test_migration_steps_run_only_below_their_version(tmp_path, monkeypatch):
+    from kb import db
+    ran = []
+    monkeypatch.setattr(db, "MIGRATIONS", [(3, lambda c: ran.append(3)), (5, lambda c: ran.append(5))])
+    path = tmp_path / "kb.sqlite3"
+    connect(path).close()
+    assert ran == []  # 새 DB 는 ddl() 만으로 최신이다
+    for have, expected in (("2", [3, 5]), ("4", [5])):
+        c = connect(path)
+        set_meta(c, "schema_version", have)
+        c.close()
+        ran.clear()
+        connect(path).close()
+        assert ran == expected

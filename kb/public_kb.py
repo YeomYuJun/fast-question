@@ -54,6 +54,22 @@ def search(pub: Store, query: str, *, limit: int = 20, **opts) -> dict:
     return {"total": res["total"], "hits": res["hits"]}
 
 
+def attach(out: dict, pub: Store | None, query: str, web_url: str, *, limit: int = 20, shape=None,
+           keep_empty: bool = False) -> dict:
+    """검색 결과 out 에 공개 층의 결과를 "public" 키로 붙이고 pub 연결을 닫는다. pub 이 None(공개 층 없음)이면 그대로 둔다.
+    shape: 항목을 응답 형식으로 줄이는 함수(MCP). keep_empty: 0건이어도 붙인다(화면은 묶음 머리의 건수를 쓴다)."""
+    if pub is None:
+        return out
+    try:
+        found = search(pub, query, limit=limit)
+    finally:
+        pub.conn.close()
+    if found["hits"] or keep_empty:
+        out["public"] = {"total": found["total"],
+                         "hits": [mark(shape(h) if shape else h, web_url) for h in found["hits"]]}
+    return out
+
+
 def detail(pub: Store, qa_id: int) -> dict:
     """공개 항목 상세. 이력은 빼고 근거는 url·note 만 남긴다(공개 DB 의 파일 근거는 운영자 PC 의 것이다)."""
     item = pub.get_qa(qa_id)

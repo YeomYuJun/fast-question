@@ -12,7 +12,7 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, PC 로그인 승인 /cli/authorize 와 토큰 교환 POST /api/cli/token(계정 대신 1회용 코드로
 받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에, 웹 Claude 패널
-/api/claude/key·/api/claude/chat 은 web/claude_chat.py 에, 공개 링크 /s/<토큰>·/api/share·/api/account/shares 는 web/share.py 에 있다. 원격 MCP(/mcp)는 mcp_server/http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
+/api/claude/key·/api/claude/chat 은 web/claude_chat.py 에, 공개 링크 /s/<토큰>·/api/share·/api/account/shares 는 web/share.py 에 있다. Markdown·DB 내보내기 /api/export·/api/export/db 는 web/export.py 에 있다. 원격 MCP(/mcp)는 web/mcp_http.py 를 마지막 라우트로 붙이고 lifespan 에서 시작한다.
 원격 모드는 단일 DB(cfg.db_path) 를 쓰지 않고 Kiwi 를 미리 띄우지 않는다.
 /healthz 는 인증·Host 검사 없이 열린다. DB 연결(원격은 제어 DB, 로컬은 KB 파일), 데이터 디스크 여유 10% 이상,
 형태소 분석기 켜짐을 보고 하나라도 실패면 503 이다. 분석기는 처음 로드를 시도하기 전까지 켜짐으로 본다.
@@ -20,17 +20,13 @@ AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /
 import dataclasses
 import json
 import logging
-import os
-import re
 import shutil
 import sqlite3
-import tempfile
 import threading
-from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 from starlette.applications import Starlette
@@ -38,8 +34,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.background import BackgroundTask
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -48,16 +43,15 @@ from kb import search as search_mod
 from kb.config import Config, load_config
 from kb.control import connect_control
 from kb.db import connect
-from kb.dbcopy import copy_db
 from kb.errors import ConflictError, KbError, NotFoundError
 from kb.evidence import line_of, parse_line
 from kb.jobs import run_due, run_due_all
 from kb.morph import Analyzer
 from kb.store import Store
-from mcp_server.http import RemoteMcp
-from web import auth, cli_login, importer, oauth_as, share
+from web import auth, cli_login, export, importer, oauth_as, share
 from web.auth import ACCOUNT_KEY
 from web.limits import BodyLimit, RateLimit
+from web.mcp_http import RemoteMcp
 
 STATIC = Path(__file__).resolve().parent / "static"
 # 화면 파일은 매번 서버에 확인하게 한다(안 바뀌었으면 304). 헤더가 없으면 브라우저가 옛 app.js 를
@@ -165,24 +159,62 @@ def _evidence(body: dict) -> list[dict] | None:
     return None if line is None else parse_line(line)
 
 
-def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
-    """(분류 경로, Markdown). 분류 경로를 제목으로, 항목마다 "### 질문" 과 답변을 쓴다.
-    대분류는 바로 아래 항목 뒤에 중분류마다 "## 경로" 절을 둔다. 삭제한 항목과 빈 중분류는 뺀다."""
-    tree = store.categories()
-    cat = next((c for t in tree for c in [t, *t["children"]] if c["id"] == category_id), None)
-    if cat is None:
-        raise NotFoundError(f"분류를 찾지 못했습니다: {category_id}")
+class Reply(Exception):
+    """처리를 끝내고 이 응답을 그대로 돌려준다(StoreCalls.run 이 던진다)."""
 
-    def items(cid: int) -> list[str]:
-        rows = store.conn.execute(
-            "SELECT question, answer FROM qa WHERE category_id = ? AND deleted_at IS NULL ORDER BY id", (cid,))
-        return [f"### {q}\n\n{a}\n" for q, a in rows]
+    def __init__(self, response: JSONResponse):
+        self.response = response
 
-    parts = [f"# {cat['path']}\n", *items(cat["id"])]
-    for child in cat["children"]:
-        if body := items(child["id"]):
-            parts += [f"## {child['path']}\n", *body]
-    return cat["path"], "\n".join(parts)
+
+def error_response(e: Exception) -> JSONResponse | None:
+    """KB 오류와 쓰기 잠금 대기 초과를 화면이 읽는 JSON 응답으로 바꾼다. 그 밖의 예외는 None."""
+    if isinstance(e, ConflictError):
+        return JSONResponse({"error": e.message, "code": e.code, "current": e.current}, status_code=409)
+    if isinstance(e, NotFoundError):
+        return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
+    if isinstance(e, KbError):
+        return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
+    if isinstance(e, sqlite3.OperationalError):  # busy_timeout(5초) 안에 쓰기 잠금을 얻지 못했다
+        return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
+                             "code": "busy"}, status_code=503)
+    return None
+
+
+class StoreCalls:
+    """요청의 KB 를 열어 처리 함수를 스레드 풀에서 돌린다. 연결 열기·닫기와 오류 → 응답 변환이 이 한 곳에 있다."""
+    Reply = Reply
+
+    def __init__(self, db_for: Callable[[Request], Path | None], open_kb: Callable[[Path], sqlite3.Connection],
+                 analyzer, remote: bool):
+        self.db_for, self.open_kb, self.analyzer, self.remote = db_for, open_kb, analyzer, remote
+
+    @staticmethod
+    def unauthorized() -> JSONResponse:
+        return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
+
+    async def run(self, request: Request, fn: Callable[[Store], object], bad_request: tuple = ()):
+        """fn(Store) 의 결과. 로그인이 없거나 error_response 가 아는 오류면 Reply 를 던진다.
+        bad_request: 요청 값을 잘못 읽어 나는 예외 형(400 으로 돌려준다)."""
+        db = self.db_for(request)
+        if db is None:
+            raise Reply(self.unauthorized())
+
+        def work():
+            conn = self.open_kb(db)
+            try:
+                return fn(Store(conn, "user", self.analyzer, remote=self.remote))
+            finally:
+                conn.close()
+
+        try:
+            return await run_in_threadpool(work)
+        except Exception as e:  # noqa: BLE001 - 아는 오류만 응답으로 바꾸고 나머지는 다시 던진다
+            resp = error_response(e)
+            if resp is None and isinstance(e, bad_request):
+                resp = JSONResponse({"error": f"요청 값이 올바르지 않습니다: {e}"}, status_code=400)
+            if resp is None:
+                raise
+            raise Reply(resp) from e
 
 
 def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jobs: bool = True,
@@ -247,9 +279,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
     if mcp is not None:
         mcp.opener = open_kb  # MCP 로 처음 연결한 계정도 기본 가이드를 받는다
 
-    def unauthorized() -> JSONResponse:
-        return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
-
+    calls = StoreCalls(db_for, open_kb, analyzer, remote)
     job_cfg = cfg if db_path is None else dataclasses.replace(cfg, db_path=path)
 
     def jobs_loop(stop: threading.Event) -> None:
@@ -274,9 +304,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     def api(fn: Callable[[Store, Request, dict], object]):
         async def handler(request: Request) -> JSONResponse:
-            db = db_for(request)
-            if db is None:
-                return unauthorized()
+            if db_for(request) is None:
+                return calls.unauthorized()
             body: dict = {}
             if request.method in ("POST", "PATCH"):
                 raw = await request.body()
@@ -285,105 +314,12 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                         body = json.loads(raw)
                     except ValueError:
                         return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
-
-            def work():
-                conn = open_kb(db)
-                try:
-                    return fn(Store(conn, "user", analyzer, remote=remote), request, body)
-                finally:
-                    conn.close()
-
             try:
-                data = await run_in_threadpool(work)
-            except ConflictError as e:
-                return JSONResponse({"error": e.message, "code": e.code, "current": e.current}, status_code=409)
-            except NotFoundError as e:
-                return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
-            except KbError as e:
-                return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
-            except sqlite3.OperationalError as e:  # busy_timeout(5초) 안에 쓰기 잠금을 얻지 못했다
-                return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
-                                     "code": "busy"}, status_code=503)
-            except (KeyError, TypeError, ValueError) as e:
-                return JSONResponse({"error": f"요청 값이 올바르지 않습니다: {e}"}, status_code=400)
-            return JSONResponse(data)
+                return JSONResponse(await calls.run(request, lambda s: fn(s, request, body),
+                                                    bad_request=(KeyError, TypeError, ValueError)))
+            except Reply as r:
+                return r.response
         return handler
-
-    async def export(request: Request) -> Response:
-        """분류 하나를 Markdown 파일로 내려준다. 오류는 api() 와 같은 JSON 이다."""
-        db = db_for(request)
-        if db is None:
-            return unauthorized()
-        raw = request.query_params.get("category", "")
-        if not raw.isdigit():
-            return JSONResponse({"error": "category 에 분류 id 가 필요합니다."}, status_code=400)
-
-        def work():
-            conn = open_kb(db)
-            try:
-                return export_markdown(Store(conn, "user", analyzer, remote=remote), int(raw))
-            finally:
-                conn.close()
-
-        try:
-            cat_path, text = await run_in_threadpool(work)
-        except NotFoundError as e:
-            return JSONResponse({"error": e.message, "code": e.code}, status_code=404)
-        except sqlite3.OperationalError as e:
-            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
-                                 "code": "busy"}, status_code=503)
-        name = re.sub(r'[\\/:*?"<>|]+', "_", cat_path.replace(" > ", "-")) + ".md"
-        # 한글 파일 이름은 latin-1 헤더에 그대로 못 넣어 RFC 5987 형식으로 보낸다
-        return Response(text, media_type="text/markdown; charset=utf-8",
-                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
-
-    async def export_db(request: Request) -> Response:
-        """내 DB 전체를 SQLite 파일 하나로 내려준다. 로컬 모드 config.json 의 db_path 로 그대로 열린다.
-        사본(최대 200 MB)은 데이터 디스크의 tmp 에 두고(디스크 여유를 /healthz 가 본다), 한 계정은 한 번에 하나만 내려받는다
-        (가져오기와 같은 importing 집합. 응답을 읽지 않는 요청을 겹쳐 열어 디스크를 채우지 못하게 한다)."""
-        db = db_for(request)
-        if db is None:
-            return unauthorized()
-        if db in importing:
-            return JSONResponse({"error": "이 계정의 가져오기나 내보내기가 진행 중입니다. 끝난 뒤 다시 시도해 주세요.",
-                                 "code": "busy"}, status_code=409)
-        importing.add(db)
-
-        def done(tmp: str) -> None:
-            importing.discard(db)
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-
-        def work() -> str:
-            tmp_dir = cfg.data_dir / "tmp" if remote else None
-            if tmp_dir:
-                tmp_dir.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix="fq-export-", suffix=".sqlite3", dir=tmp_dir)
-            os.close(fd)
-            conn = open_kb(db)
-            try:
-                copy_db(conn, Path(tmp))
-            except BaseException:
-                os.unlink(tmp)
-                raise
-            finally:
-                conn.close()
-            return tmp
-
-        try:
-            tmp = await run_in_threadpool(work)
-        except sqlite3.OperationalError as e:
-            importing.discard(db)
-            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
-                                 "code": "busy"}, status_code=503)
-        except BaseException:
-            importing.discard(db)
-            raise
-        return FileResponse(tmp, media_type="application/vnd.sqlite3",
-                            filename=f"fast-question-{datetime.now():%Y%m%d}.sqlite3",
-                            background=BackgroundTask(done, tmp))
 
     def health_checks() -> dict:
         out: dict = {"db": "ok"}
@@ -440,14 +376,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                        since_hours=float(qp["since"]) if qp.get("since") else None)
         # public=1: 공개 지식 층의 결과를 따로 붙인다(화면의 본 검색만. 분류·기간 필터는 사용자 DB 의 것이라 넘기지 않는다)
         if qp.get("public") == "1" and q.strip():
-            pub = open_public()
-            if pub is not None:
-                try:
-                    found = public_kb.search(pub, q, limit=int(qp.get("public_limit", 20)))
-                finally:
-                    pub.conn.close()
-                res["public"] = {"total": found["total"],
-                                 "hits": [public_kb.mark(h, cfg.web_url) for h in found["hits"]]}
+            public_kb.attach(res, open_public(), q, cfg.web_url, limit=int(qp.get("public_limit", 20)), keep_empty=True)
         return res
 
     def public_copy(s: Store, pub: Store, r: Request, b: dict):
@@ -492,8 +421,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             b["name"], parent=b.get("parent"), description=b.get("description", ""))), methods=["POST"]),
         Route("/api/categories/{id:int}", api(lambda s, r, b: s.update_category(
             pid(r), b["version"], name=b.get("name"), description=b.get("description"))), methods=["PATCH"]),
-        Route("/api/export", export),
-        Route("/api/export/db", export_db),
+        *export.routes(calls, cfg.data_dir / "tmp" if remote else None, importing),
         Route("/api/categories/{id:int}/impact", api(lambda s, r, b: s.category_impact(pid(r)))),
         Route("/api/categories/{id:int}/archive", api(lambda s, r, b: s.archive_category(
             pid(r), b["version"])), methods=["POST"]),

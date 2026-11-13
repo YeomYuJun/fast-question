@@ -5,7 +5,7 @@ KbError 는 도구 오류로 돌려준다. 버전 충돌이면 메시지에 현�
 web_url 은 웹 화면 주소(로컬 http://127.0.0.1:<port>, 원격 public_url)다. kb_add·kb_add_many(created)·kb_update·kb_get 결과와
 kb_search 의 hits·similar 항목에 그 Q&A 를 펼치는 주소 url = <web_url>/#qa/<id> 를 넣는다.
 kb_search 의 hits 중 열린 정리 건(kb/cleanup.py)이 있는 항목에는 cleanup = [규칙 이름] 을 붙인다.
-remote=True 는 원격 서버(mcp_server/http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고(도구 설명도
+remote=True 는 원격 서버(web/mcp_http.py)다. 서버 파일을 읽는 kb_add_many file= 을 거부하고(도구 설명도
 file 대신 items 를 쓰라고 적는다), 근거 재기록은
 로컬 프록시가 보낸 캡처값(spec.captured)을 쓴다. 근거·재검증·사전의 원격 제한은 Store(remote=True)가 건다.
 """
@@ -111,15 +111,8 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             hits = [{**hit(h), "cleanup": marks[h["id"]]} if h["id"] in marks else hit(h) for h in res["hits"]]
             out = {**head, "total": res["total"], "groups": res["groups"],
                    "hits": hits, "similar": [hit(h) for h in res["similar"]], "morph": res["morph"]}
-            pub = public()
-            if pub is not None and not regex:
-                try:
-                    found = public_kb.search(pub, " ".join(queries) if queries else query, limit=limit)
-                finally:
-                    pub.conn.close()
-                if found["hits"]:
-                    out["public"] = {"total": found["total"],
-                                     "hits": [public_kb.mark(_hit(h), base) for h in found["hits"]]}
+            if not regex:
+                public_kb.attach(out, public(), " ".join(queries) if queries else query, base, limit=limit, shape=_hit)
             return with_hint(s, out)
         return run(go)
 
