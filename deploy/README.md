@@ -64,6 +64,8 @@ docker compose -f deploy/compose.yaml up -d --build
 - 계정당 상한: Q&A 20,000건, 분류 500개, 근거 100,000행(삭제한 것 포함), DB 파일 200 MB(보관·복원·연결 끊기 외의 쓰기를 막는다), 개인 토큰 10개, 공개 링크 200개. OAuth 연결은 20개이고, 넘으면 가장 오래 안 쓴 연결을 끊는다.
 - 공개 링크: 사용자가 항목·분류 하나를 `/s/<토큰>` 으로 공개한다(로그인 없이 읽기, 질문·답변·분류 경로만). 제어 DB `share` 표에 토큰 해시만 두고, 연결 패널에서 폐기한다. 탈퇴하면 모두 폐기된다.
 - 앱은 Caddy 뒤에서만 받는다(compose 의 app 은 `expose` 만 한다). 요청·가입 제한이 실제 IP 로 걸리도록 원격 모드의 uvicorn 은 `X-Forwarded-For` 를 믿는다.
+  Caddy(2.5 이상)의 `reverse_proxy` 는 `trusted_proxies` 에 없는 상대가 보낸 `X-Forwarded-For` 를 버리고 접속 주소로 다시 쓴다. `deploy/Caddyfile` 에 `trusted_proxies` 를 넣지 않는 한 클라이언트가 이 헤더로 IP 를 속일 수 없다. Caddy 앞에 로드 밸런서를 두면 그 주소만 `trusted_proxies` 에 넣는다. 서버에서 이 동작을 실제 요청으로 확인한 기록은 없다(확인 필요).
+- 앱 프로세스는 하나만 띄운다. 요청 제한(`web/limits.py`), 검색 메모리 사본(`kb/search.py`), 가져오기·내보내기 동시 1건 제한이 프로세스 메모리에 있어, 프로세스를 늘리면 제한이 프로세스 수만큼 느슨해진다.
 
 ## 자동 배포 (GitHub Actions)
 
@@ -111,6 +113,18 @@ docker compose -f deploy/compose.yaml exec app python scripts/public_db.py --con
 - 적재할 파일은 공개할 내용만 둔 계정의 연결 패널 `저장소 파일 받기`(또는 로컬 모드의 `data/kb.sqlite3`) 결과다. 가져오기와 같은 검사(무결성·스키마 버전·표 목록·뷰 없음)를 하고, system 이 만든 항목(기본 가이드)은 빼고 넣는다.
 - 사용자와 Claude 는 공개 DB 를 읽기만 한다(웹 `GET /api/public/qa/<id>`, MCP `kb_get(id, public=true)`, 검색 결과의 `public` 묶음). 쓰기 경로가 없다. 고치려면 자기 저장소로 복사한다(웹 `내 저장소로` 버튼, MCP 는 `kb_add`).
 - 주기 작업이 형태소 분석기 버전에 맞춰 공개 DB 를 재색인한다. 내용을 바꾸려면 이 명령으로 다시 적재한다.
+- 공개 항목의 주소(`#pub/<id>`)는 적재한 파일의 항목 id 다. 같은 저장소를 고쳐 다시 내보내 적재하면 주소가 유지된다. 다른 저장소로 바꾸면 `set` 이 없어지는 주소와 다른 질문을 가리키게 되는 주소의 건수를 출력한다.
+
+## 유입·사용 집계
+
+이미 저장된 값(계정 생성 시각, 세션·개인 토큰의 마지막 사용 시각, 사용자 DB 의 등록 이력)만 읽어 센다. DB 를 바꾸지 않는다.
+
+```powershell
+docker compose -f deploy/compose.yaml exec app python scripts/stats.py --config /etc/fq/config.json --days 14
+```
+
+- 날짜(UTC)별 가입 수, 등록한 계정 수, 등록 건수(화면 / Claude)와 현재 계정 수, 최근 7일 사용 계정 수(웹 세션, PC 연결)를 낸다. `--json` 을 붙이면 JSON 으로 낸다.
+- claude.ai 커넥터·한 줄 연결(OAuth 토큰)은 마지막 사용 시각을 저장하지 않아 "사용 계정"에 잡히지 않는다. 그 계정의 등록은 등록 건수에 잡힌다.
 
 ## 형태소 사용자 단어
 

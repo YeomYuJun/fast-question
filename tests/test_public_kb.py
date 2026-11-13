@@ -124,3 +124,23 @@ def test_run_due_all_reindexes_public_db(cfg, public, analyzer):
     from kb.jobs import run_due_all
     out = run_due_all(cfg, analyzer)
     assert "public" not in out or "error" not in json.dumps(out["public"])
+
+
+def test_set_public_reports_addresses_that_change(cfg, tmp_path, public):
+    """다시 적재할 때 기존 #pub/<id> 주소가 없어지거나 다른 질문을 가리키는 건수를 알린다."""
+    again = tmp_path / "again"
+    again.mkdir()
+    same = public_db.set_public(cfg.data_dir, build_source(again))
+    assert (same["gone"], same["repointed"]) == (0, 0)
+    conn = connect(tmp_path / "other.sqlite3")
+    s = Store(conn, "claude")
+    s.add_category("Linux")
+    s.add_qa("Linux", "Linux 에서 열린 포트를 보려면?", "ss -ltnp 를 쓴다.")
+    path = tmp_path / "other-upload.sqlite3"
+    dst = sqlite3.connect(path)
+    conn.backup(dst)
+    dst.execute("PRAGMA journal_mode = DELETE")
+    dst.close()
+    conn.close()
+    out = public_db.set_public(cfg.data_dir, path)
+    assert out["items"] == 1 and (out["gone"], out["repointed"]) == (1, 1)

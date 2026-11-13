@@ -12,6 +12,8 @@ deploy
 hooks
 scripts
 !scripts/global_words.py
+!scripts/public_db.py
+!scripts/stats.py
 skill
 tests
 config.json

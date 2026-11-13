@@ -23,7 +23,13 @@ def test_dockerfile_copies_existing_paths_not_ignored():
     for src in copied:
         assert (ROOT / src).exists(), src
         assert src not in ignored, src
-    assert "!scripts/global_words.py" in ignored  # 운영자 명령은 컨테이너 안에서 돈다
+    # 운영자 명령은 컨테이너 안에서 돈다. README 가 exec 로 부르는 스크립트는 모두 이미지에 있어야 한다
+    readme = (DEPLOY / "README.md").read_text(encoding="utf-8")
+    called = set(re.findall(r"exec app python (scripts/\w+\.py)", readme))
+    assert {"scripts/global_words.py", "scripts/public_db.py", "scripts/stats.py"} <= called
+    for script in called:
+        assert script in copied, script
+        assert f"!{script}" in ignored, script
     assert "USER fq" in text and 'VOLUME ["/data"]' in text
     assert '"--config", "/etc/fq/config.json"' in text
 
