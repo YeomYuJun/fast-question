@@ -1,0 +1,3 @@
+# 화면 테스트(tests/test_e2e_*.py)만 쓴다. 서버 이미지와 PC 클라이언트에는 들어가지 않는다.
+# 설치 뒤 브라우저를 한 번 받는다: python -m playwright install chromium
+playwright==1.65.1
