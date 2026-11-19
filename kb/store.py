@@ -38,6 +38,15 @@ def db_bytes(conn: sqlite3.Connection) -> int:
                         "(SELECT freelist_count FROM pragma_freelist_count())").fetchone()[0]
     return used * conn.execute("PRAGMA page_size").fetchone()[0]
 
+PROJECT_ROOTS_MAX = 500  # project_sources 가 돌려주는 프로젝트 폴더 수 상한(훅이 질문마다 읽는 캐시 파일 크기)
+
+
+def _is_project_folder(folder: str) -> bool:
+    """정규화한 경로(슬래시, 소문자)가 절대경로이고 드라이브·파일시스템 루트보다 한 단계 이상 아래인가."""
+    head, _, rest = folder.partition("/")
+    return bool(rest) and (head == "" or (len(head) == 2 and head.endswith(":")))
+
+
 SERVER_KINDS = ("url", "note", "github")  # 원격 서버가 사용자 PC 없이 직접 만드는 근거
 REMOTE_PATH_EVIDENCE = ("원격 서버는 사용자 PC 의 파일을 읽을 수 없어 파일·폴더·git 근거를 직접 만들 수 없습니다. "
                         "로컬 프록시(run_mcp.py --remote)로 등록하거나 url·note 근거를 써 주세요.")
@@ -393,11 +402,22 @@ class Store:
         return self.get_qa(qa_id)
 
     def project_sources(self) -> dict:
-        """즉석 질문 훅의 프로젝트 판정 자료: 대분류 이름과 qa-harvest 로 구축한 경로."""
+        """즉석 질문 훅의 프로젝트 판정 자료: 대분류 이름(names)과 프로젝트 폴더(roots).
+        roots 는 qa-harvest 로 구축한 경로와, 살아 있는 Q&A 의 파일 근거가 놓인 폴더(git 근거는 저장소, 폴더 근거는 그 폴더,
+        파일 근거는 파일이 든 폴더)다. 다른 root 안에 든 경로는 뺀다(바깥 것 하나로 판정이 같다)."""
         names = [r[0] for r in self.conn.execute(
             "SELECT name FROM category WHERE parent_id IS NULL AND deleted_at IS NULL ORDER BY name")]
-        roots = [r[0][len("harvest:"):] for r in self.conn.execute("SELECT key FROM meta WHERE key LIKE 'harvest:%'")]
-        return {"names": names, "roots": roots}
+        found = {r[0][len("harvest:"):] for r in self.conn.execute("SELECT key FROM meta WHERE key LIKE 'harvest:%'")}
+        for kind, path, repo in self.conn.execute(
+                "SELECT e.kind, e.path, e.repo FROM evidence e JOIN qa q ON q.id = e.qa_id "
+                "WHERE e.deleted_at IS NULL AND q.deleted_at IS NULL AND e.kind IN ('file','dir','git','githead')"):
+            folder = self._harvest_root(repo or path or "")
+            if kind == "file" and not repo:
+                folder = folder.rpartition("/")[0]
+            if _is_project_folder(folder):
+                found.add(folder)
+        roots = [f for f in sorted(found) if not any(f.startswith(o + "/") for o in found)]
+        return {"names": names, "roots": roots[:PROJECT_ROOTS_MAX]}
 
     def evidence_spec(self, evidence_id: int) -> dict:
         return spec_of(self._evidence_row(evidence_id))

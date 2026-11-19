@@ -83,6 +83,42 @@ def test_project_of_matches_top_category_name_or_harvest_root(tmp_path):
     assert ask_kb.project_of("", cfg) is None
 
 
+def test_project_sources_include_folders_of_live_file_evidence(tmp_path):
+    def norm(p):
+        return str(p).replace("\\", "/").rstrip("/").lower()
+
+    for rel in ("proj/a.txt", "proj/src/b.txt", "gone/c.txt"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("x = 1\n", encoding="utf-8")
+    s = Store(connect(tmp_path / "kb.sqlite3"), "claude")
+    s.add_category("이관")
+
+    def add(question, rel, kind="file"):
+        return s.add_qa("이관", question, "다 쓴 뒤 rename 으로 확정한다.",
+                        evidence=[{"kind": kind, "path": str(tmp_path / rel)}])
+
+    add("a 파일 설정 값의 위치는", "proj/a.txt")
+    add("b 모듈이 재시도하는 조건은", "proj/src/b.txt")  # proj 안이라 따로 나오지 않는다
+    gone = add("c 배치가 도는 시각은", "gone/c.txt")["item"]
+    s.harvest_set(r"D:\work", {"created": 1})
+    assert s.project_sources()["roots"] == sorted(["d:/work", norm(tmp_path / "gone"), norm(tmp_path / "proj")])
+    s.archive_qa(gone["id"], gone["version"])
+    assert s.project_sources()["roots"] == sorted(["d:/work", norm(tmp_path / "proj")])
+    s.conn.close()
+
+
+def test_project_of_matches_folder_that_holds_project_roots(monkeypatch):
+    src = {"names": [], "roots": ["d:/paas/java", "c:/users/me/repo"]}
+    monkeypatch.setattr(ask_kb.Path, "home", classmethod(lambda cls: Path("C:/Users/me")))
+    assert ask_kb.project_of(r"D:\PaaS\java\src", None, src) == "d:/paas/java"
+    assert ask_kb.project_of(r"D:\PaaS", None, src) == "d:/paas"  # 저장소 여럿을 담은 작업 폴더
+    assert ask_kb.project_of("D:\\", None, src) is None  # 드라이브 루트는 무엇이든 담는다
+    assert ask_kb.project_of(r"C:\Users\me", None, src) is None  # 홈 폴더
+    assert ask_kb.project_of(r"C:\Users", None, src) is None  # 홈 폴더의 위
+    assert ask_kb.project_of(r"C:\Users\me\repo\kb", None, src) == "c:/users/me/repo"
+    assert ask_kb.project_of(r"D:\other", None, src) is None
+
+
 def _db_with_item(tmp_path):
     db = tmp_path / "kb.sqlite3"
     s = Store(connect(db), "user")

@@ -90,7 +90,8 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
     @server.tool()
     def kb_search(query: str = "", queries: list[str] | None = None, regex: bool = False,
                   category: str | None = None, limit: int = 20, include_archived: bool = False) -> dict:
-        """KB 를 검색한다. 공백으로 나눈 단어는 AND 다. 문법: a | b (OR), -a (제외), "a b" (구절),
+        """KB(사용자가 전에 확인해 둔 Q&A)를 검색한다. 사용자의 프로젝트·시스템·사내 절차에 대한 사실이 필요할 때와,
+        등록 전에 같은 질문이 있는지 볼 때 쓴다. 공백으로 나눈 단어는 AND 다. 문법: a | b (OR), -a (제외), "a b" (구절),
         q:a / a:a (질문만 / 답변만), path:파일이름 (그 파일을 근거로 단 항목).
         queries 에 표현 여러 개를 주면 한 번에 찾고, 항목마다 걸린 질의(matched)와 걸린 질의 수 순으로 돌려준다.
         regex=true 면 query 를 정규식(200자 이하, 중첩 반복 금지)으로 질문·답변에서 찾는다. 문법·동의어·형태소는 쓰지 않는다.

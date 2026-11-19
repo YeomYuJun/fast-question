@@ -137,7 +137,10 @@ def remote_projects(cred: dict, cache: Path | None = None, now: float | None = N
 def project_of(cwd: str, cfg: Config | None, sources: dict | None = None) -> str | None:
     """질문한 폴더(cwd)가 KB 에 있는 프로젝트면 그 이름을 돌려준다. 아니면 None.
 
-    폴더 경로의 어느 단계 이름이 대분류 이름과 같거나, cwd 가 qa-harvest 로 구축한 경로 안이면 프로젝트다.
+    폴더 경로의 어느 단계 이름이 대분류 이름과 같거나, cwd 가 프로젝트 폴더(roots: qa-harvest 로 구축한 경로와
+    Q&A 의 파일 근거가 놓인 폴더, kb/store.py project_sources) 안이거나, 프로젝트 폴더가 cwd 안에 있으면 프로젝트다.
+    마지막 경우는 여러 저장소를 담은 작업 폴더에서 세션을 연 때다. cwd 가 드라이브·파일시스템 루트이거나 사용자 홈
+    폴더(또는 그 위)면 그 안에 무엇이 있든 프로젝트로 보지 않는다.
     sources({"names", "roots"})가 없으면 로컬 DB(cfg.db_path)에서 읽는다.
     """
     if not cwd:
@@ -161,7 +164,20 @@ def project_of(cwd: str, cfg: Config | None, sources: dict | None = None) -> str
     for root in roots:
         if norm == root or norm.startswith(root + "/"):
             return root
+    if _holds_projects(norm) and any(root.startswith(norm + "/") for root in roots):
+        return norm
     return None
+
+
+def _holds_projects(norm: str) -> bool:
+    """정규화한 cwd 가 안에 든 프로젝트 폴더로 판정해도 되는 폴더인가. 루트와 홈 폴더(그 위 포함)는 아니다."""
+    if "/" not in norm.strip("/"):  # "d:", "", "/home" 같은 한 단계 경로
+        return False
+    try:
+        home = str(Path.home()).replace("\\", "/").rstrip("/").lower()
+    except RuntimeError:
+        return False
+    return norm != home and not home.startswith(norm + "/")
 
 
 def _line(h: dict, base: str) -> str:
