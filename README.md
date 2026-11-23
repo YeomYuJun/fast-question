@@ -1,21 +1,27 @@
 # fast-question
 
-작업 중 생긴 질문 1줄과 짧은 답을 쌓고 검색하는 Q&A 지식 DB 다. 사람은 브라우저로, Claude 는 MCP 로 같은 DB 를 쓴다.
-원격 서비스 https://fast-question.com 을 쓰거나, 저장소를 받아 PC 에서 직접 띄운다(로컬 모드).
+[한국어](README.ko.md)
 
-## 원격 MCP 연결
+A Q&A knowledge base for the one-line questions and short answers that come up during work. People use it in the browser and Claude uses it over MCP, on the same database.
+Use the hosted service at https://fast-question.com, or clone this repository and run it on your PC (local mode).
 
-설치 없이 Claude Code 에 원격 MCP 를 연결한다.
+- Privacy Policy: https://fast-question.com/privacy/en
+- Terms of Service: https://fast-question.com/terms/en
+
+## Remote MCP connection
+
+Connect Claude Code to the remote MCP server without installing anything.
 
 ```powershell
 claude mcp add --transport http -s user fast-question https://fast-question.com/mcp
 ```
 
-Claude Code 에서 `/mcp` 를 열어 `fast-question` 을 인증한다. 브라우저에서 로그인하고 승인하면 `kb_*` 도구를 쓸 수 있다.
+Open `/mcp` in Claude Code and authenticate `fast-question`. Sign in and approve in the browser, and the `kb_*` tools become available.
+The server uses OAuth 2.0 with dynamic client registration. Sign-in is with a GitHub or Google account.
 
-## Claude Code 플러그인
+## Claude Code plugin
 
-플러그인은 원격 MCP 에 더해 PC 쪽 기능을 설치한다. PC 에 uv(`uvx`)가 있어야 한다.
+The plugin installs PC-side features on top of the remote MCP server. The PC needs uv (`uvx`).
 
 ```powershell
 winget install --id astral-sh.uv -e
@@ -23,52 +29,89 @@ claude plugin marketplace add YeomYuJun/fast-question
 claude plugin install fast-question@fast-question
 ```
 
-들어 있는 것
+What it contains
 
-- MCP 서버 `fast-question`: 원격 서버의 `kb_*` 도구를 로컬 프록시로 쓴다. 파일·git 근거는 이 PC 에서 캡처하고 판정한다.
-- Skill `/fast-question:qa`(등록·검색), `/fast-question:qa-harvest`(프로젝트 폴더에서 Q&A 구축)
-- 즉석 질문 훅(UserPromptSubmit): 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣는다.
-- 세션 끝 수확 훅(Stop): 응답을 마칠 때 이 세션에서 파일로 확인한 사실이 KB 에 없으면 등록하도록 Claude 에게 한 번 권한다(KB 에 있는 프로젝트 폴더에서만).
+- MCP server `fast-question`: uses the `kb_*` tools of the remote server through a local proxy. File and git evidence is captured and checked on this PC.
+- Skills `/fast-question:qa` (add and search) and `/fast-question:qa-harvest` (build Q&As from a project folder)
+- Instant question hook (UserPromptSubmit): when you ask a question, it finds matching Q&As in the KB and adds them to that turn.
+- End-of-session hook (Stop): when Claude finishes a response, if facts it confirmed from files in this session are not in the KB, it asks Claude once to add them (only in project folders that are in the KB).
 
-MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question` 을 `uvx` 로 실행한다. 설치 뒤 아래 PC 로그인을 한 번 하고 Claude Code 를 다시 시작한다. 자세한 것은 [plugin/fast-question/README.md](plugin/fast-question/README.md).
+The MCP server, hooks and Skill commands run the PC client package `fast-question` with `uvx`. After installing, do the PC sign-in below once and restart Claude Code. Details are in [plugin/fast-question/README.md](plugin/fast-question/README.md).
 
-## claude.ai·Claude Desktop
+## claude.ai and Claude Desktop
 
-claude.ai 의 커스텀 커넥터로 `https://fast-question.com/mcp` 를 추가한다. 등록·검색 절차를 담은 qa Skill 은 저장소에서 파일로 만들어 Claude 에 올린다.
+Add `https://fast-question.com/mcp` as a custom connector in claude.ai. The qa Skill, which holds the add and search procedure, is built as a file from this repository and uploaded to Claude.
 
 ```powershell
 .venv\Scripts\python.exe scripts\build_desktop_skill.py
 ```
 
-- 결과는 `dist/qa.skill` 이다(zip, 안에 `qa/SKILL.md`·`qa/rules.md`).
-- `skill/qa` 원본에서 `<!-- remote -->` 구간을 남기고 `<!-- local -->` 구간을 뺀다. 원격 서버는 사용자 PC 의 파일을 읽지 못하므로 파일 근거·근거 재판정·즉석 질문 훅 절차가 빠진다.
-- qa-harvest 는 넣지 않는다. 사용자 PC 의 폴더와 PC 클라이언트 명령이 있어야 한다.
+- The output is `dist/qa.skill` (a zip with `qa/SKILL.md` and `qa/rules.md`).
+- It keeps the `<!-- remote -->` sections of `skill/qa` and drops the `<!-- local -->` sections. The remote server cannot read files on your PC, so the file evidence, evidence recheck and instant question hook steps are left out.
+- qa-harvest is not included. It needs folders on your PC and the PC client commands.
 
-## PC 로그인
+## Tools
 
-플러그인의 MCP 와 훅은 개인 토큰으로 서버에 접속한다. 토큰은 브라우저 승인으로 받는다.
+The MCP server exposes 21 tools. Read-only tools are marked read-only; tools that delete or overwrite data are marked destructive.
+
+| Tool | Title | Kind |
+| --- | --- | --- |
+| `kb_search` | Search Q&As | read-only |
+| `kb_get` | Get Q&A | read-only |
+| `kb_categories` | List categories | read-only |
+| `kb_cleanup_list` | List cleanup items | read-only |
+| `kb_dict_get` | Get dictionary | read-only |
+| `kb_evidence_spec` | Get evidence spec | read-only |
+| `kb_harvest_get` | Get harvest record | read-only |
+| `kb_add` | Add Q&A | write |
+| `kb_add_many` | Add many Q&As | write |
+| `kb_add_category` | Add category | write |
+| `kb_update` | Update Q&A | write |
+| `kb_restore` | Restore Q&A | write |
+| `kb_rename_category` | Rename category | write |
+| `kb_link` | Link Q&As | write |
+| `kb_recheck` | Recheck evidence | write |
+| `kb_cleanup_resolve` | Resolve cleanup item | write |
+| `kb_harvest_set` | Set harvest record | write |
+| `kb_archive` | Archive Q&A | destructive |
+| `kb_delete_category` | Delete category | destructive |
+| `kb_dict_edit` | Edit dictionary | destructive |
+| `kb_evidence` | Edit evidence | destructive |
+
+Limits, counted in weighted length (Hangul, CJK and full-width characters count 2, other characters 1)
+
+- Question: one line, up to 300
+- Answer: up to 800 and 6 lines. Each line of an answer that Claude adds is up to 240, the first line is 1-2 sentences, and the following lines are `- ` items
+- Category name: up to 60 characters, two levels (top > sub)
+- Remote account: 20,000 Q&As and 500 categories
+
+`kb_add` and `kb_update` check the answer format, banned expressions (speculation, decision history, progress status) and sensitive information (secrets, personal information, IP addresses) for items Claude writes, and reject violations.
+
+## PC sign-in
+
+The plugin's MCP server and hooks connect to the server with a personal token. The token is issued through browser approval.
 
 ```powershell
 uvx fast-question login
 ```
 
-- 브라우저가 서버의 승인 화면을 연다. 열리지 않으면 터미널에 찍힌 주소를 연다.
-- 로그인해 승인하면 토큰이 `%USERPROFILE%\.fast-question\credentials.json` 에 저장된다. 5분 안에 승인하지 않으면 끝난다.
-- 서버 주소는 `--url` 로 준다. 없으면 credentials.json 의 주소, 그것도 없으면 `https://fast-question.com` 이다.
-- 같은 서버에 쓰던 토큰이 있으면 새 토큰을 받으면서 옛 토큰을 서버에서 폐기한다.
+- The browser opens the server's approval screen. If it does not open, open the address printed in the terminal.
+- After you sign in and approve, the token is saved in `%USERPROFILE%\.fast-question\credentials.json`. It ends if you do not approve within 5 minutes.
+- Give the server address with `--url`. Without it, the address in credentials.json is used, and without that, `https://fast-question.com`.
+- If there is a token for the same server, the old token is revoked on the server when the new one is issued.
 
-## 웹 화면의 Claude
+## Claude on the web screen
 
-원격 서비스 화면 오른쪽 위 Claude 아이콘을 누르면 오른쪽에 대화 패널이 열린다. Anthropic API 키(Claude Console 에서 만든 키)를 한 번 등록하면 그 키로 Claude 가 이 DB 를 찾고, 등록·수정·보관·분류 정리를 한다.
+Click the Claude icon at the top right of the hosted service screen to open a chat panel on the right. Register an Anthropic API key (a key made in the Claude Console) once, and Claude uses that key to search this DB and to add, edit, archive and organize categories.
 
-- 키는 서버에 암호화해 보관하고, 요금은 그 키의 계정에 청구된다.
-- 파일 근거 달기, 항목·분류 삭제, 대량 등록은 이 패널에서 하지 않는다.
+- The key is stored encrypted on the server, and usage is billed to the key's account.
+- Attaching file evidence, deleting items and categories, and bulk adding are not done in this panel.
 
-## 로컬 모드
+## Local mode
 
-저장소를 받아 PC 에서 웹 화면과 MCP 를 직접 띄운다. DB 는 SQLite 파일 하나이고 위치는 `config.json` 의 `db_path` 다. Python 3.12 가 필요하다.
+Clone the repository and run the web screen and MCP server on your PC. The DB is a single SQLite file at `db_path` in `config.json`. Python 3.12 is required.
 
-Windows(PowerShell)
+Windows (PowerShell)
 
 ```powershell
 git clone https://github.com/YeomYuJun/fast-question
@@ -90,35 +133,39 @@ python3 -m venv .venv
 .venv/bin/python run_web.py
 ```
 
-- `scripts/install.py` 가 하는 일
-  - `skill/` 의 qa·qa-harvest Skill 을 `~/.claude/skills` 로 복사한다.
-  - `run_mcp.py` 를 MCP 서버 `fast-question` 으로 Claude Code 사용자 범위에 등록한다(`claude` CLI 가 PATH 에 있어야 한다).
-  - 즉석 질문 훅(`hooks/ask_kb.py`)과 세션 끝 수확 훅(`hooks/stop_harvest.py`)을 `~/.claude/settings.json` 의 UserPromptSubmit·Stop 에 등록한다. 처음 고치기 전 원본은 `settings.json.fast-question.bak` 으로 남긴다.
-  - DB 에 기본 사용 가이드를 넣는다.
-  - MCP·훅·Skill 명령은 저장소의 `.venv` python 으로 실행된다. 저장소를 옮기면 다시 실행한다.
-- `run_web.py` 는 http://127.0.0.1:8765 에 웹 화면을 띄운다. 설정은 저장소의 `config.json`(DB 경로, 포트, 백업·로그 폴더)이고, `--config "<다른 config.json>"` 으로 바꾼다.
-- `run_mcp.py` 는 Claude Code 가 띄우는 stdio MCP 진입점이다. 직접 실행하지 않는다.
-- 훅만 지우기: `scripts/install.py --remove-hook`(위와 같은 `.venv` python 으로 실행)
-- 되돌리기: 훅 지우기, `claude mcp remove -s user fast-question`, `~/.claude/skills` 아래 qa·qa-harvest 폴더 삭제
-- 로그온할 때 웹 화면을 자동으로 띄우기(Windows 전용, 작업 스케줄러 등록): `.venv\Scripts\python.exe scripts\autostart.py --install`(`--remove` 로 해제). 다른 OS 에서는 등록하지 않고 안내만 낸다.
-- 플러그인과 `scripts/install.py` 를 함께 쓰면 MCP·훅·Skill 이 두 벌 걸린다. 둘 중 하나만 쓴다.
+- What `scripts/install.py` does
+  - Copies the qa and qa-harvest Skills in `skill/` to `~/.claude/skills`.
+  - Registers `run_mcp.py` as the MCP server `fast-question` in the Claude Code user scope (the `claude` CLI must be on PATH).
+  - Registers the instant question hook (`hooks/ask_kb.py`) and the end-of-session hook (`hooks/stop_harvest.py`) under UserPromptSubmit and Stop in `~/.claude/settings.json`. The original before the first change is kept as `settings.json.fast-question.bak`.
+  - Adds the default usage guide to the DB.
+  - The MCP server, hooks and Skill commands run with the repository's `.venv` python. Run it again if you move the repository.
+- `run_web.py` serves the web screen at http://127.0.0.1:8765. Settings are in the repository's `config.json` (DB path, port, backup and log folders); use `--config "<another config.json>"` to change them.
+- `run_mcp.py` is the stdio MCP entry point that Claude Code starts. Do not run it directly.
+- Remove only the hooks: `scripts/install.py --remove-hook` (run with the same `.venv` python)
+- Undo: remove the hooks, run `claude mcp remove -s user fast-question`, and delete the qa and qa-harvest folders under `~/.claude/skills`
+- Start the web screen at sign-in (Windows only, registers a Task Scheduler task): `.venv\Scripts\python.exe scripts\autostart.py --install` (`--remove` to unregister). On other OSes it registers nothing and only prints instructions.
+- Using the plugin and `scripts/install.py` together installs the MCP server, hooks and Skills twice. Use only one of them.
 
-## 로컬·원격 전환
+## Switching between local and remote
 
-저장소로 설치한 PC 는 MCP 와 즉석 질문 훅이 쓰는 DB 를 로컬 DB 와 원격 서버 사이에서 바꿀 수 있다. 저장소 폴더에서 실행한다(Linux 는 `.venv/bin/python scripts/install.py …`).
+On a PC installed from the repository, the DB that the MCP server and the instant question hook use can be switched between the local DB and the remote server. Run this in the repository folder (on Linux, `.venv/bin/python scripts/install.py …`).
 
 ```powershell
 .venv\Scripts\python.exe scripts\install.py --remote
 .venv\Scripts\python.exe scripts\install.py --local
 ```
 
-- 모드는 `%USERPROFILE%\.fast-question\credentials.json` 의 `mode` 에 적힌다. `scripts/install.py` 를 인자 없이 실행하면 지금 모드를 유지한다.
-- `--remote` 는 저장된 서버 주소와 개인 토큰을 서버에서 확인한 뒤 쓴다. 처음이거나 다른 서버면 `--remote https://<주소>` 로 주고 개인 토큰을 입력한다. 토큰이 폐기·만료됐으면 `.venv\Scripts\python.exe fq_client\cli.py login` 으로 다시 로그인한다.
-- `--local` 은 credentials.json 을 지우지 않는다. 주소·토큰·PC 식별자(device_id)가 남아 다시 원격으로 바꿀 때 토큰을 넣지 않는다.
-- 바꾼 뒤 Claude Code 를 다시 시작하거나 `/mcp` 에서 `fast-question` 을 다시 연결한다.
-- 전환은 DB 내용을 옮기지 않는다. 로컬 DB 를 서버로 옮기려면 `.venv\Scripts\python.exe scripts\push_local.py`([deploy/README.md](deploy/README.md)). 서버 DB 를 로컬에서 쓰려면 웹 화면 연결 패널의 "DB 파일 받기"로 받은 파일을 `config.json` 의 `db_path` 로 둔다.
-- 플러그인은 원격 서버 전용이라 이 전환을 따르지 않는다. 로컬 DB 를 쓰려면 플러그인을 끄고(`claude plugin disable fast-question@fast-question`) 저장소로 설치한다.
+- The mode is written to `mode` in `%USERPROFILE%\.fast-question\credentials.json`. Running `scripts/install.py` without arguments keeps the current mode.
+- `--remote` uses the saved server address and personal token after checking them with the server. The first time, or for another server, give `--remote https://<address>` and enter a personal token. If the token was revoked or expired, sign in again with `.venv\Scripts\python.exe fq_client\cli.py login`.
+- `--local` does not delete credentials.json. The address, token and PC identifier (device_id) stay, so switching back to remote does not ask for the token.
+- After switching, restart Claude Code or reconnect `fast-question` in `/mcp`.
+- Switching does not move DB contents. To move the local DB to the server, run `.venv\Scripts\python.exe scripts\push_local.py` ([deploy/README.md](deploy/README.md)). To use the server DB locally, set the file downloaded with Export in the web screen's Connect panel as `db_path` in `config.json`.
+- The plugin is for the remote server only and does not follow this switch. To use a local DB, disable the plugin (`claude plugin disable fast-question@fast-question`) and install from the repository.
 
-## 서버 배포
+## Server deployment
 
-원격 모드 서버를 Docker 로 띄우는 절차는 [deploy/README.md](deploy/README.md) 에 있다.
+The procedure for running the remote-mode server with Docker is in [deploy/README.md](deploy/README.md) (Korean).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

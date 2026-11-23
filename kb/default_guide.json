@@ -77,7 +77,7 @@
     {
       "category": "화면",
       "question": "fast-question 질문·답변의 글자 수와 줄 수 한도는?",
-      "answer": "질문은 한 줄 150자, 답변은 400자·6줄까지다.\n- 분류 이름: 60자, > 는 쓸 수 없음\n- Claude 등록분: 답변 첫 줄은 1~2문장·120자, 둘째 줄부터 '- ' 항목",
+      "answer": "질문은 한 줄 300자, 답변은 800자·6줄까지다(가중 길이: 한글·한자 2, 그 밖 1).\n- 분류 이름: 60자, > 는 쓸 수 없음\n- Claude 등록분: 답변 한 줄 240자, 첫 줄은 1~2문장, 둘째 줄부터 '- ' 항목",
       "evidence": [
         {
           "kind": "auto",
@@ -153,7 +153,26 @@
     {
       "category": "Claude 연동",
       "question": "fast-question 의 정리 대상은 어떻게 찾고 처리되나?",
+      "target": "local",
       "answer": "주기 작업이 하루 한 번 고칠 만한 항목을 찾아 두고, Claude 가 정리한다.\n- 대상: 질문이 비슷한 항목, Claude 등록분의 형식 규칙 위반, 근거가 바뀌었거나 판정하지 못한 항목\n- Claude 가 검색 중 표시된 항목을 만나면 묻지 않고 고치거나 보관\n- 한꺼번에 정리: Claude 에게 \"qa 정리해\"\n- 주기 작업 자체는 항목을 고치지 않음",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/cleanup.py",
+          "anchor": "def scan"
+        },
+        {
+          "kind": "auto",
+          "path": "skill/qa/SKILL.md",
+          "anchor": "## 정리"
+        }
+      ]
+    },
+    {
+      "category": "Claude 연동",
+      "question": "fast-question 의 정리 대상은 어떻게 찾고 처리되나?",
+      "target": "remote",
+      "answer": "주기 작업이 하루 한 번 고칠 만한 항목을 찾아 두고, Claude 가 정리한다.\n- 대상: 질문이 비슷한 항목, Claude 등록분의 형식 규칙 위반, 근거가 바뀌었거나 판정하지 못한 항목\n- Claude Code 플러그인: Claude 가 검색 중 표시된 항목을 만나면 묻지 않고 고치거나 보관\n- claude.ai 커넥터·한 줄 연결·화면의 Claude 패널: 사용자가 정리를 요청하거나 동의할 때만 고침\n- 한꺼번에 정리: Claude 에게 \"qa 정리해\"\n- 주기 작업 자체는 항목을 고치지 않음",
       "evidence": [
         {
           "kind": "auto",
@@ -171,7 +190,7 @@
       "category": "Claude 연동",
       "question": "fast-question 동의어나 고유명사를 검색에 추가하려면?",
       "target": "local",
-      "answer": "Claude 에게 요청해 MCP kb_dict 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: action=user_word_add (색인을 다시 만듦)",
+      "answer": "Claude 에게 요청해 MCP kb_dict_edit 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: action=user_word_add (색인을 다시 만듦)\n- 지금 사전 보기: kb_dict_get",
       "evidence": [
         {
           "kind": "auto",
@@ -184,7 +203,7 @@
       "category": "Claude 연동",
       "question": "fast-question 동의어나 고유명사를 검색에 추가하려면?",
       "target": "remote",
-      "answer": "Claude 에게 요청해 MCP kb_dict 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: 서버 공용 사전이라 운영자가 넣음",
+      "answer": "Claude 에게 요청해 MCP kb_dict_edit 로 넣는다(화면에는 사전 관리가 없다).\n- 같은 뜻의 다른 표기: action=synonym_add\n- 형태소 분석이 잘못 자르는 고유명사: 서버 공용 사전이라 운영자가 넣음\n- 지금 사전 보기: kb_dict_get",
       "evidence": []
     },
     {
@@ -263,7 +282,7 @@
       "category": "운영",
       "question": "fast-question 원격 계정의 데이터를 내려받거나 탈퇴하려면?",
       "target": "remote",
-      "answer": "화면 상단 연결 패널에서 한다.\n- DB 파일 받기: 내 KB 전체를 SQLite 파일 하나로 받음(로컬 모드에서 그대로 열림)\n- 탈퇴: 패널 맨 아래에 확인 문구 탈퇴 를 넣고 누름. 이 계정의 로그인·토큰이 모두 끊김",
+      "answer": "화면 상단 연결 패널에서 한다.\n- 내보내기: 내 KB 전체를 SQLite 파일 하나로 받음(로컬 모드에서 그대로 열림)\n- 탈퇴: 패널 맨 아래에 확인 문구 탈퇴 를 넣고 누름. 이 계정의 로그인·토큰이 모두 끊김",
       "evidence": []
     },
     {
@@ -337,7 +356,7 @@
       "category": "운영",
       "question": "fast-question 백업은 언제 어디에 만들어지나?",
       "target": "remote",
-      "answer": "서버가 계정 DB 마다 마지막 백업 뒤 24시간이 지나면 서버 안에 사본을 만든다.\n- 최신 몇 개만 남김\n- 직접 보관할 사본은 연결 패널의 DB 파일 받기로 받음",
+      "answer": "서버가 계정 DB 마다 마지막 백업 뒤 24시간이 지나면 서버 안에 사본을 만든다.\n- 최신 몇 개만 남김\n- 직접 보관할 사본은 연결 패널의 내보내기로 받음",
       "evidence": []
     },
     {

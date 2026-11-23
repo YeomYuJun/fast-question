@@ -21,25 +21,25 @@ def test_targets_split_local_and_remote_items():
     raw = json.loads(guide.GUIDE_FILE.read_text(encoding="utf-8"))["items"]
     assert {i.get("target") for i in raw} == {None, "local", "remote"}
     local = [i["question"] for i in guide.load()["items"]]
-    remote = [i["question"] for i in guide.load_remote(URL)["items"]]
+    remote = [i["question"] for i in guide.load_remote(URL, lang="ko")["items"]]
     assert local == [i["question"] for i in raw if i.get("target") != "remote"]
     assert remote == [i["question"] for i in raw if i.get("target") != "local"]
-    assert all("target" not in i for i in guide.load()["items"] + guide.load_remote(URL)["items"])
+    assert all("target" not in i for i in guide.load()["items"] + guide.load_remote(URL, lang="ko")["items"])
 
 
 def test_remote_guide_has_no_local_only_instructions():
-    for item in guide.load_remote(URL)["items"]:
+    for item in guide.load_remote(URL, lang="ko")["items"]:
         assert not [w for w in LOCAL_ONLY if w in item["answer"]], item["question"]
 
 
 def test_remote_items_follow_registration_rules():
-    for item in guide.load_remote(URL)["items"]:
+    for item in guide.load_remote(URL, lang="ko")["items"]:
         assert problems(item["question"], item["answer"]) == [], item["question"]
 
 
 def test_load_remote_turns_paths_into_github_urls_and_uses_public_url():
     raw = [i for i in json.loads(guide.GUIDE_FILE.read_text(encoding="utf-8"))["items"] if i.get("target") != "local"]
-    remote = guide.load_remote(URL)
+    remote = guide.load_remote(URL, lang="ko")
     for r, item in zip(raw, remote["items"]):
         assert item["evidence"] == [{"kind": "url", "url": guide.SOURCE_URL + e["path"], "anchor": e["anchor"]}
                                     for e in r["evidence"]], item["question"]
@@ -49,7 +49,7 @@ def test_load_remote_turns_paths_into_github_urls_and_uses_public_url():
 
 
 def test_remote_evidence_urls_point_to_tracked_files_and_pass_rules():
-    for item in guide.load_remote(URL)["items"]:
+    for item in guide.load_remote(URL, lang="ko")["items"]:
         for e in item["evidence"]:
             rel = e["url"].removeprefix(guide.SOURCE_URL)
             tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch", rel], capture_output=True)
@@ -67,12 +67,12 @@ def test_skill_user_word_lines_say_remote_is_refused():
 
 def test_load_remote_keeps_answers_within_limit_for_long_url():
     long_url = "https://" + "a" * 200 + ".example.com"
-    for item in guide.load_remote(long_url)["items"]:
+    for item in guide.load_remote(long_url, lang="ko")["items"]:
         assert check_answer(item["answer"]) == item["answer"], item["question"]
 
 
 def test_new_user_db_gets_remote_guide_once(cfg, app):
-    n = len(guide.load_remote(URL)["items"])
+    n = len(guide.load_remote(URL, lang="ko")["items"])
     with client_for(app, 1) as c:
         cats = c.get("/api/categories").json()["categories"]
         assert [x["name"] for x in cats] == ["fast-question"] and cats[0]["count"] == n
@@ -86,10 +86,43 @@ def test_new_user_db_gets_remote_guide_once(cfg, app):
     conn = connect(tenant.db_path_for(cfg.data_dir, 1))
     assert conn.execute("SELECT count(*) FROM qa").fetchone()[0] == n
     assert conn.execute("SELECT answer FROM qa WHERE id = ?", (item["id"],)).fetchone()[0] == "사용자가 고친 답이다."
-    n_ev = sum(len(i["evidence"]) for i in guide.load_remote(URL)["items"])
+    n_ev = sum(len(i["evidence"]) for i in guide.load_remote(URL, lang="ko")["items"])
     assert [tuple(r) for r in conn.execute("SELECT kind, verdict, count(*) FROM evidence GROUP BY kind, verdict")] == [
         ("url", "external", n_ev)]
     conn.close()
+
+
+def test_english_guide_follows_rules_and_has_no_korean_text():
+    import re
+    raw = json.loads(guide.GUIDE_FILES["en"].read_text(encoding="utf-8"))
+    assert raw["items"] and all(i.get("target") != "local" for i in raw["items"])  # 영어판은 원격 모드에만 쓴다
+    data = guide.load_remote(URL, lang="en")
+    assert len(data["items"]) == len(guide.load_remote(URL, lang="ko")["items"])
+    for item in data["items"]:
+        assert problems(item["question"], item["answer"]) == [], item["question"]
+        assert not re.search(r"[가-힣]", item["question"] + item["answer"] + item["category"]), item["question"]
+        assert not [w for w in LOCAL_ONLY if w in item["answer"]], item["question"]
+        for e in item["evidence"]:
+            rel = e["url"].removeprefix(guide.SOURCE_URL)
+            assert e["anchor"] in (ROOT / rel).read_text(encoding="utf-8"), e
+    for item in guide.load_remote("https://" + "a" * 200 + ".example.com", lang="en")["items"]:
+        assert check_answer(item["answer"]) == item["answer"], item["question"]
+
+
+def test_new_user_db_gets_guide_in_screen_language(cfg, app):
+    """새 계정 DB 는 화면이 보낸 X-FQ-Lang, 없으면 Accept-Language 의 언어 판을 받고 그 언어를 meta 에 둔다."""
+    from kb.db import get_meta
+    en = [i["question"] for i in guide.load_remote(URL, lang="en")["items"]]
+    cases = ((1, "en", {}, "en"), (2, None, {"Accept-Language": "ko-KR,ko;q=0.9"}, "ko"),
+             (3, None, {"Accept-Language": "en-US,en;q=0.9"}, "en"), (4, "ko", {"Accept-Language": "en"}, "ko"))
+    for account, lang, headers, want in cases:
+        with client_for(app, account, lang=lang) as c:
+            c.get("/api/categories", headers=headers)
+        conn = connect(tenant.db_path_for(cfg.data_dir, account))
+        questions = [r[0] for r in conn.execute("SELECT question FROM qa ORDER BY id")]
+        assert get_meta(conn, "guide_lang") == want, account
+        assert (questions == en) == (want == "en"), account
+        conn.close()
 
 
 def test_existing_user_db_is_not_seeded(cfg, app):
@@ -103,7 +136,7 @@ def test_seed_sync_evidence_updates_only_items_system_wrote_last(tmp_path):
     import copy
 
     from kb.store import Store
-    data = guide.load_remote(URL)
+    data = guide.load_remote(URL, lang="ko")
     old = copy.deepcopy(data)
     for item in old["items"]:
         item["evidence"] = []

@@ -1,0 +1,295 @@
+{
+  "category": "fast-question",
+  "description": "Only how to use, configure and run fast-question. No development history, decision history or internal implementation.",
+  "items": [
+    {
+      "category": "Search",
+      "question": "What query syntax does the fast-question search box accept?",
+      "answer": "Words separated by spaces find only items that contain all of them (AND). The ? button next to the search box shows the same table.\n- a | b: items that contain either one (OR)\n- -a: leave out items that contain a\n- \"a b\": a phrase that includes the space\n- q:a · a:a: search only questions · only answers\n- path:x: items whose evidence file path contains x",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/query.py",
+          "anchor": "a | b, a|b"
+        }
+      ]
+    },
+    {
+      "category": "Search",
+      "question": "When does fast-question show similar results for a search with 0 hits?",
+      "answer": "They appear separately only when exact, synonym and morpheme search all return 0 hits.\n- Items sharing at least 50% of the search term's 2-character pieces\n- Or items matching at least 50% of the search term's morphemes",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/search.py",
+          "anchor": "def _similar"
+        }
+      ]
+    },
+    {
+      "category": "Search",
+      "question": "How do I search fast-question with a regular expression?",
+      "answer": "The search box on the screen has no regular expressions; only Claude can use them, with regex=true on MCP kb_search.\n- Up to 200 characters, nested repetition such as (a+)+ is refused",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/search.py",
+          "anchor": "REGEX_MAX"
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "What keyboard shortcuts does the fast-question screen have?",
+      "answer": "/ moves to the search box, and the up and down arrows move through results and expand them.\n- Enter: expand the first result from the search box\n- E: edit the expanded item\n- Esc: closes syntax help, then collapses the expanded item, then clears the search term, category filter and 24-hour view, one at a time\n- While editing, Ctrl+Enter saves and Esc cancels",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "document.addEventListener(\"keydown\""
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "What happens when I delete a Q&A in fast-question?",
+      "answer": "It disappears from search results, and the row is kept so it can be brought back.\n- Undo in the notice right after deleting (6 seconds) restores it\n- After that, ask Claude to restore it (MCP kb_restore)",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/store.py",
+          "anchor": "def restore_qa"
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "What happens when I delete a category in fast-question?",
+      "answer": "Its subcategories and the Q&As in them are deleted together.\n- The confirmation shows how many subcategories and items will be deleted\n- There is no way to bring back the category itself\n- Its Q&As can be restored with kb_restore by choosing a category to move them to",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/store.py",
+          "anchor": "def archive_category"
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "What are the length and line limits for fast-question questions and answers?",
+      "answer": "A question is one line of up to 300, and an answer up to 800 and 6 lines (weighted length: Hangul and CJK count 2, other characters 1).\n- Category name: 60 characters, > is not allowed\n- Items added by Claude: each answer line up to 240, the first line 1-2 sentences, '- ' items from the second line",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/text.py",
+          "anchor": "ANSWER_MAX_LINES"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "category": "Claude",
+      "question": "How do I add or find Q&As in fast-question with Claude?",
+      "answer": "Ask the connected Claude with words like \"save this as a Q&A\" or \"look it up in qa\".\n- Claude Code plugin: /fast-question:qa to add, /fast-question:qa <search term> to find\n- claude.ai and Desktop: add http://127.0.0.1:8765/mcp as a custom connector to use the kb_* tools\n- The Claude panel on the screen uses the same tools",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "skill/qa/SKILL.md",
+          "anchor": "## 등록"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "category": "Claude",
+      "question": "How do I build fast-question Q&As from a project folder at once?",
+      "answer": "Run /fast-question:qa-harvest <path> in the Claude Code plugin.\n- Adds up to 60 items per run and 5 per file\n- From the second run, only files changed since the last build are covered\n- It reads folders on your PC, so claude.ai, Desktop and the Claude panel on the screen cannot run it",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "skill/qa-harvest/SKILL.md",
+          "anchor": "## 0. 범위"
+        }
+      ]
+    },
+    {
+      "category": "Claude",
+      "question": "When does the fast-question instant question hook run?",
+      "answer": "When you type a question into Claude Code (question mark, question ending or question word, up to 300 characters and 4 lines), it searches the KB and adds the results to that turn.\n- Requests that ask for work are not treated as questions\n- If no Q&A matches, it explains the add conditions only when asked from a project folder that is in the KB\n- Other everyday questions are not added",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "hooks/ask_kb.py",
+          "anchor": "def project_of"
+        }
+      ]
+    },
+    {
+      "category": "Claude",
+      "question": "How are fast-question cleanup items found and handled?",
+      "answer": "A periodic job finds items worth fixing once a day, and Claude cleans them up.\n- Targets: items with similar questions, rule violations in items Claude added, items whose evidence changed or could not be checked\n- Claude Code plugin: when Claude meets a marked item during a search, it fixes or archives it without asking\n- claude.ai connector, one-line connection and the Claude panel on the screen: Claude fixes items only when you ask or agree\n- To clean up all at once, ask Claude \"clean up qa\"\n- The periodic job itself does not change items",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/cleanup.py",
+          "anchor": "def scan"
+        },
+        {
+          "kind": "auto",
+          "path": "skill/qa/SKILL.md",
+          "anchor": "## 정리"
+        }
+      ]
+    },
+    {
+      "category": "Claude",
+      "question": "How do I add synonyms or proper nouns to fast-question search?",
+      "target": "remote",
+      "answer": "Ask Claude to add them with MCP kb_dict_edit (the screen has no dictionary management).\n- Another spelling with the same meaning: action=synonym_add\n- Proper nouns that morpheme analysis splits wrongly: the operator adds them, because it is a server-wide dictionary\n- See the current dictionary: kb_dict_get",
+      "evidence": []
+    },
+    {
+      "category": "Claude",
+      "question": "How do I connect Claude Code to the fast-question remote server?",
+      "target": "remote",
+      "answer": "Run the commands of step 1 (Connect with one line) or step 2 (Install on this PC) from Connect at the top of the screen in a terminal, in order.\n- Step 1: register with claude mcp add --transport http, then sign in and approve in /mcp; file evidence is not available\n- Step 2: the plugin installs the Skills, the instant question hook and the MCP server; the PC needs uv, and uvx fast-question login signs in\n- With step 2, remove the step 1 entry with claude mcp remove -s user fast-question",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "const PLUGIN_CMDS"
+        }
+      ]
+    },
+    {
+      "category": "Operations",
+      "question": "How do I open the fast-question web screen?",
+      "target": "remote",
+      "answer": "Open http://127.0.0.1:8765 and sign in with a GitHub or Google account.\n- Sign out: next to the account name at the top of the screen",
+      "evidence": []
+    },
+    {
+      "category": "Operations",
+      "question": "How do I download my fast-question remote account data or delete the account?",
+      "target": "remote",
+      "answer": "Use the Connect panel at the top of the screen.\n- Export: downloads your whole KB as one SQLite file (it opens as is in local mode)\n- Delete account: type the confirmation word delete at the bottom of the panel and press the button; all sign-ins and tokens of this account stop working",
+      "evidence": []
+    },
+    {
+      "target": "remote",
+      "category": "Claude",
+      "question": "How do I give Claude work from the fast-question screen?",
+      "answer": "Open the right-hand panel with the Claude button at the top, register an Anthropic API key, then chat.\n- The key is kept encrypted on the server, and Delete key below the panel removes it\n- Models: Opus 5.5, Sonnet 5.5, Haiku 5.5\n- It searches, adds, edits, archives, adds and renames categories, and cleans up; deleting a category is done in category editing\n- The chat history stays only in this browser tab",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/claude_chat.py",
+          "anchor": "ALLOWED_TOOLS = "
+        },
+        {
+          "kind": "auto",
+          "path": "web/static/claude.js",
+          "anchor": "sessionStorage"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "category": "Operations",
+      "question": "How do I disconnect a Claude app or a personal token from fast-question?",
+      "answer": "Disconnect it in the Connect panel at the top of the screen.\n- Connected apps: one-line connections and claude.ai connectors (name, connected time, last use), with Disconnect\n- Tokens: personal tokens made by plugin sign-in and the like, with Revoke\n- A disconnected app must connect again to use this DB",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "function appsBlock"
+        }
+      ]
+    },
+    {
+      "target": "remote",
+      "category": "Operations",
+      "question": "What are the storage limits of a fast-question remote account?",
+      "answer": "Up to 20,000 Q&As, 500 categories, 100,000 evidence rows (deleted ones included) and a 200 MB DB file.\n- Over 200 MB, writes other than archive, restore and disconnect are blocked\n- 10 personal tokens and 20 OAuth connections (beyond that, the connection unused the longest is disconnected)",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/store.py",
+          "anchor": "QUOTAS = "
+        },
+        {
+          "kind": "auto",
+          "path": "kb/control.py",
+          "anchor": "TOKEN_MAX = 10"
+        },
+        {
+          "kind": "auto",
+          "path": "kb/oauth_store.py",
+          "anchor": "CLIENT_MAX = 20"
+        }
+      ]
+    },
+    {
+      "category": "Operations",
+      "question": "When and where are fast-question backups made?",
+      "target": "remote",
+      "answer": "The server makes a copy on the server for each account DB when 24 hours have passed since the last backup.\n- Only the latest few are kept\n- For a copy you keep yourself, use Export in the Connect panel",
+      "evidence": []
+    },
+    {
+      "category": "Operations",
+      "question": "What does the fast-question evidence state stale mean?",
+      "target": "remote",
+      "answer": "It means a file attached as evidence to a Q&A changed after it was recorded.\n- The server cannot read the file, so Claude on the PC that added the evidence checks it with kb_recheck and reports\n- If you use the repository, scripts\\autostart.py --check-install checks it every day at 09:00\n- With no check for over 30 days, the state becomes unknown",
+      "evidence": []
+    },
+    {
+      "category": "Screen",
+      "question": "How do I copy an answer or an item address on the fast-question screen?",
+      "answer": "When you expand an item, Copy and Copy address buttons are at the end of the history line.\n- Copy: copies the question and answer together as two lines, Q: and A:\n- Address format: http://127.0.0.1:8765/#qa/<id>",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "ibtn(\"cp\", \"copy\""
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "How do I see only the fast-question Q&As added in the last 24 hours?",
+      "answer": "Press the 'Last 24 hours: N' chip in the summary line.\n- Press it again or press Esc to clear it\n- The chip is hidden when nothing was added in that period",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/static/app.js",
+          "anchor": "function renderSince"
+        }
+      ]
+    },
+    {
+      "category": "Screen",
+      "question": "How do I export the Q&As of a fast-question category to a Markdown file?",
+      "answer": "Turn on category editing in the category panel and press the export button on that category's row.\n- A top-level category is exported with a section for each subcategory\n- Deleted items are left out",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "web/export.py",
+          "anchor": "def export_markdown"
+        }
+      ]
+    },
+    {
+      "category": "Search",
+      "question": "How do I search again when a fast-question search finds 0 hits?",
+      "answer": "If the search term has two or more words, chips show the hit count of each query with one word left out, and pressing one searches with that query.\n- Similar results are shown as well",
+      "evidence": [
+        {
+          "kind": "auto",
+          "path": "kb/search.py",
+          "anchor": "def _relaxed"
+        }
+      ]
+    }
+  ]
+}

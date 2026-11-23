@@ -316,15 +316,15 @@ def test_run_due_all_refreshes_remote_guide_only_when_it_changes(tmp_path, monke
 
     cfg = remote_cfg(tmp_path)
     user_db(cfg, 1).close()
-    n = len(guide.load_remote(cfg.public_url)["items"])
+    n = len(guide.load_remote(cfg.public_url, lang="ko")["items"])
     assert run_due_all(cfg)["users"][1]["guide"]["added"] == n
     later = datetime.now(timezone.utc) + timedelta(hours=25)
     assert "guide" not in run_due_all(cfg, now=later)["users"][1]  # 가이드가 그대로면 건너뛴다
 
     real = guide.load_remote
 
-    def changed(url):
-        data = real(url)
+    def changed(url, **kw):
+        data = real(url, **kw)
         data["items"][0]["answer"] = "서버에서 바뀐 가이드 답이다."
         return data
     monkeypatch.setattr(guide, "load_remote", changed)
@@ -333,4 +333,24 @@ def test_run_due_all_refreshes_remote_guide_only_when_it_changes(tmp_path, monke
     conn = connect(tenant.db_path_for(cfg.data_dir, 1))
     assert conn.execute("SELECT count(*) FROM qa WHERE answer = '서버에서 바뀐 가이드 답이다.'").fetchone()[0] == 1
     assert get_meta(conn, "guide_hash")
+    # meta guide_lang 이 없는 기존 DB 는 한국어판을 받는다
+    want = {i["question"] for i in guide.load_remote(cfg.public_url, lang="ko")["items"]}
+    assert {r[0] for r in conn.execute("SELECT question FROM qa WHERE created_by = 'system'")} == want
+    conn.close()
+
+
+def test_run_due_all_refreshes_guide_in_the_db_language(tmp_path):
+    """가이드 갱신은 DB 의 meta guide_lang 판을 쓴다. 영어 DB 에 한국어 항목이 들어가지 않는다."""
+    from kb import guide, tenant
+    from kb.jobs import run_due_all
+
+    cfg = remote_cfg(tmp_path)
+    conn = user_db(cfg, 1)
+    guide.seed_new(Store(conn, "system"), cfg.public_url, "en")
+    conn.close()
+    n = len(guide.load_remote(cfg.public_url, lang="en")["items"])
+    assert run_due_all(cfg)["users"][1]["guide"] == {"added": 0, "updated": 0, "same": n, "kept": 0}
+    conn = connect(tenant.db_path_for(cfg.data_dir, 1))
+    assert conn.execute("SELECT count(*) FROM qa WHERE created_by = 'system'").fetchone()[0] == n
+    assert get_meta(conn, "guide_hash") == guide.fingerprint(guide.load_remote(cfg.public_url, lang="en"))
     conn.close()

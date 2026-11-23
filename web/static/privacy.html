@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>개인정보 처리방침 - fast question</title>
 <meta name="robots" content="noindex">
+<link rel="alternate" hreflang="en" href="/privacy/en">
 <script src="/static/theme.js"></script>
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <link rel="stylesheet" href="/static/tokens.css">
@@ -14,6 +15,10 @@
 <header class="top">
   <a class="brand" href="/"><svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><path d="M23 45V20A16 16 0 0 1 39 4H47V13H39A7 7 0 0 0 32 20V45Z" fill="var(--ink)"></path><path d="M16 22H39V30H16Z" fill="var(--ink)"></path><path d="M23 50.5H32A9 9 0 0 1 23 59.5Z" fill="var(--accent)"></path></svg><span>fast question</span></a>
   <div class="grow"></div>
+  <div class="langs" role="group" aria-label="Language">
+    <button class="lang" type="button" data-lang="ko" lang="ko">한국어</button>
+    <button class="lang" type="button" data-lang="en" lang="en">English</button>
+  </div>
   <button id="theme-btn" class="iconbtn" type="button" aria-label="테마 바꾸기">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"></path></svg>
   </button>
@@ -27,11 +32,12 @@
     </nav>
     <div class="doc-head">
       <h1>개인정보 처리방침</h1>
-      <span class="doc-date">시행일 2026-10-26</span>
+      <span class="doc-date">시행일 2026-11-23</span>
     </div>
     <p class="doc-lead">yyj2046(이하 운영자)이 개인으로 운영하는 fast question(https://fast-question.com)이 개인정보를 어떻게 다루는지 알립니다. 내 PC 에만 설치해 쓰는 로컬 모드는 운영자 서버와 통신하지 않아 이 방침의 대상이 아닙니다.</p>
     <ol class="clauses">
       <li><span class="n">1</span><div><h2>처리하는 정보</h2>
+        <p>대화 내용은 자동으로 수집하지 않습니다. 저장하는 질문과 답변은 가입할 때 넣는 기본 사용 안내를 빼면, 이용자가 화면이나 가져오기로 등록하거나 연결한 Claude 가 등록 도구로 보낸 것뿐입니다. 원격 연결(claude.ai 커넥터, 원격 MCP, 화면의 Claude 패널)에서 Claude 는 이용자가 등록이나 수정을 요청했을 때만 질문과 답변을 저장합니다. PC 에 직접 설치하는 Claude Code 플러그인은 지식 DB 에 있는 프로젝트 폴더에서 질문을 받을 때와 응답을 마칠 때 그 세션에서 확인한 사실을 등록하도록 Claude 에게 권할 수 있어, 이때 Claude 가 요청 없이 질문과 답변을 등록할 수 있습니다.</p>
         <p>로그인: GitHub 사용자 번호와 로그인 이름, 또는 Google 계정 식별자. 이메일·실명·전화번호는 저장하지 않습니다.</p>
         <p>계정: 계정 번호, 가입·탈퇴 시각, 로그인 세션과 접근 토큰의 해시값(원래 값은 저장하지 않습니다), 토큰 이름, 연결한 프로그램의 이름과 돌아갈 주소, 브라우저 종류(User-Agent), 가입할 때의 IP 주소.</p>
         <p>저장한 내용: 분류, 질문, 답변, 근거(파일 경로와 해시, 등록한 PC 의 무작위 id, git 정보, 웹 주소, 메모), 변경 이력. 파일 내용 자체는 서버로 오지 않습니다.</p>
@@ -40,8 +46,8 @@
       <li><span class="n">2</span><div><h2>이용 목적</h2><p>로그인과 계정 구분, 질문·답변의 저장·검색과 Claude 연결, 가입·요청 남용 방지, 장애 대응과 복구에만 씁니다. 광고, 분석, 판매에는 쓰지 않습니다.</p></div></li>
       <li><span class="n">3</span><div><h2>보유 기간과 파기</h2>
         <p>저장한 내용과 계정 정보는 탈퇴할 때까지 둡니다. 탈퇴하면 바로 접근을 막고 30일 뒤 지우며, 계정 번호와 가입·탈퇴 시각만 남깁니다.</p>
-        <p>가입 IP 는 1일, 서비스 기록은 14일 뒤 지웁니다. 로그인 세션은 마지막 사용 뒤 30일(길어도 90일), 개인 접근 토큰은 180일까지 유효합니다.</p>
-        <p>기간이 지난 정보는 주기 작업이 자동으로 지웁니다. 지운 정보도 백업 사본에는 30일가량 더 남아, 탈퇴한 계정이 모든 사본에서 사라지기까지는 최대 61일 걸립니다.</p></div></li>
+        <p>가입 IP 는 1일이 지나면 다음 가입 때나 하루 한 번 도는 주기 작업이 지워, 길어도 2일 안에 지워집니다. 서비스 기록은 14일 뒤 지웁니다. 서버 컨테이너의 표준 출력에 함께 남는 서비스 기록 사본은 기간이 아니라 용량(최대 30 MB)으로 관리해, 넘으면 오래된 것부터 지웁니다. 요청마다 남는 접속 기록(IP 주소, User-Agent)은 만들지 않습니다. 로그인 세션은 마지막 사용 뒤 30일(길어도 90일), 개인 접근 토큰은 180일까지 유효합니다.</p>
+        <p>기간이 지난 정보는 자동으로 지웁니다. 지운 정보도 백업 사본에는 30일가량 더 남아, 탈퇴한 계정이 모든 사본에서 사라지기까지는 최대 61일 걸립니다.</p></div></li>
       <li><span class="n">4</span><div><h2>제3자 제공과 처리 위탁</h2>
         <p>5항의 Anthropic 전송 말고는 개인정보를 제3자에게 제공하지 않습니다. 법령에 따른 요구가 있을 때만 그 범위에서 제공합니다.</p>
         <p>서버 운영과 백업 보관을 아마존웹서비시즈코리아 유한책임회사에 맡깁니다. 데이터는 AWS 서울 리전에만 저장합니다.</p>

@@ -128,7 +128,7 @@ docker compose -f deploy/compose.yaml exec app python scripts/stats.py --config 
 
 ## 형태소 사용자 단어
 
-원격 모드의 Kiwi 사용자 단어는 서버 전역 사전 하나다(제어 DB 의 `global_user_word` 표). 사용자가 MCP `kb_dict` 로 바꾸는 것은 거부된다. 운영자가 컨테이너 안에서 바꾼다.
+원격 모드의 Kiwi 사용자 단어는 서버 전역 사전 하나다(제어 DB 의 `global_user_word` 표). 사용자가 MCP `kb_dict_edit` 로 바꾸는 것은 거부된다. 운영자가 컨테이너 안에서 바꾼다.
 
 ```powershell
 docker compose -f deploy/compose.yaml exec app python scripts/global_words.py --config /etc/fq/config.json list

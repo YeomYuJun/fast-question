@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy - fast question</title>
+<meta name="robots" content="noindex">
+<link rel="alternate" hreflang="ko" href="/privacy">
+<script src="/static/theme.js"></script>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="doc-page">
+<header class="top">
+  <a class="brand" href="/"><svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><path d="M23 45V20A16 16 0 0 1 39 4H47V13H39A7 7 0 0 0 32 20V45Z" fill="var(--ink)"></path><path d="M16 22H39V30H16Z" fill="var(--ink)"></path><path d="M23 50.5H32A9 9 0 0 1 23 59.5Z" fill="var(--accent)"></path></svg><span>fast question</span></a>
+  <div class="grow"></div>
+  <div class="langs" role="group" aria-label="Language">
+    <button class="lang" type="button" data-lang="ko" lang="ko">한국어</button>
+    <button class="lang" type="button" data-lang="en" lang="en">English</button>
+  </div>
+  <button id="theme-btn" class="iconbtn" type="button" aria-label="Switch theme">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"></path></svg>
+  </button>
+</header>
+
+<main class="doc-main">
+  <article class="doc">
+    <nav class="doc-nav" aria-label="Legal documents">
+      <a href="/terms/en">Terms of Service</a>
+      <a class="on" href="/privacy/en" aria-current="page">Privacy Policy</a>
+    </nav>
+    <div class="doc-head">
+      <h1>Privacy Policy</h1>
+      <span class="doc-date">Effective 2026-11-23</span>
+    </div>
+    <p class="doc-lead">This policy explains how fast question (https://fast-question.com), run by yyj2046 as an individual (the "operator"), handles personal information. Local mode, which you install and run only on your own PC, does not talk to the operator's server and is not covered by this policy.</p>
+    <ol class="clauses">
+      <li><span class="n">1</span><div><h2>Information we process</h2>
+        <p>We do not automatically collect conversation content. Apart from the default usage guide added at sign-up, the only questions and answers we store are those you add on the screen or by import, or that a Claude you connected sends with the add tools. Over a remote connection (the claude.ai connector, remote MCP, or the Claude panel on the screen), Claude stores questions and answers only when you ask it to add or change them. The Claude Code plugin that you install on your own PC can, in a project folder that is already in your knowledge base, prompt Claude to add facts it confirmed in the session when you ask a question or when Claude finishes a response, so Claude may then add questions and answers without your request.</p>
+        <p>Sign-in: your GitHub user number and login name, or your Google account identifier. We do not store email addresses, real names or phone numbers.</p>
+        <p>Account: account number, sign-up and deletion times, hashes of sign-in sessions and access tokens (the original values are not stored), token names, the names and redirect addresses of connected programs, browser type (User-Agent), and the IP address used at sign-up.</p>
+        <p>Stored content: categories, questions, answers, evidence (file paths and hashes, a random id of the PC that added it, git information, web addresses, notes) and change history. File contents themselves are never sent to the server.</p>
+        <p>Claude panel: the Anthropic API key you register (stored encrypted, with only the last 4 characters kept as they are) and the model you choose. Conversations are not stored.</p>
+        <p>Service records: account number, key actions such as sign-ins and tokens, and error details. They do not contain IP addresses, token values, questions, answers or search terms.</p></div></li>
+      <li><span class="n">2</span><div><h2>Purposes</h2><p>We use this information only to sign you in and tell accounts apart, to store and search questions and answers and connect them to Claude, to prevent abuse of sign-ups and requests, and to handle failures and recovery. We do not use it for advertising, analytics or sale.</p></div></li>
+      <li><span class="n">3</span><div><h2>Retention and deletion</h2>
+        <p>Stored content and account information are kept until you delete your account. When you delete it, access stops immediately and the data is erased after 30 days; only the account number and the sign-up and deletion times remain.</p>
+        <p>A sign-up IP address is erased by the next sign-up or by a periodic job that runs once a day after it is 1 day old, so it is gone within 2 days. Service records are erased after 14 days. The copy of service records kept in the server container's standard output is managed by size, not by time (30 MB at most), and the oldest part is erased when it exceeds that size. We do not keep per-request access logs (IP address, User-Agent). Sign-in sessions are valid for 30 days after last use (90 days at most), and personal access tokens for up to 180 days.</p>
+        <p>Expired information is erased automatically. Erased information remains in backup copies for about 30 more days, so it takes up to 61 days for a deleted account to disappear from every copy.</p></div></li>
+      <li><span class="n">4</span><div><h2>Disclosure to third parties and processors</h2>
+        <p>Apart from the transfer to Anthropic described in section 5, we do not provide personal information to third parties. We provide it only when required by law and only to the extent required.</p>
+        <p>Server operation and backup storage are entrusted to Amazon Web Services Korea LLC. Data is stored only in the AWS Seoul region.</p>
+        <p>You sign in directly on the GitHub or Google screen, and that step follows each company's privacy policy.</p></div></li>
+      <li><span class="n">5</span><div><h2>Information sent to Anthropic</h2><p>When you register your API key in the web Claude panel and send a request, the conversation and the repository content Claude reads with its tools (questions, answers, evidence, categories) are sent each time over HTTPS to the API of Anthropic, PBC (USA, <span class="mono">privacy@anthropic.com</span>). This is done to produce the response you asked for; retention and processing follow Anthropic's privacy policy and the terms between you and Anthropic. Nothing is sent if you do not use the panel or delete the key. When you connect Claude Code on your PC, Claude Code sends the data itself.</p></div></li>
+      <li><span class="n">6</span><div><h2>Your rights</h2><p>You can view, edit and delete items on the screen at any time, and in the connection panel you can download your whole repository as a file or delete your account. Items deleted on the screen disappear from lists and search but remain in the repository and its change history until you delete your account. Send other requests to <span class="mono">yyj2046@gmail.com</span>. We answer within 10 days and may verify that the requester owns the account. A representative may also make a request.</p></div></li>
+      <li><span class="n">7</span><div><h2>Operator access</h2><p id="operator" class="boxed">The operator can access stored data to handle failures and restore backups. Stored data is encrypted only at the disk level. API keys are also encrypted with a key inside the server, so the operator can decrypt them. The operator does not view data for any other purpose.</p></div></li>
+      <li><span class="n">8</span><div><h2>Security measures</h2><p>All connections are accepted over HTTPS only. Sessions and tokens are stored only as hashes, and API keys are stored encrypted. Each account has its own data file, backed up once a day; the backup storage blocks public access and is encrypted. Server access is limited to the operator's SSH key.</p></div></li>
+      <li><span class="n">9</span><div><h2>Cookies and browser storage</h2><p>We use only the two cookies needed for sign-in (<span class="mono">__Host-fq_session</span> keeps you signed in, <span class="mono">__Host-fq_login</span> checks a sign-in for 10 minutes). We use no advertising or analytics cookies; if you block cookies you cannot sign in. Screen settings such as the theme, recent searches and panel state, and Claude panel conversations, are kept in browser storage.</p></div></li>
+      <li><span class="n">10</span><div><h2>Children under 14</h2><p>People under 14 may not use the service. If we learn that one has signed up, we delete the account.</p></div></li>
+      <li><span class="n">11</span><div><h2>Privacy officer and contact</h2>
+        <p>Privacy officer: yyj2046 (<span class="mono">yyj2046@gmail.com</span>)</p>
+        <p>Send questions, complaints and requests about personal information to the address above.</p></div></li>
+      <li><span class="n">12</span><div><h2>Changes to this policy</h2><p>When we change this policy, we announce it on the screen from 7 days before it takes effect (30 days for important changes).</p></div></li>
+    </ol>
+  </article>
+</main>
+
+<footer class="doc-foot">
+  <span>fast question</span>
+  <a href="/terms/en">Terms of Service</a>
+  <a href="/privacy/en">Privacy Policy</a>
+</footer>
+<script src="/static/doc.js"></script>
+</body>
+</html>
