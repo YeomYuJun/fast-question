@@ -100,7 +100,8 @@ def plugin_files(spec: str) -> dict[str, bytes]:
     files = {
         ".claude-plugin/plugin.json": _json({
             "name": NAME, "version": __version__, "description": DESCRIPTION, "author": {"name": OWNER},
-            "homepage": SITE_URL, "repository": REPO_URL, "keywords": ["knowledge-base", "qa", "mcp"]}),
+            "homepage": SITE_URL, "repository": REPO_URL, "license": "MIT",
+            "keywords": ["knowledge-base", "qa", "mcp"]}),
         ".mcp.json": _json({"mcpServers": {NAME: {"command": "uvx", "args": client_command(spec)[1:] + ["mcp"]}}}),
         "hooks/hooks.json": _json({
             "description": "질문하면 fast-question KB 에서 맞는 Q&A 를 찾아 그 턴에 넣고, 응답을 마칠 때 확인한 사실의 등록을 권합니다",

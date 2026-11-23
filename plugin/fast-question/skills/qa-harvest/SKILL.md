@@ -22,12 +22,12 @@ description: 프로젝트 폴더(소스·git 이력·문서·설정·정책 파�
 - 대상 경로(여럿 가능), 대분류 이름(사업·프로젝트 이름), 이번 회 상한.
 - `kb_categories` 에 같은 주제의 대분류가 있으면 그것을 쓴다(예: `사내 시스템 이관 사업`). 새로 만들지 않는다.
   새로 만들 때 대분류 이름은 사용자가 정한 이름이 있으면 그것으로, 없으면 대상 폴더 이름으로 짓고, `description` 에 이 분류에 넣는 것과 넣지 않는 것을 한 줄로 적는다. 그 분류에 이미 description 이 있으면 그 범위 밖의 질문은 만들지 않는다.
-- 대상 경로마다 `kb_harvest` action=get 으로 지난 기록을 읽는다. 기록이 있으면 증분 모드다(2단계 끝 참고).
+- 대상 경로마다 `kb_harvest_get` 으로 지난 기록을 읽는다. 기록이 있으면 증분 모드다(2단계 끝 참고).
 
 ## 1. 목록 (결정적)
 
 ```
-uvx --from fast-question==0.1.4 fast-question inventory "<경로1>" "<경로2>" --out "<스크래치>/inventory.json"
+uvx --from fast-question==0.1.5 fast-question inventory "<경로1>" "<경로2>" --out "<스크래치>/inventory.json"
 ```
 
 - 증분 모드면 지난 record 를 `<스크래치>/since.json` 으로 저장하고 `--since "<스크래치>/since.json"` 을 더한다.
@@ -80,14 +80,14 @@ uvx --from fast-question==0.1.4 fast-question inventory "<경로1>" "<경로2>" 
   - `ask_when`: 사용자가 이 질문을 다시 하게 되는 구체적인 상황 한 줄(예: `배포가 디스크 부족으로 실패했을 때`). 쓸 수 없으면 그 항목은 등록하지 않는다.
   - `quote`·`ask_when` 은 검사용이다. `kb_add_many` 는 이 칸을 저장하지 않는다.
 - 분류: 대분류는 0단계 이름, 중분류는 대상(모듈, 시스템, 문서 묶음) 이름이다. 중분류는 한 회에 15개를 넘기지 않게 묶는다. 맞는 중분류가 없으면 `kb_add_category` 로 만든다.
-- 형태소 분석이 잘못 자를 고유명사(시스템 이름, 사업 이름)는 적재 전에 `kb_dict` action=user_word_add 로 한 번에 넣는다. 사용자 단어를 바꾸면 색인을 다시 만든다. 원격 서버에 연결했으면 이 동작은 거부된다(서버 공용 사전이라 운영자가 넣는다). 넣지 말고 넘어간다.
-- 같은 뜻의 다른 표기는 `kb_dict` action=synonym_add 로 묶는다.
+- 형태소 분석이 잘못 자를 고유명사(시스템 이름, 사업 이름)는 적재 전에 `kb_dict_edit` action=user_word_add 로 한 번에 넣는다. 사용자 단어를 바꾸면 색인을 다시 만든다. 원격 서버에 연결했으면 이 동작은 거부된다(서버 공용 사전이라 운영자가 넣는다). 넣지 말고 넘어간다.
+- 같은 뜻의 다른 표기는 `kb_dict_edit` action=synonym_add 로 묶는다.
 
 ## 5. 검사와 중복
 
 1. 기계 검사. 문제가 0건이 될 때까지 고치고 다시 돌린다. 0건이 아니면 6단계로 가지 않는다.
    ```
-   uvx --from fast-question==0.1.4 fast-question lint-draft "<스크래치>/draft.json"
+   uvx --from fast-question==0.1.5 fast-question lint-draft "<스크래치>/draft.json"
    ```
    등록 검사(길이, 답변 양식, 결정 경위·추정 표현, 민감 정보), `quote`·`ask_when` 유무, quote 의 식별자가 답에 있는지, 초안 안의 비슷한 질문, 파일당 5건을 본다.
 2. 자기 검사. 항목마다 아래에 모두 "예" 여야 남긴다. 하나라도 "아니오" 면 고치거나 버린다.
@@ -109,7 +109,7 @@ uvx --from fast-question==0.1.4 fast-question inventory "<경로1>" "<경로2>" 
 
 ## 7. 기록
 
-- 대상 경로마다 `kb_harvest` action=set 으로 기록한다.
+- 대상 경로마다 `kb_harvest_set` 으로 기록한다.
   `state` 예: `{"repos": {"<저장소 경로>": "<inventory 의 head>"}, "created": 12, "updated": 3, "skipped": {"이유 확인 불가": 4, "읽을 수 없는 형식": 2}, "note": "다음 회 후보: ..."}`
 - 상한 때문에 다루지 못한 주제는 `note` 에 남겨 다음 회에 이어간다.
 
