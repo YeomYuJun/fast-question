@@ -24,10 +24,10 @@ from mcp.server.lowlevel.server import Server
 from kb.errors import KbError
 from kb.evidence import capture
 from kb.remote import judge
-from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, PROXY_INSTRUCTIONS
+from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, PROXY_INSTRUCTIONS, RECHECK_DOC
 
 SERVER_KINDS = ("url", "note", "github")  # 서버가 직접 만드는 근거(github 는 서버가 GitHub API 로 기록·판정한다)
-LOCAL_DOCS = {"kb_add_many": ADD_MANY_DOC + ADD_MANY_FILE}
+LOCAL_DOCS = {"kb_add_many": ADD_MANY_DOC + ADD_MANY_FILE, "kb_recheck": RECHECK_DOC}
 
 
 def localize(spec, origin: str = ""):

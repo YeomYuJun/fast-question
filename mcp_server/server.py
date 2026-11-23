@@ -23,7 +23,7 @@ from kb.morph import reindex
 from kb.rules import check_claude_qa
 from kb.store import Store
 from mcp_server.instructions import (ADD_MANY_DOC, ADD_MANY_FILE, ADD_MANY_REMOTE, PROXY_INSTRUCTIONS,
-                                     REMOTE_INSTRUCTIONS)
+                                     RECHECK_DOC, RECHECK_REMOTE, REMOTE_INSTRUCTIONS)
 
 READ = ToolAnnotations(read_only_hint=True)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False)
@@ -254,9 +254,9 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
         """Returns the spec for capturing one evidence again."""
         return run(lambda s: {"spec": s.evidence_spec(evidence_id)})
 
-    @server.tool(title="Recheck evidence", annotations=WRITE)
+    @server.tool(title="Recheck evidence", description=RECHECK_DOC + (RECHECK_REMOTE if remote else ""),
+                 annotations=WRITE)
     def kb_recheck(id: int | None = None) -> dict:
-        """Judges evidence again. With id, only that Q&A; without it, all Q&As."""
         def go(s: Store):
             results = s.recheck(id)
             ids = sorted({r["qa_id"] for r in results})

@@ -354,3 +354,12 @@ def test_add_many_description_offers_file_only_locally(db):
     remote = asyncio.run(docs(build_server(store_factory(db, None), web_url=WEB, remote=True)))["kb_add_many"]
     assert "draft file as it is" in local
     assert "draft file as it is" not in remote and "file is not available" in remote
+
+
+def test_recheck_description_names_the_github_limit_only_remotely(db):
+    async def doc(srv):
+        async with Client(srv) as c:
+            return next(t.description for t in (await c.list_tools()).tools if t.name == "kb_recheck")
+    local = asyncio.run(doc(build_server(store_factory(db, None), web_url=WEB)))
+    remote = asyncio.run(doc(build_server(store_factory(db, None), web_url=WEB, remote=True)))
+    assert "only github evidence" not in local and "only github evidence" in remote

@@ -158,3 +158,4 @@ def test_proxy_add_many_description_offers_file(cfg, app):
     tools = via_proxy(app, token, lambda c: c.list_tools()).tools
     doc = next(t for t in tools if t.name == "kb_add_many").description
     assert "draft file as it is" in doc and "file is not available" not in doc
+    assert "only github evidence" not in next(t for t in tools if t.name == "kb_recheck").description

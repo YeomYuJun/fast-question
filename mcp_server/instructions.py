@@ -63,3 +63,7 @@ ADD_MANY_FILE = """file takes the absolute path of a JSON file holding the item 
 (copying the items again can change characters)."""
 # 원격 직접 연결(claude.ai·한 줄 연결)은 사용자 PC 의 파일을 읽을 수 없다. 로컬 프록시는 ADD_MANY_FILE 설명으로 바꿔 내보낸다
 ADD_MANY_REMOTE = """file is not available on this connection (it cannot read files on the user's PC). Send all items in items."""
+RECHECK_DOC = """Judges evidence again. With id, only that Q&A; without it, all Q&As."""
+RECHECK_REMOTE = """
+On this connection only github evidence is judged (the server cannot read files on the user's PC, and url and note
+evidence are never judged). results and items are empty when there is no github evidence to judge."""
