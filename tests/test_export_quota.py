@@ -35,14 +35,14 @@ def test_request_body_limit(app):
 
 
 def test_quota_only_in_remote_mode(tmp_path, monkeypatch):
-    monkeypatch.setitem(store_mod.QUOTAS, "category", ("분류", 2))
+    monkeypatch.setitem(store_mod.QUOTAS, "category", ("categories", 2))
     monkeypatch.setitem(store_mod.QUOTAS, "qa", ("Q&A", 1))
     remote = Store(connect(tmp_path / "remote.sqlite3"), "user", remote=True)
     remote.add_category("가")
     remote.add_category("나")
     with pytest.raises(ValidationError) as e:
         remote.add_category("다")
-    assert e.value.code == "quota" and "분류 2건" in e.value.message
+    assert e.value.code == "quota" and "2 categories" in e.value.message
     remote.add_qa("가", "질문 하나", "답이다.")
     with pytest.raises(ValidationError, match="Q&A"):
         remote.add_qa("가", "질문 둘", "답이다.", force=True)
@@ -69,7 +69,7 @@ def test_db_size_cap_blocks_writes_that_grow_the_file(tmp_path, monkeypatch):
     for write in writes:
         with pytest.raises(ValidationError) as e:
             write()
-        assert e.value.code == "quota" and "저장소 파일 받기" in e.value.message
+        assert e.value.code == "quota" and "store file" in e.value.message
     s.unlink(one["id"], two["id"])
     s.archive_qa(one["id"], s.get_qa(one["id"])["version"])
     s.restore_qa(one["id"], s.get_qa(one["id"])["version"])

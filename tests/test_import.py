@@ -7,6 +7,7 @@ import pytest
 from kb import control, guide, tenant
 from kb.db import connect, set_meta
 from kb.dbcopy import prune
+from kb.schema import SCHEMA_VERSION
 from kb.store import Store
 from web.importer import validate
 from tests.test_remote_web import URL, analyzer, app, cfg, client_for  # noqa: F401 - 픽스처
@@ -42,6 +43,12 @@ def snapshot(conn, path):
     return path.read_bytes()
 
 
+def moved(c, headers=None) -> dict:
+    """옮긴 분류(이관)만 찾는 검색 인자. 새 계정의 영어 기본 가이드에도 rename 이 나온다."""
+    top = next(x["id"] for x in c.get("/api/categories", headers=headers).json()["categories"] if x["name"] == "이관")
+    return {"q": "rename", "category": top}
+
+
 def user_store(cfg, account_id, actor="user"):
     return Store(connect(tenant.db_path_for(cfg.data_dir, account_id)), actor)
 
@@ -52,14 +59,20 @@ def test_import_into_new_account_replaces_file(cfg, app, tmp_path):
         r = c.post("/api/import/db", content=body, headers=OCTET)
         assert r.status_code == 200, r.text
         assert r.json() == {"mode": "replaced", "items": 2}
-        hits = c.get("/api/search", params={"q": "rename"}).json()["hits"]
+        hits = c.get("/api/search", params=moved(c)).json()["hits"]
         assert [h["question"] for h in hits] == [".part 를 쓰는 이유"]
         item = c.get(f"/api/qa/{hits[0]['id']}").json()
     assert [e["kind"] for e in item["evidence"]] == ["file", "url", "note"]
     assert item["revisions"], "revision 이력이 그대로 옮겨진다"
     s = user_store(cfg, 1)
     assert s.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    # 화면 요청 없이 가져오기로 처음 만든 계정은 영어 기본 가이드를 받는다
+    from kb.db import get_meta
+    assert get_meta(s.conn, "guide_lang") == "en"
+    got = [r[0] for r in s.conn.execute("SELECT question FROM qa WHERE created_by = 'system' AND deleted_at IS NULL "
+                                        "ORDER BY id")]
     s.conn.close()
+    assert got == [i["question"] for i in guide.load_remote(URL, lang="en")["items"]]
 
 
 def test_import_replaces_db_that_has_only_system_rows(cfg, app, tmp_path):
@@ -76,7 +89,22 @@ def test_import_replaces_db_that_has_only_system_rows(cfg, app, tmp_path):
     s = user_store(cfg, 1)
     guide_n = s.conn.execute("SELECT count(*) FROM qa WHERE created_by = 'system' AND deleted_at IS NULL").fetchone()[0]
     s.conn.close()
-    assert guide_n == len(guide.load_remote(URL)["items"])
+    assert guide_n == len(guide.load_remote(URL, lang="ko")["items"])
+
+
+def test_import_replace_keeps_the_account_guide_language(cfg, app, tmp_path):
+    from kb.db import get_meta
+    with client_for(app, 1, lang="en") as c:
+        c.get("/api/categories")  # 영어 화면에서 만든 계정 DB
+    body = snapshot(local_db(tmp_path), tmp_path / "upload.sqlite3")
+    with client_for(app, 1, lang="ko") as c:
+        assert c.post("/api/import/db", content=body, headers=OCTET).json() == {"mode": "replaced", "items": 2}
+    s = user_store(cfg, 1)
+    got = [r[0] for r in s.conn.execute("SELECT question FROM qa WHERE created_by = 'system' AND deleted_at IS NULL "
+                                        "ORDER BY id")]
+    assert get_meta(s.conn, "guide_lang") == "en"
+    s.conn.close()
+    assert got == [i["question"] for i in guide.load_remote(URL, lang="en")["items"]]
 
 
 def with_local_guide(conn):
@@ -133,10 +161,64 @@ def test_import_into_used_account_adds_items_and_skips_similar(cfg, app, tmp_pat
     local.close()
 
 
+def test_import_skips_only_block_level_english_questions(cfg, app, tmp_path):
+    """한글이 없는 질문은 등록을 막는 수준(block)일 때만 건너뛰고, 후보만 알리는 수준(notice)은 넣는다."""
+    s = user_store(cfg, 1)
+    s.add_category("existing")
+    s.add_qa("existing", "Where is the checksum computed?", "On the sending side.")
+    s.add_qa("existing", "How do I deploy the web server?", "Run the deploy script.")
+    s.conn.close()
+    local = connect(tmp_path / "en.sqlite3")
+    ls = Store(local, "user")
+    ls.add_category("ops")
+    ls.add_qa("ops", "where is the checksum computed", "On the sending side, with sha256.")
+    ls.add_qa("ops", "How do I restart the web server?", "Restart the app container.")
+    body = snapshot(local, tmp_path / "en-upload.sqlite3")
+    local.close()
+    with client_for(app, 1) as c:
+        res = c.post("/api/import/db", content=body, headers=OCTET).json()
+    assert res["mode"] == "merged" and res["added"] == 1
+    assert [x["question"] for x in res["skipped"]] == ["where is the checksum computed"]
+
+
 def _schema_mismatch(tmp_path):
-    conn = local_db(tmp_path, "old.sqlite3")
-    set_meta(conn, "schema_version", "2")
-    return snapshot(conn, tmp_path / "old-upload.sqlite3")
+    conn = local_db(tmp_path, "new.sqlite3")
+    set_meta(conn, "schema_version", "999")
+    return snapshot(conn, tmp_path / "new-upload.sqlite3")
+
+
+def as_schema_5(conn):
+    """스키마 5 의 qa 표(질문 150자, 답변 400자 CHECK)와 schema_version 5 로 되돌린다."""
+    from kb import db
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'qa'").fetchone()[0]
+    for old, new in zip(db._OLD_QA_LENS, db._NEW_QA_LENS):
+        sql = sql.replace(new, old)
+    ver = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    conn.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'qa'", (sql,))
+    conn.execute(f"PRAGMA schema_version = {ver + 1}")
+    conn.execute("PRAGMA writable_schema = OFF")
+    set_meta(conn, "schema_version", "5")
+    return conn
+
+
+def test_import_upgrades_schema_5_file(cfg, app, tmp_path):
+    body = snapshot(as_schema_5(local_db(tmp_path)), tmp_path / "upload.sqlite3")
+    with client_for(app, 1) as c:
+        r = c.post("/api/import/db", content=body, headers=OCTET)
+        assert r.status_code == 200, r.text
+        assert r.json() == {"mode": "replaced", "items": 2}
+        assert [h["question"] for h in c.get("/api/search", params=moved(c)).json()["hits"]] == [".part 를 쓰는 이유"]
+        r = c.post("/api/qa", json={"category": "이관", "question": "q" * 300, "answer": "답이다."})
+        assert r.status_code == 200, r.text
+    s = user_store(cfg, 1)
+    assert s.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == SCHEMA_VERSION
+    s.conn.close()
+    body = snapshot(as_schema_5(local_db(tmp_path, "second.sqlite3")), tmp_path / "upload2.sqlite3")
+    with client_for(app, 1) as c:
+        res = c.post("/api/import/db", content=body, headers=OCTET).json()
+    assert res["mode"] == "merged" and res["failed"] == []
+    assert not list((cfg.data_dir / "tmp").glob("*")), "이전한 받은 파일과 WAL 잔재를 남기지 않는다"
 
 
 def _extra_table(tmp_path):
@@ -160,11 +242,11 @@ def _truncated(tmp_path):
 
 
 @pytest.mark.parametrize("make, needle", [
-    (lambda tmp: b"not a sqlite file" * 64, "손상"),
-    (_truncated, "손상"),
-    (_schema_mismatch, "스키마 버전"),
-    (_extra_table, "표 목록"),
-    (_with_view, "뷰"),
+    (lambda tmp: b"not a sqlite file" * 64, "damaged"),
+    (_truncated, "damaged"),
+    (_schema_mismatch, "schema version"),
+    (_extra_table, "table list"),
+    (_with_view, "views"),
 ])
 def test_import_rejects_bad_files_and_keeps_db(cfg, app, tmp_path, make, needle):
     with client_for(app, 1) as c:
@@ -214,9 +296,14 @@ def test_push_local_uploads_snapshot_with_personal_token(cfg, app, tmp_path, cap
         assert push.main(["--db", str(tmp_path / "local.sqlite3")], creds=creds, http=c) == 0
         out = capsys.readouterr().out
         assert "통째로 바꿨다" in out and "2" in out
-        hits = c.get("/api/search", params={"q": "rename"}, headers={"Authorization": f"Bearer {token}"})
+        auth_h = {"Authorization": f"Bearer {token}"}
+        hits = c.get("/api/search", params=moved(c, auth_h), headers=auth_h)
         assert [h["question"] for h in hits.json()["hits"]] == [".part 를 쓰는 이유"]
     assert tenant.db_path_for(cfg.data_dir, acc).exists()
+    conn = connect(tenant.db_path_for(cfg.data_dir, acc))
+    from kb.db import get_meta
+    assert get_meta(conn, "guide_lang") == "en"  # push_local 로 처음 만든 계정은 영어 기본 가이드
+    conn.close()
     assert not list(tmp_path.glob("*.tmp")), "로컬 쪽 임시 사본을 남기지 않는다"
 
 
@@ -442,7 +529,7 @@ def test_replace_import_checks_account_quota(cfg, app, tmp_path, monkeypatch, pa
     with client_for(app, 1) as c:
         r = c.post(path, content=body, headers=OCTET)
     assert r.status_code == 400 and r.json()["code"] == "quota", r.text
-    assert ("Q&A 3건" if limit == "rows" else "MB") in r.json()["error"]
+    assert ("3 Q&A" if limit == "rows" else "MB") in r.json()["error"]
     assert not tenant.db_path_for(cfg.data_dir, 1).exists()
 
 

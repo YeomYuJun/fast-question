@@ -6,6 +6,7 @@ playwright 는 서버·클라이언트 의존성이 아니라 requirements-e2e.t
 각 테스트는 새 페이지를 열고, 페이지가 낸 스크립트 오류가 없어야 통과한다. DB 는 파일 전체가 하나를 쓰므로 테스트마다
 다른 항목을 고친다.
 """
+import re
 import socket
 import threading
 import time
@@ -57,17 +58,54 @@ def browser():
         b.close()
 
 
-@pytest.fixture
-def page(browser, base_url):
-    ctx = browser.new_context(base_url=base_url, viewport={"width": 1280, "height": 900})
+def open_page(browser, base_url, locale: str):
+    """화면 언어는 navigator.language 를 따르므로 브라우저 언어를 정해 연다."""
+    ctx = browser.new_context(base_url=base_url, viewport={"width": 1280, "height": 900}, locale=locale)
     pg = ctx.new_page()
     errors: list[str] = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     pg.fq_errors = errors  # 서버가 거부하는 요청을 일부러 보내는 테스트가 그 줄을 지운다
+    return ctx, pg, errors
+
+
+@pytest.fixture
+def page(browser, base_url):
+    ctx, pg, errors = open_page(browser, base_url, "ko-KR")
     yield pg
     ctx.close()
     assert errors == [], errors
+
+
+@pytest.fixture
+def en_page(browser, base_url):
+    ctx, pg, errors = open_page(browser, base_url, "en-US")
+    yield pg
+    ctx.close()
+    assert errors == [], errors
+
+
+# 화면 문구(글자, aria-label, title, placeholder)에서 한글을 찾는다. 질문·답변·분류 이름처럼 데이터를 보이는 곳은 뺀다
+# (데모 DB 의 데이터가 한국어다). 언어 전환 버튼은 각 언어 이름을 그 언어로 쓴다. 서버가 만드는 오류 문장도 대상이 아니다
+HANGUL_IN_UI = """(sel) => {
+  const skip = ".qtext, .atext, .grp-head, .facet .name, .facet-edit .name, .links, .ev, select, .cl-hit, .cl-qa, #cat-chip, .langs, #account-name";
+  const out = [];
+  for (const root of document.querySelectorAll(sel)) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (!n.parentElement.closest(skip) && /[\\uAC00-\\uD7A3]/.test(n.textContent)) out.push(n.textContent.trim());
+    }
+    for (const e of [root, ...root.querySelectorAll("*")]) {
+      if (e.closest(skip)) continue;
+      for (const a of ["aria-label", "title", "placeholder"]) {
+        const v = e.getAttribute(a);
+        if (v && /[\\uAC00-\\uD7A3]/.test(v)) out.push(`${a}=${v}`);
+      }
+    }
+  }
+  return out;
+}"""
 
 
 def rows(page):
@@ -187,7 +225,7 @@ def test_category_panel_filters_results(page):
 
 
 def test_phone_width_has_no_horizontal_scroll(browser, base_url):
-    ctx = browser.new_context(base_url=base_url, viewport={"width": 375, "height": 800})
+    ctx = browser.new_context(base_url=base_url, viewport={"width": 375, "height": 800}, locale="ko-KR")
     page = ctx.new_page()
     page.goto("/")
     expect(rows(page).first).to_be_visible()
@@ -205,3 +243,157 @@ def test_dark_theme_toggle_persists(page):
     assert after and after != before
     page.reload()
     assert page.evaluate("document.documentElement.dataset.theme || ''") == after
+
+
+# ---- 화면 언어(ko/en) ----
+
+def test_language_follows_browser_and_toggle_persists(page):
+    page.goto("/")
+    assert page.evaluate("document.documentElement.lang") == "ko"
+    expect(page.locator("#new-btn")).to_have_text("+ 새 질문")
+    expect(page.locator('button[data-lang="ko"]')).to_have_attribute("aria-pressed", "true")
+    page.locator('button[data-lang="en"]').click()
+    expect(page.locator("#new-btn")).to_have_text("+ New question")  # 고른 언어로 다시 읽는다
+    assert page.evaluate("document.documentElement.lang") == "en"
+    assert page.evaluate("localStorage.getItem('fq.lang')") == "en"
+    expect(page.locator('button[data-lang="en"]')).to_have_attribute("aria-pressed", "true")
+    page.locator('button[data-lang="ko"]').click()
+    expect(page.locator("#new-btn")).to_have_text("+ 새 질문")
+    assert page.evaluate("localStorage.getItem('fq.lang')") == "ko"
+
+
+def test_english_screen_list_search_and_help_have_no_korean_ui(en_page):
+    page = en_page
+    page.goto("/")
+    expect(rows(page).first).to_be_visible()
+    assert page.evaluate("document.documentElement.lang") == "en"
+    assert page.title() == "fast question - A Q&A store you share with Claude"
+    expect(page.locator("#q")).to_have_attribute("placeholder", "What do you want to know?  e.g. CORS error")
+    expect(page.locator("#sum-count")).to_contain_text("Recently updated:")
+    page.click("#toggle-side")
+    page.click("#help-btn")
+    expect(page.locator("#help")).to_be_visible()
+    assert page.evaluate(HANGUL_IN_UI, "header.top, .summary, #side, #help, #empty") == []
+    page.keyboard.press("Escape")
+    page.fill("#q", "PATCH nosuchword")  # 검색어는 0건 안내와 칩에 그대로 보이므로 한글이 없는 말로 찾는다
+    expect(page.locator("#empty")).to_be_visible()
+    expect(page.locator("#empty-msg")).to_contain_text("No matching questions.")
+    expect(page.locator("#relaxed .chip")).to_contain_text("without")
+    assert page.evaluate(HANGUL_IN_UI, ".summary, #empty") == []
+
+
+def test_english_screen_detail_and_edit_have_no_korean_ui(en_page):
+    page = en_page
+    page.goto("/")
+    search(page, "429", 1)
+    rows(page).first.locator(".rowbtn").click()
+    expect(rows(page).first.locator(".detail .label").first).to_have_text("Evidence")
+    assert page.evaluate(HANGUL_IN_UI, "#results .detail") == []
+    page.locator("#results .detail").get_by_role("button", name="Edit").click()
+    form = page.locator("#results form.edit")
+    expect(form).to_be_visible()
+    assert page.evaluate(HANGUL_IN_UI, "#results form.edit") == []
+    form.locator("textarea.fa").fill("Wait for Retry-After and send again (screen test).")
+    form.get_by_role("button", name="Save").click()
+    expect(page.locator("#toast")).to_contain_text("Saved.")
+
+
+def test_terms_and_privacy_follow_screen_language(en_page):
+    """화면 언어가 en 이면 /privacy 는 영어판으로 옮기고(#operator 유지), ko 버튼을 누르면 한국어판으로 돌아온다."""
+    page = en_page
+    page.goto("/privacy#operator")
+    expect(page).to_have_url(re.compile(r"/privacy/en#operator$"))
+    expect(page.locator("h1")).to_have_text("Privacy Policy")
+    expect(page.locator('button[data-lang="en"]')).to_have_attribute("aria-pressed", "true")
+    page.locator('button[data-lang="ko"]').click()
+    expect(page).to_have_url(re.compile(r"/privacy#operator$"))
+    expect(page.locator("h1")).to_have_text("개인정보 처리방침")
+    page.goto("/terms/en")
+    expect(page).to_have_url(re.compile(r"/terms$"))
+    expect(page.locator("h1")).to_have_text("이용약관")
+
+
+def test_english_edit_form_shows_note_prefix_in_english(en_page):
+    """서버는 메모 근거를 "메모:" 로 돌려준다. en 편집 폼은 note: 로 보이고, 고치지 않고 저장하면 근거를 다시 보내지 않는다."""
+    page = en_page
+    page.goto("/")
+    search(page, "PKCE", 1)
+    rows(page).first.locator(".rowbtn").click()
+    expect(page).to_have_url(re.compile(r"#qa/\d+$"))
+    qa_id = int(page.evaluate("location.hash").split("/")[-1])
+    cur = page.request.get(f"/api/qa/{qa_id}").json()
+    r = page.request.patch(f"/api/qa/{qa_id}", data={"version": cur["version"], "evidence_line": "메모: checked by ops"})
+    assert r.ok, r.text()
+    version = r.json()["version"]
+    assert r.json()["evidence_line"] == "메모: checked by ops"
+    page.reload()  # 펼칠 때 읽어 둔 상세에는 고치기 전 근거가 있다
+    page.locator("#results .detail").get_by_role("button", name="Edit").click()
+    form = page.locator("#results form.edit")
+    expect(form.locator("input.fe")).to_have_value("note: checked by ops")
+    form.get_by_role("button", name="Save").click()
+    expect(form).to_be_hidden()
+    after = page.request.get(f"/api/qa/{qa_id}").json()
+    assert after["version"] == version and after["evidence_line"] == "메모: checked by ops"
+
+
+def test_counter_uses_weighted_length(page):
+    """한글·한자는 2, 그 밖은 1로 센다. 질문 300, 답변 800, 답변 한 줄 240 을 넘으면 over 표시."""
+    page.goto("/")
+    page.click("#new-btn")
+    form = page.locator("#new-slot form.edit")
+    counts = form.locator(".count")
+    form.locator("input.fq").fill("가나 ab")
+    expect(counts.nth(0)).to_have_text("7/300")
+    form.locator("input.fq").fill("가" * 150)
+    expect(counts.nth(0)).not_to_have_class("count over")
+    form.locator("input.fq").fill("가" * 150 + "a")
+    expect(counts.nth(0)).to_have_class("count over")
+    form.locator("textarea.fa").fill("a" * 240)
+    expect(counts.nth(1)).to_have_text("240/800")
+    expect(counts.nth(1)).not_to_have_class("count over")
+    form.locator("textarea.fa").fill("가" * 121)  # 한 줄이 가중 242
+    expect(counts.nth(1)).to_have_class("count over")
+    form.locator("textarea.fa").fill("\n".join(["가" * 100] * 4) + "\n" + "a" * 1)
+    expect(counts.nth(1)).to_have_text("805/800")
+    expect(counts.nth(1)).to_have_class("count over")
+    form.get_by_role("button", name="취소").click()
+
+
+def test_string_tables_have_the_same_keys(page):
+    page.goto("/")
+    expect(rows(page).first).to_be_visible()
+    diff = page.evaluate("""() => {
+      const only = (a, b) => Object.keys(STR[a]).filter((k) => !(k in STR[b])).map((k) => `${a}:${k}`);
+      return [...only("ko", "en"), ...only("en", "ko")];
+    }""")
+    assert diff == []
+
+
+def test_weight_ranges_match_contract():
+    """화면의 가중 길이 범위 표가 계약의 범위와 같다(kb/text.py 의 weight 와 같은 표를 쓴다)."""
+    import re
+    from web.app import STATIC
+    js = (STATIC / "app.js").read_text(encoding="utf-8")
+    block = re.search(r"const WIDE = \[(.*?)\];", js, re.S).group(1)
+    got = [(int(a, 16), int(b, 16)) for a, b in re.findall(r"\[0x([0-9A-Fa-f]+), 0x([0-9A-Fa-f]+)\]", block)]
+    assert got == [(0x1100, 0x115F), (0x2E80, 0xA4CF), (0xAC00, 0xD7A3), (0xF900, 0xFAFF), (0xFE30, 0xFE4F),
+                   (0xFF00, 0xFF60), (0xFFE0, 0xFFE6)]
+    assert re.search(r"const QUESTION_MAX = 300;", js) and re.search(r"const ANSWER_MAX = 800;", js)
+    assert re.search(r"const LINE_MAX = 240;", js)
+
+
+def test_login_screen_in_both_languages(page, en_page):
+    """로컬 모드에는 로그인 화면이 없어 showLogin 을 직접 불러 그린다."""
+    for pg, lang, button in ((page, "ko", "GitHub 로 계속하기"), (en_page, "en", "Continue with GitHub")):
+        pg.goto("/")
+        expect(rows(pg).first).to_be_visible()
+        pg.evaluate("history.replaceState(null, '', '/?login_error=denied'); showLogin(['github', 'google'])")
+        expect(pg.locator("#login")).to_be_visible()
+        expect(pg.locator("#login-btns a").first).to_have_text(button)
+        expect(pg.locator(".langs")).to_be_visible()
+        if lang == "en":
+            expect(pg.locator("#login-err")).to_have_text("Sign-in was cancelled.")
+            expect(pg.locator(".ex-u").first).to_have_text("How did I fix the CORS error last time?")
+            assert pg.evaluate(HANGUL_IN_UI, "#login, header.top") == []
+        else:
+            expect(pg.locator("#login-err")).to_have_text("로그인을 취소했습니다.")

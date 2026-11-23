@@ -31,11 +31,11 @@ def routes(control_path: Path, data_dir: Path, open_kb: Callable[[Path], sqlite3
             conn.close()
 
     def not_found() -> Response:
-        return JSONResponse({"error": "공개 링크를 찾지 못했습니다. 폐기됐거나 없는 주소입니다.", "code": "not_found"}, status_code=404)
+        return JSONResponse({"error": "Public link not found. It was revoked or does not exist.", "code": "not_found"}, status_code=404)
 
     def need_session(request: Request) -> Response | None:
         if request.scope.get(AUTH_KIND_KEY) != "session":
-            return JSONResponse({"error": "브라우저에서 로그인해 주세요.", "code": "unauthorized"}, status_code=401)
+            return JSONResponse({"error": "Log in from the browser.", "code": "unauthorized"}, status_code=401)
         return None
 
     def read_shared(token: str) -> dict | None:
@@ -80,23 +80,23 @@ def routes(control_path: Path, data_dir: Path, open_kb: Callable[[Path], sqlite3
             body = await request.json()
             kind, target_id = str(body.get("kind", "")), int(body.get("id"))
         except (ValueError, TypeError):
-            return JSONResponse({"error": "kind(qa·category)와 id 가 필요합니다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "kind (qa or category) and id are required.", "code": "invalid"}, status_code=400)
         if kind not in share.KINDS:
-            return JSONResponse({"error": "kind 는 qa 또는 category 입니다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "kind must be qa or category.", "code": "invalid"}, status_code=400)
         title = await run_in_threadpool(target_title, account_id, kind, target_id)
         if title is None:
-            return JSONResponse({"error": "공개할 항목이나 분류를 찾지 못했습니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "The item or category to share was not found.", "code": "not_found"}, status_code=404)
         try:
             made = await run_in_threadpool(db, share.create, account_id, kind, target_id, title)
         except share.ShareRefused as e:
-            return JSONResponse({"error": str(e), "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": str(e), "code": e.code}, status_code=400)
         return JSONResponse(with_url(made))
 
     async def revoke(request: Request) -> Response:
         if (denied := need_session(request)) is not None:
             return denied
         ok = await run_in_threadpool(db, share.revoke, request.scope[ACCOUNT_KEY], int(request.path_params["id"]))
-        return JSONResponse({"ok": True}) if ok else JSONResponse({"error": "공개 링크를 찾지 못했습니다.", "code": "not_found"},
+        return JSONResponse({"ok": True}) if ok else JSONResponse({"error": "Public link not found.", "code": "not_found"},
                                                                   status_code=404)
 
     return [

@@ -44,11 +44,11 @@ CHAT_BODY_MAX = 8 * 1024 * 1024
 SECRET_FILE = "claude-key.secret"
 
 SYSTEM = f"""\
-너는 fast-question 웹 화면 오른쪽 패널에서 이 사용자의 Q&A 지식 DB 를 다루는 비서다. 한국어로 짧고 정확하게 답한다.
-- DB 에 관한 질문은 먼저 kb_search·kb_get 으로 찾아보고 답한다. 찾은 항목은 결과의 url 로 [#<id> 질문](url) 처럼 링크한다.
-- 사용자가 등록·수정·보관·분류 정리를 요청하면 도구로 바로 처리하고 무엇을 했는지 한두 줄로 알린다.
-- 이 화면에서는 파일 근거를 달 수 없다(서버에 사용자 파일이 없다). 근거가 필요한 등록은 근거 없이 하거나 사용자 PC 의 Claude Code 를 권한다.
-- 항목 삭제·분류 삭제·대량 등록은 이 화면에서 할 수 없다. 요청받으면 웹 화면의 편집 기능이나 Claude Code 를 안내한다.
+You are the assistant in the right-hand panel of the fast-question web screen, working on this user's Q&A knowledge DB. Answer briefly and accurately, in the language the user writes in.
+- For a question about the DB, search with kb_search and kb_get first, then answer. Link each item you found with the url in the result, as [#<id> question](url).
+- When the user asks to add, change or archive items or to tidy categories, do it with the tools right away and report what you did in one or two lines.
+- File evidence cannot be attached in this screen (the server has no user files). For an item that needs evidence, add it without evidence or suggest Claude Code on the user's PC.
+- Permanently deleting items, deleting categories and adding many items at once are not available in this screen. If asked, point the user to the editing features of the web screen or to Claude Code.
 
 {INSTRUCTIONS}"""
 
@@ -104,33 +104,33 @@ def _block(b) -> dict:
     return b.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-def _api_error(e: Exception) -> str:
+def _api_error(e: Exception) -> tuple[str, str]:
     if isinstance(e, anthropic.AuthenticationError):
-        return "API 키가 거부됐습니다. 키를 다시 등록해 주세요."
+        return "api_key_rejected", "The API key was rejected. Register the key again."
     if isinstance(e, anthropic.PermissionDeniedError):
-        return "이 API 키로는 고른 모델을 쓸 수 없습니다."
+        return "api_model_denied", "This API key cannot use the selected model."
     if isinstance(e, anthropic.RateLimitError):
-        return "Anthropic 요청 한도에 걸렸습니다. 잠시 뒤 다시 보내 주세요."
+        return "api_rate_limited", "The Anthropic rate limit was reached. Send again shortly."
     if isinstance(e, anthropic.BadRequestError):
-        return f"Anthropic 이 요청을 거부했습니다: {e.message}"
+        return "api_bad_request", f"Anthropic rejected the request: {e.message}"
     if isinstance(e, anthropic.APIStatusError):
-        return f"Anthropic 서버 오류({e.status_code})입니다. 잠시 뒤 다시 보내 주세요."
+        return "api_server_error", f"Anthropic server error ({e.status_code}). Send again shortly."
     if isinstance(e, anthropic.APIConnectionError):
-        return "Anthropic 에 연결하지 못했습니다."
-    return "대화를 처리하지 못했습니다."
+        return "api_unreachable", "Could not connect to Anthropic."
+    return "chat_failed", "Could not process the conversation."
 
 
 def _check_messages(messages) -> str | None:
     """요청 본문의 대화 기록 모양만 본다(내용은 Anthropic 이 검사한다). 문제가 있으면 이유."""
     if not isinstance(messages, list) or not messages:
-        return "messages 가 비었습니다."
+        return "messages is empty."
     if len(messages) > MAX_MESSAGES:
-        return "대화가 너무 깁니다. 새 대화를 시작해 주세요."
+        return "The conversation is too long. Start a new conversation."
     for m in messages:
         if not isinstance(m, dict) or m.get("role") not in ("user", "assistant") or "content" not in m:
-            return "messages 형식이 올바르지 않습니다."
+            return "messages has an invalid format."
     if messages[-1]["role"] != "user":
-        return "마지막 메시지는 사용자 메시지여야 합니다."
+        return "The last message must be a user message."
     return None
 
 
@@ -152,7 +152,7 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
         return request.scope.get(ACCOUNT_KEY) if request.scope.get(AUTH_KIND_KEY) == "session" else None
 
     def unauthorized() -> Response:
-        return JSONResponse({"error": "브라우저에서 로그인해야 합니다.", "code": "unauthorized"}, status_code=401)
+        return JSONResponse({"error": "You must log in from the browser.", "code": "unauthorized"}, status_code=401)
 
     async def body_of(request: Request) -> dict | None:
         try:
@@ -176,23 +176,23 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
             return JSONResponse({"ok": True})
         body = await body_of(request)
         if body is None:
-            return JSONResponse({"error": "요청 본문이 JSON 이 아닙니다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "The request body is not JSON.", "code": "invalid"}, status_code=400)
         model = body.get("model", DEFAULT_MODEL)
         if model not in MODELS:
-            return JSONResponse({"error": f"모델은 {', '.join(MODELS)} 중 하나입니다.", "code": "invalid"},
+            return JSONResponse({"error": f"The model must be one of {', '.join(MODELS)}.", "code": "invalid"},
                                 status_code=400)
         api_key = str(body.get("key") or "").strip()
         if not api_key:  # 키 없이 오면 모델만 바꾼다
             if not await run_in_threadpool(db, control.set_claude_model, account_id, model):
-                return JSONResponse({"error": "먼저 API 키를 등록해 주세요.", "code": "no_key"}, status_code=400)
+                return JSONResponse({"error": "Register an API key first.", "code": "no_key"}, status_code=400)
             return JSONResponse({"ok": True, "model": model})
         if len(api_key) > 300 or not api_key.isascii():
-            return JSONResponse({"error": "API 키 형식이 아닙니다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "This is not an API key.", "code": "invalid"}, status_code=400)
         try:
             await client_factory(api_key).models.retrieve(model)  # 가벼운 요청으로 키와 모델 권한을 확인한다
         except Exception as e:  # noqa: BLE001 - 어떤 실패든 등록하지 않고 이유를 돌려준다
             log.info("Claude API 키 확인 실패: 계정 %s, %s", account_id, type(e).__name__)
-            return JSONResponse({"error": _api_error(e), "code": "rejected"}, status_code=400)
+            return JSONResponse({"error": _api_error(e)[1], "code": "rejected"}, status_code=400)
         await run_in_threadpool(db, control.put_claude_key, account_id, await run_in_threadpool(box.seal, api_key),
                                 api_key[-4:], model)
         log.info("Claude API 키 등록: 계정 %s", account_id)
@@ -223,7 +223,7 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
                 appended.append({"role": "assistant", "content": [_block(b) for b in final.content]})
                 tool_uses = [b for b in final.content if b.type == "tool_use"]
                 if final.stop_reason == "refusal":
-                    yield _sse({"type": "notice", "text": "Claude 가 이 요청을 거절했습니다."})
+                    yield _sse({"type": "notice", "code": "chat_refused", "text": "Claude declined this request."})
                     break
                 if final.stop_reason == "pause_turn":
                     continue
@@ -231,7 +231,8 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
                     break
                 if final.stop_reason == "max_tokens":  # 잘린 도구 입력은 실행하지 않는다
                     appended.pop()
-                    yield _sse({"type": "error", "text": "응답이 길어 도중에 끊겼습니다. 요청을 나눠 보내 주세요."})
+                    yield _sse({"type": "error", "code": "chat_truncated",
+                                "text": "The response was too long and was cut off. Split the request."})
                     return
                 results = []
                 for b in tool_uses:
@@ -242,14 +243,16 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
                                     **({"is_error": True} if is_error else {})})
                 appended.append({"role": "user", "content": results})
             else:
-                yield _sse({"type": "notice", "text": f"도구를 {MAX_TURNS}번 넘게 불러 여기서 멈췄습니다."})
+                yield _sse({"type": "notice", "code": "chat_tool_limit",
+                        "text": f"Stopped here after more than {MAX_TURNS} tool calls."})
         except ValueError:  # 모델이 만든 도구 입력 JSON 을 SDK 가 읽지 못했다
-            yield _sse({"type": "error", "text": "Claude 응답을 읽지 못했습니다. 다시 보내 주세요."})
+            yield _sse({"type": "error", "code": "chat_unreadable", "text": "Could not read the Claude response. Send again."})
             return
         except Exception as e:  # noqa: BLE001 - 어떤 실패든 브라우저에 이유를 보내고 기록을 늘리지 않는다
             if not isinstance(e, anthropic.APIError):
                 log.exception("Claude 대화 실패: 계정 %s", account_id)
-            yield _sse({"type": "error", "text": _api_error(e)})
+            code, text = _api_error(e)
+            yield _sse({"type": "error", "code": code, "text": text})
             return
         yield _sse({"type": "done", "append": appended})
 
@@ -258,16 +261,16 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
             return unauthorized()
         body = await body_of(request)
         if body is None:
-            return JSONResponse({"error": "요청 본문이 JSON 이 아닙니다.", "code": "invalid"}, status_code=400)
+            return JSONResponse({"error": "The request body is not JSON.", "code": "invalid"}, status_code=400)
         messages = body.get("messages")
         if (problem := _check_messages(messages)) is not None:
             return JSONResponse({"error": problem, "code": "invalid"}, status_code=400)
         row = await run_in_threadpool(db, control.get_claude_key, account_id)
         api_key = None if row is None else await run_in_threadpool(box.open, row["secret"])
         if api_key is None:
-            return JSONResponse({"error": "먼저 Anthropic API 키를 등록해 주세요.", "code": "no_key"}, status_code=400)
+            return JSONResponse({"error": "Register an Anthropic API key first.", "code": "no_key"}, status_code=400)
         if account_id in busy:
-            return JSONResponse({"error": "이전 요청을 처리하는 중입니다.", "code": "busy"}, status_code=409)
+            return JSONResponse({"error": "The previous request is still being processed.", "code": "busy"}, status_code=409)
         busy.add(account_id)
 
         async def events():
@@ -287,9 +290,9 @@ def routes(control_path: Path, data_dir: Path, open_store: Callable[[int], Store
 async def _call(server, name: str, args) -> tuple[str, bool]:
     """MCP 도구를 부른다. (모델에 넘길 글, 오류 여부)."""
     if name not in ALLOWED_TOOLS:
-        return f"{name} 은 이 화면에서 쓸 수 없는 도구입니다.", True
+        return f"{name} is not available on this screen.", True
     if not isinstance(args, dict):
-        return "도구 입력이 객체가 아닙니다.", True
+        return "The tool input is not an object.", True
     try:
         result = await server.call_tool(name, args)
     except ToolError as e:

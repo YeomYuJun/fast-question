@@ -28,13 +28,44 @@ from starlette.routing import Route
 
 from kb import control, oauth_store
 from web.auth import ACCOUNT_KEY, AUTH_KIND_KEY
+from web.cli_login import pick_lang
 
 SCOPE = "kb"
 CLIENT_JSON_MAX = 8192  # 등록 한 건의 메타데이터 크기 상한(인증 없이 받는다)
 REDIRECT_MAX = 10
 LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 PROVIDER_LABELS = {"github": "GitHub", "google": "Google"}
-CONSENT = "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다"
+TEXT = {
+    "ko": {
+        "ended_title": "요청이 끝났습니다",
+        "ended_body": ("<h1>연결 요청이 끝났습니다</h1>"
+                       "<p>없거나 10분이 지났거나 이미 처리한 요청입니다. Claude Code 에서 다시 연결해 주세요.</p>"),
+        "login_title": "로그인", "login_with": "{name} 로 로그인",
+        "login_body": "<h1>로그인</h1><p>Claude Code 를 내 질문·답변 저장소에 연결하려면 먼저 로그인해 주세요.</p>",
+        "none": '<p class="none">켜진 로그인 공급자가 없습니다.</p>',
+        "agree": ('<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 <a href="/privacy">개인정보 처리방침</a>을 '
+                  "확인한 것으로 봅니다.</p>"),
+        "consent_title": "연결 승인", "consent": "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다",
+        "consent_p": "<p>승인하면 이 프로그램이 내 계정으로 저장소를 검색·등록·수정합니다.</p>",
+        "client": "요청한 프로그램", "redirect": "승인 뒤 돌아갈 주소", "approve": "승인", "deny": "거부",
+        "bad_title": "잘못된 요청", "bad_body": "<h1>잘못된 요청입니다</h1><p>승인 또는 거부를 골라 주세요.</p>",
+    },
+    "en": {
+        "ended_title": "Request ended",
+        "ended_body": ("<h1>This connection request has ended</h1>"
+                       "<p>The request does not exist, is older than 10 minutes, or was already handled. "
+                       "Connect again from Claude Code.</p>"),
+        "login_title": "Sign in", "login_with": "Sign in with {name}",
+        "login_body": "<h1>Sign in</h1><p>Sign in first to connect Claude Code to your Q&amp;A repository.</p>",
+        "none": '<p class="none">No sign-in provider is enabled.</p>',
+        "agree": ('<p class="agree">By signing in, you agree to the <a href="/terms">Terms</a> and acknowledge the '
+                  '<a href="/privacy">Privacy Policy</a>.</p>'),
+        "consent_title": "Approve connection", "consent": "Claude Code will read and write your Q&A repository",
+        "consent_p": "<p>If you approve, this program searches, adds, and edits the repository with your account.</p>",
+        "client": "Requesting program", "redirect": "Return address after approval", "approve": "Approve", "deny": "Deny",
+        "bad_title": "Bad request", "bad_body": "<h1>Bad request</h1><p>Choose approve or deny.</p>",
+    },
+}
 
 log = logging.getLogger("fast-question.oauth")
 
@@ -78,14 +109,14 @@ class KbAuthProvider:
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         uris = [str(u) for u in client_info.redirect_uris or []]
         if not 1 <= len(uris) <= REDIRECT_MAX:
-            raise RegistrationError("invalid_redirect_uri", f"redirect_uri 는 1~{REDIRECT_MAX}개여야 합니다.")
+            raise RegistrationError("invalid_redirect_uri", f"Provide 1 to {REDIRECT_MAX} redirect_uris.")
         bad = [u for u in uris if not allowed_redirect(u)]
         if bad:
-            raise RegistrationError("invalid_redirect_uri", "redirect_uri 는 http://localhost:<포트>/callback, "
-                                    f"http://127.0.0.1:<포트>/callback, https://… 만 받습니다: {bad[0]}")
+            raise RegistrationError("invalid_redirect_uri", "Only http://localhost:<port>/callback, "
+                                    f"http://127.0.0.1:<port>/callback and https://… redirect_uris are accepted: {bad[0]}")
         raw = client_info.model_dump_json(exclude_none=True)
         if len(raw) > CLIENT_JSON_MAX:
-            raise RegistrationError("invalid_client_metadata", f"등록 정보가 {CLIENT_JSON_MAX}바이트를 넘습니다.")
+            raise RegistrationError("invalid_client_metadata", f"Client metadata exceeds {CLIENT_JSON_MAX} bytes.")
         await self._run(oauth_store.put_client, client_info.client_id, raw)
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
@@ -95,7 +126,7 @@ class KbAuthProvider:
                      self.resource, client.client_id, client.client_name)
             resource = self.resource
         if resource != self.resource:
-            raise AuthorizeError("invalid_target", f"resource 는 {self.resource} 여야 합니다.")
+            raise AuthorizeError("invalid_target", f"resource must be {self.resource}.")
         pending_id = await self._run(oauth_store.put_pending, client.client_id, {
             "scopes": params.scopes or [SCOPE], "code_challenge": params.code_challenge,
             "redirect_uri": str(params.redirect_uri),
@@ -117,7 +148,7 @@ class KbAuthProvider:
     @staticmethod
     def _oauth_token(issued: dict | None) -> OAuthToken:
         if issued is None:
-            raise TokenError("invalid_grant", "이미 썼거나 끝난 코드·토큰입니다.")
+            raise TokenError("invalid_grant", "The code or token was already used or has expired.")
         return OAuthToken(access_token=issued["access_token"], token_type="Bearer", expires_in=issued["expires_in"],
                           scope=" ".join(issued["scopes"]), refresh_token=issued["refresh_token"])
 
@@ -180,7 +211,7 @@ class RevokeFieldLog:
 
 
 PAGE = """<!doctype html>
-<html lang="ko">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -202,46 +233,43 @@ LOGO = ('<svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true">'
         '<path d="M23 45V20A16 16 0 0 1 39 4H47V13H39A7 7 0 0 0 32 20V45Z" fill="var(--ink)"></path>'
         '<path d="M16 22H39V30H16Z" fill="var(--ink)"></path>'
         '<path d="M23 50.5H32A9 9 0 0 1 23 59.5Z" fill="var(--accent)"></path></svg>')
-AGREE = ('<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 <a href="/privacy">개인정보 처리방침</a>을 '
-         "확인한 것으로 봅니다.</p>")
 # Referrer-Policy 는 same-origin 이다. no-referrer 면 Chrome 이 이 페이지의 승인 폼 POST 에 Origin: null 을 붙여
 # 같은 출처 검사(SameOriginOnly)가 거부한다. same-origin 도 다른 사이트(콜백 주소)에는 리퍼러를 보내지 않는다.
 # Content-Security-Policy 는 모든 응답에 web/app.py 의 SecurityHeaders 가 붙인다
 PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin"}
 
 
-def page(title: str, body: str, host: str, status: int = 200) -> HTMLResponse:
+def page(title: str, body: str, host: str, status: int = 200, lang: str = "en") -> HTMLResponse:
     """body 는 이미 이스케이프한 HTML 이다. host 는 카드 상표 줄에 보이는 이 서버의 호스트(어느 사이트에 승인하는지)."""
-    return HTMLResponse(PAGE.format(title=html.escape(title), body=body, logo=LOGO, host=html.escape(host)),
+    return HTMLResponse(PAGE.format(title=html.escape(title), body=body, logo=LOGO, host=html.escape(host), lang=lang),
                         status_code=status, headers=PAGE_HEADERS)
 
 
-def ended(host: str) -> HTMLResponse:
-    return page("요청이 끝났습니다", "<h1>연결 요청이 끝났습니다</h1>"
-                "<p>없거나 10분이 지났거나 이미 처리한 요청입니다. Claude Code 에서 다시 연결해 주세요.</p>", host, 400)
+def ended(host: str, lang: str) -> HTMLResponse:
+    return page(TEXT[lang]["ended_title"], TEXT[lang]["ended_body"], host, 400, lang)
 
 
-def login_page(providers, path: str, host: str, status: int = 200) -> HTMLResponse:
+def login_page(providers, path: str, host: str, lang: str, status: int = 200) -> HTMLResponse:
+    tx = TEXT[lang]
     query = urlencode({"next": path})
     links = "".join(f'<a class="btn" href="/auth/login/{html.escape(name)}?{html.escape(query)}">'
-                    f"{html.escape(PROVIDER_LABELS.get(name, name))} 로 로그인</a>" for name in sorted(providers))
-    body = ("<h1>로그인</h1><p>Claude Code 를 내 질문·답변 저장소에 연결하려면 먼저 로그인해 주세요.</p>"
-            + (f'<div class="logins">{links}</div>' if links else '<p class="none">켜진 로그인 공급자가 없습니다.</p>')
-            + AGREE)
-    return page("로그인", body, host, status)
+                    f"{html.escape(tx['login_with'].format(name=PROVIDER_LABELS.get(name, name)))}</a>"
+                    for name in sorted(providers))
+    body = tx["login_body"] + (f'<div class="logins">{links}</div>' if links else tx["none"]) + tx["agree"]
+    return page(tx["login_title"], body, host, status, lang)
 
 
-def consent_page(client: OAuthClientInformationFull | None, params: dict, host: str) -> HTMLResponse:
+def consent_page(client: OAuthClientInformationFull | None, params: dict, host: str, lang: str) -> HTMLResponse:
+    tx = TEXT[lang]
     name = (client.client_name if client else None) or (client.client_id if client else "")
-    body = (f"<h1>{html.escape(CONSENT)}</h1>"
-            "<p>승인하면 이 프로그램이 내 계정으로 저장소를 검색·등록·수정합니다.</p>"
-            f"<dl><div><dt>요청한 프로그램</dt><dd>{html.escape(name)}</dd></div>"
-            f"<div><dt>승인 뒤 돌아갈 주소</dt><dd>{html.escape(params['redirect_uri'])}</dd></div></dl>"
+    body = (f"<h1>{html.escape(tx['consent'])}</h1>" + tx["consent_p"]
+            + f"<dl><div><dt>{tx['client']}</dt><dd>{html.escape(name)}</dd></div>"
+            f"<div><dt>{tx['redirect']}</dt><dd>{html.escape(params['redirect_uri'])}</dd></div></dl>"
             '<form method="post" class="actions">'
-            '<button class="btn primary" type="submit" name="decision" value="approve">승인</button>'
-            '<button class="btn" type="submit" name="decision" value="deny">거부</button>'
+            f'<button class="btn primary" type="submit" name="decision" value="approve">{tx["approve"]}</button>'
+            f'<button class="btn" type="submit" name="decision" value="deny">{tx["deny"]}</button>'
             "</form>")
-    return page("연결 승인", body, host)
+    return page(tx["consent_title"], body, host, lang=lang)
 
 
 def routes(providers, control_path) -> list[Route]:
@@ -260,25 +288,26 @@ def routes(providers, control_path) -> list[Route]:
         path = f"/oauth/continue/{pending_id}"
         # SameOriginOnly 가 public_url 의 호스트인 요청만 통과시키므로 Host 가 곧 이 서버의 호스트다
         host = request.headers.get("host", "")
+        lang = pick_lang(request.headers.get("accept-language"))
         has_session = request.scope.get(AUTH_KIND_KEY) == "session"
         if request.method == "GET":
             found = await run_in_threadpool(db, oauth_store.get_pending, pending_id)
             if found is None:
-                return ended(host)
+                return ended(host, lang)
             if not has_session:
-                return login_page(providers, path, host)
+                return login_page(providers, path, host, lang)
             raw = await run_in_threadpool(db, oauth_store.get_client, found["client_id"])
             client = None if raw is None else OAuthClientInformationFull.model_validate_json(raw)
-            return consent_page(client, found["params"], host)
+            return consent_page(client, found["params"], host, lang)
 
         if not has_session:
-            return login_page(providers, path, host, 401)
+            return login_page(providers, path, host, lang, 401)
         decision = (await request.form()).get("decision")
         if decision not in ("approve", "deny"):
-            return page("잘못된 요청", "<h1>잘못된 요청입니다</h1><p>승인 또는 거부를 골라 주세요.</p>", host, 400)
+            return page(TEXT[lang]["bad_title"], TEXT[lang]["bad_body"], host, 400, lang)
         found = await run_in_threadpool(db, oauth_store.take_pending, pending_id)
         if found is None:
-            return ended(host)
+            return ended(host, lang)
         p = found["params"]
         if decision == "deny":
             target = construct_redirect_uri(p["redirect_uri"], error="access_denied", state=p["state"])

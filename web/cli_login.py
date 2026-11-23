@@ -56,8 +56,66 @@ dd { margin: 0 0 var(--space-3); font: var(--text-evidence); word-break: break-a
 .btn.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 """
 
+def pick_lang(accept_language: str | None) -> str:
+    """Accept-Language 에서 ko·en 중 가중치(q)가 가장 높은 쪽. 같으면 앞의 것, 둘 다 없으면 en.
+    web/oauth_as.py 도 쓴다. PC 쪽(fq_client/login.py)은 web 을 담지 않는 패키지라 같은 규칙을 따로 둔다."""
+    best, best_q = "en", 0.0
+    for part in (accept_language or "").split(","):
+        tag, *params = (s.strip() for s in part.split(";"))
+        tag = tag.lower()
+        lang = "ko" if tag == "ko" or tag.startswith("ko-") else "en" if tag == "en" or tag.startswith("en-") else None
+        q = 1.0
+        for p in params:
+            k, _, v = p.partition("=")
+            if k.strip().lower() == "q":
+                try:
+                    q = float(v)
+                except ValueError:
+                    q = 0.0
+        if lang and q > best_q:
+            best, best_q = lang, q
+    return best
+
+
+TEXT = {
+    "ko": {
+        "bad_title": "잘못된 요청",
+        "bad_body": "<h1>잘못된 요청입니다</h1><p>PC 에서 <code>fast-question login</code> 을 다시 실행하세요.</p>",
+        "login_title": "로그인", "login_with": "{name} 로 로그인",
+        "login_body": "<h1>로그인</h1><p>이 PC 의 fast-question 명령을 계정에 연결하려면 먼저 로그인하세요.</p>",
+        "none": "<p>켜진 로그인 공급자가 없습니다.</p>",
+        "agree": ('<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 '
+                  '<a href="/privacy">개인정보 처리방침</a>을 확인한 것으로 봅니다.</p>'),
+        "consent_title": "PC 연결 승인",
+        "consent_head": ("<h1>이 PC 를 연결할까요?</h1>"
+                         "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 내 질문·답변 저장소를 "
+                         "검색·등록·수정합니다. 토큰은 180일 뒤 끝나고, 연결 패널의 토큰 목록에서 언제든 폐기할 수 있습니다.</p>"),
+        "device": "PC 이름", "account": "계정",
+        "note": '<p class="note">PC 에서 직접 <code>fast-question login</code> 을 실행하지 않았다면 거부하세요.</p>',
+        "approve": "승인", "deny": "거부",
+    },
+    "en": {
+        "bad_title": "Bad request",
+        "bad_body": "<h1>Bad request</h1><p>Run <code>fast-question login</code> on your PC again.</p>",
+        "login_title": "Sign in", "login_with": "Sign in with {name}",
+        "login_body": "<h1>Sign in</h1><p>Sign in first to connect the fast-question command on this PC to your account.</p>",
+        "none": "<p>No sign-in provider is enabled.</p>",
+        "agree": ('<p class="agree">By signing in, you agree to the <a href="/terms">Terms</a> and acknowledge the '
+                  '<a href="/privacy">Privacy Policy</a>.</p>'),
+        "consent_title": "Approve PC connection",
+        "consent_head": ("<h1>Connect this PC?</h1>"
+                         "<p>If you approve, the fast-question command on this PC (the Claude Code plugin) searches, adds, "
+                         "and edits your Q&amp;A repository with a personal token. The token expires after 180 days, and you "
+                         "can revoke it at any time from the token list in the Connect panel.</p>"),
+        "device": "PC name", "account": "Account",
+        "note": ('<p class="note">If you did not run <code>fast-question login</code> on your PC yourself, '
+                 "deny this request.</p>"),
+        "approve": "Approve", "deny": "Deny",
+    },
+}
+
 PAGE = """<!doctype html>
-<html lang="ko">
+<html lang="{lang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -76,14 +134,14 @@ PAGE = """<!doctype html>
 PAGE_HEADERS = {"Cache-Control": "no-store", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin"}
 
 
-def page(title: str, body: str, status: int = 200) -> HTMLResponse:
+def page(title: str, body: str, status: int = 200, lang: str = "en") -> HTMLResponse:
     """body 는 이미 이스케이프한 HTML 이다."""
-    return HTMLResponse(PAGE.format(title=html.escape(title), body=body), status_code=status, headers=PAGE_HEADERS)
+    return HTMLResponse(PAGE.format(title=html.escape(title), body=body, lang=lang), status_code=status,
+                        headers=PAGE_HEADERS)
 
 
-def bad_request() -> HTMLResponse:
-    return page("잘못된 요청", "<h1>잘못된 요청입니다</h1>"
-                "<p>PC 에서 <code>fast-question login</code> 을 다시 실행하세요.</p>", 400)
+def bad_request(lang: str) -> HTMLResponse:
+    return page(TEXT[lang]["bad_title"], TEXT[lang]["bad_body"], 400, lang)
 
 
 def challenge_of(verifier: str) -> str:
@@ -109,31 +167,29 @@ def callback_url(params: dict, **query: str) -> str:
     return f"http://127.0.0.1:{params['port']}/callback?" + urlencode({**query, "state": params["state"]})
 
 
-def login_page(providers, params: dict, status: int = 200) -> HTMLResponse:
+def login_page(providers, params: dict, lang: str, status: int = 200) -> HTMLResponse:
+    tx = TEXT[lang]
     query = urlencode({"next": "/cli/authorize?" + urlencode(params)})
     links = "".join(f'<a class="btn" href="/auth/login/{html.escape(name)}?{html.escape(query)}">'
-                    f"{html.escape(PROVIDER_LABELS.get(name, name))} 로 로그인</a>" for name in sorted(providers))
-    body = ("<h1>로그인</h1><p>이 PC 의 fast-question 명령을 계정에 연결하려면 먼저 로그인하세요.</p>"
-            + (f'<div class="actions">{links}</div>' if links else "<p>켜진 로그인 공급자가 없습니다.</p>")
-            + '<p class="agree">로그인하면 <a href="/terms">이용약관</a>에 동의하고 '
-            '<a href="/privacy">개인정보 처리방침</a>을 확인한 것으로 봅니다.</p>')
-    return page("로그인", body, status)
+                    f"{html.escape(tx['login_with'].format(name=PROVIDER_LABELS.get(name, name)))}</a>"
+                    for name in sorted(providers))
+    body = (tx["login_body"] + (f'<div class="actions">{links}</div>' if links else tx["none"]) + tx["agree"])
+    return page(tx["login_title"], body, status, lang)
 
 
-def consent_page(params: dict, account: dict) -> HTMLResponse:
+def consent_page(params: dict, account: dict, lang: str) -> HTMLResponse:
+    tx = TEXT[lang]
     hidden = "".join(f'<input type="hidden" name="{k}" value="{html.escape(v)}">' for k, v in params.items())
     who = account.get("display_name") or ", ".join(PROVIDER_LABELS.get(p, p) for p in account.get("providers", []))
-    body = ("<h1>이 PC 를 연결할까요?</h1>"
-            "<p>승인하면 이 PC 의 fast-question 명령(Claude Code 플러그인)이 개인 토큰으로 내 질문·답변 저장소를 검색·등록·수정합니다. "
-            "토큰은 180일 뒤 끝나고, 연결 패널의 토큰 목록에서 언제든 폐기할 수 있습니다.</p>"
-            f"<dl><dt>PC 이름</dt><dd>{html.escape(params['device'])}</dd>"
-            f"<dt>계정</dt><dd>{html.escape(who)}</dd></dl>"
-            '<p class="note">PC 에서 직접 <code>fast-question login</code> 을 실행하지 않았다면 거부하세요.</p>'
-            f'<form method="post" action="/cli/authorize" class="actions">{hidden}'
-            '<button class="btn primary" type="submit" name="decision" value="approve">승인</button>'
-            '<button class="btn" type="submit" name="decision" value="deny">거부</button>'
+    body = (tx["consent_head"]
+            + f"<dl><dt>{tx['device']}</dt><dd>{html.escape(params['device'])}</dd>"
+            f"<dt>{tx['account']}</dt><dd>{html.escape(who)}</dd></dl>"
+            + tx["note"]
+            + f'<form method="post" action="/cli/authorize" class="actions">{hidden}'
+            f'<button class="btn primary" type="submit" name="decision" value="approve">{tx["approve"]}</button>'
+            f'<button class="btn" type="submit" name="decision" value="deny">{tx["deny"]}</button>'
             "</form>")
-    return page("PC 연결 승인", body)
+    return page(tx["consent_title"], body, lang=lang)
 
 
 def error(message: str, code: str, status: int = 400) -> JSONResponse:
@@ -155,18 +211,19 @@ def routes(providers, control_path) -> list[Route]:
         return {**control.get_account(conn, account_id), "providers": control.account_providers(conn, account_id)}
 
     async def authorize(request: Request) -> Response:
+        lang = pick_lang(request.headers.get("accept-language"))
         q = request.query_params if request.method == "GET" else await request.form()
         params = read_params(q)
         if params is None:
-            return bad_request()
+            return bad_request(lang)
         if request.scope.get(AUTH_KIND_KEY) != "session":
-            return login_page(providers, params, 200 if request.method == "GET" else 401)
+            return login_page(providers, params, lang, 200 if request.method == "GET" else 401)
         account_id = request.scope[ACCOUNT_KEY]
         if request.method == "GET":
-            return consent_page(params, await run_in_threadpool(db, account_view, account_id))
+            return consent_page(params, await run_in_threadpool(db, account_view, account_id), lang)
         decision = q.get("decision")
         if decision not in ("approve", "deny"):
-            return bad_request()
+            return bad_request(lang)
         if decision == "deny":
             target = callback_url(params, error="access_denied")
         else:
@@ -181,7 +238,7 @@ def routes(providers, control_path) -> list[Route]:
         except ValueError:
             body = None
         if not isinstance(body, dict):
-            return error("요청 본문이 JSON 객체가 아닙니다.", "invalid")
+            return error("The request body is not a JSON object.", "invalid")
         code, verifier, replaces = (str(body.get(k) or "") for k in ("code", "code_verifier", "replaces"))
 
         def work(conn):
@@ -199,11 +256,11 @@ def routes(providers, control_path) -> list[Route]:
         try:
             got = await run_in_threadpool(db, work)
         except control.TokenRefused:
-            return error(f"살아 있는 개인 토큰이 이미 {control.TOKEN_MAX}개입니다. 연결 패널에서 쓰지 않는 토큰을 "
-                         "폐기한 뒤 다시 로그인하세요.", "token_limit")
+            return error(f"There are already {control.TOKEN_MAX} active personal tokens. Revoke unused tokens in the "
+                         "Connect panel, then sign in again.", "token_limit")
         if got is None:
-            return error("승인 코드가 없거나 5분이 지났거나 이미 썼습니다. fast-question login 을 다시 실행하세요.",
-                         "invalid_grant")
+            return error("The approval code does not exist, is older than 5 minutes, or was already used. "
+                         "Run fast-question login again.", "invalid_grant")
         account_id, made, revoked, acc = got
         log.info("PC 로그인 토큰 발급: 계정 %s, 토큰 %s, 폐기한 옛 토큰 %s", account_id, made["id"], revoked)
         return JSONResponse({"token": made["token"], "name": made["name"], "expires_at": made["expires_at"],

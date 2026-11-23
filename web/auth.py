@@ -44,7 +44,8 @@ GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN = "https://github.com/login/oauth/access_token"
 GITHUB_USER = "https://api.github.com/user"
 CACHE_S = 24 * 3600
-log = logging.getLogger("fast-question.auth")
+LEAVE_WORDS = ("탈퇴", "delete")
+log =logging.getLogger("fast-question.auth")
 
 ClientFactory = Callable[[], httpx.AsyncClient]
 
@@ -95,7 +96,7 @@ class Google:
                 r.raise_for_status()
                 self._keys = {k["kid"]: k for k in r.json().get("keys", []) if "kid" in k}
         if kid not in self._keys:
-            raise AuthError(f"id_token 서명 키를 찾지 못했습니다: {kid}")
+            raise AuthError(f"id_token signing key not found: {kid}")
         return jwt.PyJWK(self._keys[kid]).key
 
     async def identity(self, code: str, verifier: str) -> tuple[str, str]:
@@ -104,7 +105,7 @@ class Google:
                 "code": code, "client_id": self.client_id, "client_secret": self.secret,
                 "redirect_uri": self.redirect_uri, "grant_type": "authorization_code", "code_verifier": verifier})
         if r.status_code != 200 or "id_token" not in r.json():
-            raise AuthError(f"Google 토큰 교환 실패: {r.status_code}")
+            raise AuthError(f"Google token exchange failed: {r.status_code}")
         id_token = r.json()["id_token"]
         try:
             kid = jwt.get_unverified_header(id_token).get("kid", "")
@@ -112,7 +113,7 @@ class Google:
                                 issuer=GOOGLE_ISSUERS, leeway=ID_TOKEN_LEEWAY_S,
                                 options={"require": ["exp", "iat", "iss", "aud", "sub"]})
         except jwt.PyJWTError as e:
-            raise AuthError(f"id_token 검증 실패: {type(e).__name__}: {e}") from e
+            raise AuthError(f"id_token verification failed: {type(e).__name__}: {e}") from e
         return str(claims["sub"]), ""
 
 
@@ -134,12 +135,12 @@ class GitHub:
                 "redirect_uri": self.redirect_uri, "code_verifier": verifier})
             token = r.json().get("access_token") if r.status_code == 200 else None
             if not token:
-                raise AuthError(f"GitHub 토큰 교환 실패: {r.status_code} {r.json().get('error', '')}")
+                raise AuthError(f"GitHub token exchange failed: {r.status_code} {r.json().get('error', '')}")
             u = await c.get(GITHUB_USER, headers={"Authorization": f"Bearer {token}",
                                                   "Accept": "application/vnd.github+json",
                                                   "User-Agent": "fast-question"})
         if u.status_code != 200 or not isinstance(u.json().get("id"), int):
-            raise AuthError(f"GitHub 사용자 조회 실패: {u.status_code}")
+            raise AuthError(f"GitHub user lookup failed: {u.status_code}")
         return str(u.json()["id"]), str(u.json().get("login") or "")
 
 
@@ -228,14 +229,14 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def login(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "This login provider is not enabled.", "code": "not_found"}, status_code=404)
         return await start(p, safe_next(request.query_params.get("next")))
 
     async def link(request: Request) -> Response:
         """로그인 수단 추가(연결 패널의 폼 POST). 공급자 로그인이 끝나면 callback 이 이 계정에 신원을 붙인다."""
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "This login provider is not enabled.", "code": "not_found"}, status_code=404)
         if request.scope.get(AUTH_KIND_KEY) != "session":
             return RedirectResponse("/?link_error=session", status_code=303)
         return await start(p, "/", request.scope[ACCOUNT_KEY], 303)
@@ -243,7 +244,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def callback(request: Request) -> Response:
         p = providers.get(request.path_params["provider"])
         if p is None:
-            return JSONResponse({"error": "켜지지 않은 로그인 공급자입니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "This login provider is not enabled.", "code": "not_found"}, status_code=404)
         q = request.query_params
         if q.get("error"):
             return failed("denied")
@@ -316,7 +317,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
     async def me(request: Request) -> Response:
         account_id = request.scope.get(ACCOUNT_KEY)
         if account_id is None:
-            return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized", "mode": "remote",
+            return JSONResponse({"error": "Login is required.", "code": "unauthorized", "mode": "remote",
                                  "providers": sorted(providers)}, status_code=401)
 
         def read(conn):
@@ -328,7 +329,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
 
     def need_session(request: Request) -> Response | None:
         if request.scope.get(AUTH_KIND_KEY) != "session":
-            return JSONResponse({"error": "브라우저에서 로그인해 주세요.", "code": "unauthorized"}, status_code=401)
+            return JSONResponse({"error": "Log in from the browser.", "code": "unauthorized"}, status_code=401)
         return None
 
     async def tokens(request: Request) -> Response:
@@ -340,7 +341,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
         try:
             name = (await request.json()).get("name", "")
         except ValueError:
-            return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
+            return JSONResponse({"error": "The request body is not JSON.", "code": "invalid"}, status_code=400)
         try:
             made = await run_in_threadpool(db, control.create_personal_token, account_id, str(name))
         except control.TokenRefused as e:
@@ -353,7 +354,7 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return denied
         if not await run_in_threadpool(db, control.revoke_personal_token, request.scope[ACCOUNT_KEY],
                                        request.path_params["id"]):
-            return JSONResponse({"error": "토큰을 찾지 못했습니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "Token not found.", "code": "not_found"}, status_code=404)
         return JSONResponse({"ok": True})
 
     async def apps(request: Request) -> Response:
@@ -367,20 +368,21 @@ def routes(cfg: Config, providers: dict, control_path) -> list[Route]:
             return denied
         account_id, client_id = request.scope[ACCOUNT_KEY], request.path_params["client_id"]
         if not await run_in_threadpool(db, oauth_store.disconnect, account_id, client_id):
-            return JSONResponse({"error": "연결을 찾지 못했습니다.", "code": "not_found"}, status_code=404)
+            return JSONResponse({"error": "Connection not found.", "code": "not_found"}, status_code=404)
         log.info("연결 끊기: 계정 %s", account_id)
         return JSONResponse({"ok": True})
 
     async def delete_account(request: Request) -> Response:
-        """탈퇴. 확인 문구("탈퇴")를 받아야 한다. 사용자 폴더는 data_dir/deleted/ 로 옮긴다(30일 뒤 지우는 것은 주기 작업)."""
+        """탈퇴. 확인 문구(LEAVE_WORDS 중 하나. 화면 언어마다 입력 안내가 다르다)를 받아야 한다. 사용자 폴더는 data_dir/deleted/ 로 옮긴다(30일 뒤 지우는 것은 주기 작업)."""
         if (denied := need_session(request)) is not None:
             return denied
         try:
             confirm = (await request.json()).get("confirm")
         except ValueError:
             confirm = None
-        if confirm != "탈퇴":
-            return JSONResponse({"error": "확인 문구로 '탈퇴' 를 입력해 주세요.", "code": "invalid"}, status_code=400)
+        if confirm not in LEAVE_WORDS:
+            return JSONResponse({"error": "Enter 'delete' or '탈퇴' as the confirmation phrase.", "code": "invalid"},
+                                status_code=400)
         account_id = request.scope[ACCOUNT_KEY]
 
         def work() -> None:

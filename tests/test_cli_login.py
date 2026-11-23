@@ -51,14 +51,37 @@ def test_without_session_shows_login_that_returns_here(app):
     p = params()
     with client(app) as c:
         r = c.get("/cli/authorize", params=p)
-        assert r.status_code == 200 and "로그인" in r.text
+        assert r.status_code == 200 and "Sign in with Google" in r.text
         nxt = "/cli/authorize?" + urlencode(p)
         assert f"/auth/login/google?{urlencode({'next': nxt})}".replace("&", "&amp;") in r.text
         login(c, next_=nxt)
         page = c.get("/cli/authorize", params={**p, "device": "<b>PC</b>"})
-    assert page.status_code == 200 and "이 PC 를 연결할까요?" in page.text
+    assert page.status_code == 200 and "Connect this PC?" in page.text
     assert "&lt;b&gt;PC&lt;/b&gt;" in page.text and "<b>PC</b>" not in page.text
     assert page.headers["x-frame-options"] == "DENY" and "default-src 'self'" in page.headers["content-security-policy"]
+
+
+def test_pages_follow_accept_language(app):
+    """승인·로그인·잘못된 요청 화면은 Accept-Language 로 ko·en 중 하나를 고른다. 없으면 영어다."""
+    ko = {"Accept-Language": "ko-KR,ko;q=0.9"}
+    with client(app) as c:
+        page = c.get("/cli/authorize", params=params(), headers=ko).text
+        assert '<html lang="ko">' in page and "Google 로 로그인" in page
+        assert "잘못된 요청입니다" in c.get("/cli/authorize", params={"port": "x"}, headers=ko).text
+        assert "Bad request" in c.get("/cli/authorize", params={"port": "x"}).text
+        login(c)
+        page = c.get("/cli/authorize", params=params(), headers=ko).text
+        assert "이 PC 를 연결할까요?" in page and ">승인</button>" in page
+        page = c.get("/cli/authorize", params=params(), headers={"Accept-Language": "en-US,ko;q=0.5"}).text
+        assert '<html lang="en">' in page and ">Approve</button>" in page
+
+
+@pytest.mark.parametrize("header, lang", [(None, "en"), ("", "en"), ("fr", "en"), ("ko", "ko"), ("KO-kr", "ko"),
+                                          ("en-US,ko;q=0.9", "en"), ("ko;q=0.4,en;q=0.6", "en"),
+                                          ("fr;q=1,ko;q=0.2", "ko"), ("ko;q=0,en;q=0", "en"), ("ko;q=x", "en")])
+def test_pick_lang_rule_is_shared_by_server_and_pc(header, lang):
+    from web.cli_login import pick_lang
+    assert pick_lang(header) == lang and cli.pick_lang(header) == lang
 
 
 @pytest.mark.parametrize("bad", [{"port": "80"}, {"port": "x"}, {"state": "짧"}, {"code_challenge": "abc"}])
@@ -107,7 +130,7 @@ def test_approve_needs_session_and_same_origin(app):
     p = params()
     with client(app) as c:
         r = c.post("/cli/authorize", data={**p, "decision": "approve"}, headers={"Origin": URL}, follow_redirects=False)
-        assert r.status_code == 401 and "로그인" in r.text
+        assert r.status_code == 401 and "Sign in" in r.text
         login(c)
         r = c.post("/cli/authorize", data={**p, "decision": "approve"}, headers={"Origin": "https://evil.example"},
                    follow_redirects=False)
@@ -150,7 +173,7 @@ def test_token_limit_is_reported(cfg, app):
         verifier, challenge = cli.pkce()
         q = approve(c, params(challenge=challenge))
     r = exchange(app, q["code"], verifier)
-    assert r.status_code == 400 and r.json()["code"] == "token_limit" and "폐기" in r.json()["error"]
+    assert r.status_code == 400 and r.json()["code"] == "token_limit" and "Revoke" in r.json()["error"]
 
 
 def test_page_css_uses_only_token_variables(app):
@@ -211,12 +234,28 @@ def test_login_command_reports_deny_and_timeout(app, tmp_path):
     with client(app) as c:
         login(c)
         deny = browser_for(c)
-        with pytest.raises(cli.LoginError, match="거부"):
+        with pytest.raises(cli.LoginError, match="denied"):
             cli.login(URL, path=cred, open_browser=lambda t: deny(t, "deny"), opener=opener_for(app), wait_s=10,
                       say=lambda s: None)
-    with pytest.raises(cli.LoginError, match="승인하지 않아"):
+    with pytest.raises(cli.LoginError, match="No approval"):
         cli.login(URL, path=cred, open_browser=lambda t: None, wait_s=0.5, say=lambda s: None)
     assert not cred.exists()
+
+
+@pytest.mark.parametrize("header, text", [(None, "Sign-in complete"), ("ko-KR,ko;q=0.9", "로그인을 마쳤습니다")])
+def test_done_page_follows_accept_language(header, text):
+    from urllib.request import Request
+    server = cli.CallbackServer("s" * 20)
+    waiter = threading.Thread(target=server.wait, args=(5,), daemon=True)
+    waiter.start()
+    try:
+        req = Request(f"http://127.0.0.1:{server.port}/callback?code=c&state={'s' * 20}",
+                      headers={"Accept-Language": header} if header else {})
+        body = urlopen(req, timeout=5).read().decode("utf-8")
+        waiter.join(5)
+    finally:
+        server.server_close()
+    assert text in body and f'lang="{"ko" if header else "en"}"' in body
 
 
 def test_login_url_defaults(tmp_path):

@@ -46,8 +46,9 @@ def app(cfg, analyzer):
     return create_app(cfg, run_jobs=False, analyzer=analyzer)
 
 
-def client_for(app, account_id, base_url=URL):
-    return TestClient(AsAccount(app, account_id), base_url=base_url)
+def client_for(app, account_id, base_url=URL, lang="ko"):
+    """lang: 화면이 보내는 X-FQ-Lang(새 계정 DB 의 기본 가이드 언어). None 이면 보내지 않는다."""
+    return TestClient(AsAccount(app, account_id), base_url=base_url, headers={"X-FQ-Lang": lang} if lang else None)
 
 
 def add_basics(c):
@@ -71,7 +72,7 @@ def test_unauthenticated_api_is_401(cfg, app):
             assert r.status_code == 401 and r.json()["code"] == "unauthorized", path
         assert c.post("/api/categories", json={"name": "이관"}).status_code == 401
         assert c.get("/").status_code == 200  # 화면은 로그인 전에도 뜬다
-        for path in ("/terms", "/privacy", "/favicon.ico"):  # 로그인 화면이 링크하는 약관과 아이콘도 로그인 전에 열린다
+        for path in ("/terms", "/privacy", "/terms/en", "/privacy/en", "/favicon.ico"):  # 로그인 화면이 링크하는 약관과 아이콘도 로그인 전에 열린다
             assert c.get(path).status_code == 200, path
     assert not (cfg.data_dir / "users").exists()
 

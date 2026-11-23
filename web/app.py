@@ -8,7 +8,7 @@ run_jobs 면 기동 직후와 10분마다 주기 작업을 스레드에서 돌�
 재색인, 정리 탐지), 원격 모드는 kb.jobs.run_due_all(사용자 DB 마다 백업·기본 가이드 갱신·재색인·정리 탐지, 제어 DB 백업)이다.
 
 원격 모드(cfg.mode == "remote")는 요청의 계정이 DB 파일(kb/tenant.py)을 정한다. 웹 요청이 사용자 DB 를 처음
-만들 때 원격용 기본 가이드(kb/guide.py load_remote)를 넣는다(가져오기가 DB 를 통째로 바꾸면 다시 넣고, 서버의 가이드가 바뀌면 주기 작업이 다시 넣는다). 계정은 인증 계층(web/auth.py
+만들 때 요청한 화면 언어(screen_lang)의 원격용 기본 가이드(kb/guide.py seed_new)를 넣는다(가져오기가 DB 를 통째로 바꾸면 다시 넣고, 서버의 가이드가 바뀌면 주기 작업이 다시 넣는다). 계정은 인증 계층(web/auth.py
 AccountAuth)이 ASGI scope 의 ACCOUNT_KEY 에 넣은 값만 쓰고, 없으면 /api/* 는 401 이다. 로그인 경로 /auth/* 와
 /api/me 는 web/auth.py 에, PC 로그인 승인 /cli/authorize 와 토큰 교환 POST /api/cli/token(계정 대신 1회용 코드로
 받는다)은 web/cli_login.py 에, 로컬 DB 가져오기 POST /api/import/db 와 미리보기 /api/import/db/plan 은 web/importer.py 에, 웹 Claude 패널
@@ -58,6 +58,7 @@ STATIC = Path(__file__).resolve().parent / "static"
 # 캐시에서 꺼내 새 index.html 과 섞어 쓴다
 NO_CACHE = {"Cache-Control": "no-cache"}
 JOB_INTERVAL_S = 600
+NO_SCREEN_LANG = guide.DEFAULT_LANG  # 화면 요청 없이 만든 사용자 DB 의 가이드 언어. Accept-Language 가 없을 때 pick_lang 과 같다
 # /healthz 기준. 외부 상태 검사가 503 을 알람으로 받는다(Lightsail 지표에는 메모리·디스크 사용률이 없다)
 HEALTH_DISK_MIN = 0.20  # 디스크 80% 사용
 HEALTH_MEM_MIN = 0.15  # 메모리 85% 사용. Kiwi 를 띄운 앱이 약 550 MiB 라 2 GB 서버에서 여유가 크지 않다
@@ -104,7 +105,7 @@ class SameOriginOnly:
     def __init__(self, app, hosts: set[str]):
         self.app = app
         self.hosts = hosts
-        self.message = f"이 서버는 {'·'.join(sorted(h.split(':')[0] for h in hosts))} 의 같은 출처 요청만 받습니다."
+        self.message = f"This server only accepts same-origin requests for {', '.join(sorted(h.split(':')[0] for h in hosts))}."
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http" and scope["path"] != HEALTH_PATH:
@@ -112,7 +113,7 @@ class SameOriginOnly:
             host = headers.get(b"host", "")
             origin = headers.get(b"origin")
             if host not in self.hosts or (origin is not None and origin.split("://", 1)[-1] not in self.hosts):
-                resp = JSONResponse({"error": self.message}, status_code=403)
+                resp = JSONResponse({"error": self.message, "code": "forbidden_origin"}, status_code=403)
                 await resp(scope, receive, send)
                 return
         await self.app(scope, receive, send)
@@ -175,22 +176,28 @@ def error_response(e: Exception) -> JSONResponse | None:
     if isinstance(e, KbError):
         return JSONResponse({"error": e.message, "code": e.code}, status_code=400)
     if isinstance(e, sqlite3.OperationalError):  # busy_timeout(5초) 안에 쓰기 잠금을 얻지 못했다
-        return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
+        return JSONResponse({"error": f"The store is locked by another write. Try again shortly. ({e})",
                              "code": "busy"}, status_code=503)
     return None
+
+
+def screen_lang(request: Request) -> str:
+    """요청한 화면의 언어. 화면(app.js)이 보내는 X-FQ-Lang, 없으면 Accept-Language(web/cli_login.py pick_lang)."""
+    lang = request.headers.get("x-fq-lang")
+    return lang if lang in guide.LANGS else cli_login.pick_lang(request.headers.get("accept-language"))
 
 
 class StoreCalls:
     """요청의 KB 를 열어 처리 함수를 스레드 풀에서 돌린다. 연결 열기·닫기와 오류 → 응답 변환이 이 한 곳에 있다."""
     Reply = Reply
 
-    def __init__(self, db_for: Callable[[Request], Path | None], open_kb: Callable[[Path], sqlite3.Connection],
+    def __init__(self, db_for: Callable[[Request], Path | None], open_kb: Callable[[Path, str], sqlite3.Connection],
                  analyzer, remote: bool):
         self.db_for, self.open_kb, self.analyzer, self.remote = db_for, open_kb, analyzer, remote
 
     @staticmethod
     def unauthorized() -> JSONResponse:
-        return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
+        return JSONResponse({"error": "Login is required.", "code": "unauthorized"}, status_code=401)
 
     async def run(self, request: Request, fn: Callable[[Store], object], bad_request: tuple = ()):
         """fn(Store) 의 결과. 로그인이 없거나 error_response 가 아는 오류면 Reply 를 던진다.
@@ -199,8 +206,10 @@ class StoreCalls:
         if db is None:
             raise Reply(self.unauthorized())
 
+        lang = screen_lang(request)
+
         def work():
-            conn = self.open_kb(db)
+            conn = self.open_kb(db, lang)
             try:
                 return fn(Store(conn, "user", self.analyzer, remote=self.remote))
             finally:
@@ -211,7 +220,7 @@ class StoreCalls:
         except Exception as e:  # noqa: BLE001 - 아는 오류만 응답으로 바꾸고 나머지는 다시 던진다
             resp = error_response(e)
             if resp is None and isinstance(e, bad_request):
-                resp = JSONResponse({"error": f"요청 값이 올바르지 않습니다: {e}"}, status_code=400)
+                resp = JSONResponse({"error": f"Invalid request value: {e}", "code": "invalid"}, status_code=400)
             if resp is None:
                 raise
             raise Reply(resp) from e
@@ -261,8 +270,9 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         with db_locks_guard:
             return db_locks.setdefault(db.resolve(), threading.Lock())
 
-    def open_kb(db: Path) -> sqlite3.Connection:
-        """요청의 KB 연결. 원격 모드에서 파일이 없으면 만들면서 기본 가이드를 넣는다(스레드 풀에서 부른다)."""
+    def open_kb(db: Path, lang: str = NO_SCREEN_LANG) -> sqlite3.Connection:
+        """요청의 KB 연결. 원격 모드에서 파일이 없으면 만들면서 lang 판의 기본 가이드를 넣는다(스레드 풀에서 부른다).
+        MCP 로 처음 연결한 계정처럼 화면 요청이 없으면 NO_SCREEN_LANG 이다."""
         if not remote or db.exists():
             return connect(db)
         with db_lock(db):
@@ -270,8 +280,8 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
             conn = connect(db)
             if fresh:
                 try:
-                    log.info("기본 가이드(%s): %s", db.parent.name,
-                             guide.seed(Store(conn, "system"), guide.load_remote(cfg.public_url)))
+                    log.info("기본 가이드(%s, %s): %s", db.parent.name, lang,
+                             guide.seed_new(Store(conn, "system"), cfg.public_url, lang))
                 except Exception:  # noqa: BLE001 - 가이드를 못 넣어도 요청은 처리한다
                     log.exception("기본 가이드를 넣지 못했다: %s", db)
             return conn
@@ -313,7 +323,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
                     try:
                         body = json.loads(raw)
                     except ValueError:
-                        return JSONResponse({"error": "요청 본문이 JSON 이 아니다."}, status_code=400)
+                        return JSONResponse({"error": "The request body is not JSON.", "code": "invalid"}, status_code=400)
             try:
                 return JSONResponse(await calls.run(request, lambda s: fn(s, request, body),
                                                     bad_request=(KeyError, TypeError, ValueError)))
@@ -359,7 +369,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         def go(s: Store, r: Request, b: dict):
             pub = open_public()
             if pub is None:
-                raise NotFoundError("공개 지식이 없습니다.")
+                raise NotFoundError("There is no public knowledge.")
             try:
                 return fn(s, pub, r, b)
             finally:
@@ -404,9 +414,12 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
 
     routes = [
         Route("/", lambda r: FileResponse(STATIC / "index.html", headers=NO_CACHE)),
-        # 약관·처리방침은 로그인 없이 연다(로그인 화면과 OAuth 로그인 카드가 링크한다)
+        # 약관·처리방침은 로그인 없이 연다(로그인 화면과 OAuth 로그인 카드가 링크한다). /en 은 영어판이고,
+        # 화면 언어(fq.lang)와 판이 다르면 theme.js 가 <link rel="alternate"> 의 판으로 옮긴다
         Route("/terms", lambda r: FileResponse(STATIC / "terms.html", headers=NO_CACHE)),
         Route("/privacy", lambda r: FileResponse(STATIC / "privacy.html", headers=NO_CACHE)),
+        Route("/terms/en", lambda r: FileResponse(STATIC / "terms.en.html", headers=NO_CACHE)),
+        Route("/privacy/en", lambda r: FileResponse(STATIC / "privacy.en.html", headers=NO_CACHE)),
         # 검색 엔진·일부 브라우저는 <link rel="icon"> 대신 이 주소를 먼저 찾는다
         Route("/favicon.ico", lambda r: FileResponse(STATIC / "favicon.ico", media_type="image/x-icon")),
         Route(HEALTH_PATH, healthz),
@@ -447,7 +460,7 @@ def create_app(cfg: Config | None = None, *, db_path: Path | None = None, run_jo
         routes[1:1] = cli_login.routes(auth.providers_from(cfg), control_file)  # /cli/authorize, /api/cli/token
         routes[1:1] = share.routes(control_file, cfg.data_dir, open_kb, cfg.public_url)  # /s/<토큰>, /api/share, /api/account/shares
         routes[1:1] = importer.routes(db_for, cfg.data_dir / "tmp", analyzer, db_lock,
-                                       lambda: guide.load_remote(cfg.public_url), importing)
+                                       lambda lang: guide.load_remote(cfg.public_url, lang=lang), importing)
         from web import claude_chat  # anthropic 은 서버 의존성(requirements-server.txt)이라 원격 모드에서만 읽는다
         routes[1:1] = claude_chat.routes(
             control_file, cfg.data_dir,

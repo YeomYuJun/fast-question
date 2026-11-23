@@ -14,6 +14,10 @@
 <header class="top">
   <a class="brand" href="/"><svg width="24" height="24" viewBox="0 0 64 64" aria-hidden="true"><path d="M23 45V20A16 16 0 0 1 39 4H47V13H39A7 7 0 0 0 32 20V45Z" fill="var(--ink)"></path><path d="M16 22H39V30H16Z" fill="var(--ink)"></path><path d="M23 50.5H32A9 9 0 0 1 23 59.5Z" fill="var(--accent)"></path></svg><span>fast question</span></a>
   <div class="grow"></div>
+  <div class="langs" role="group" aria-label="Language">
+    <button class="lang" type="button" data-lang="ko" lang="ko">한국어</button>
+    <button class="lang" type="button" data-lang="en" lang="en">English</button>
+  </div>
   <button id="theme-btn" class="iconbtn" type="button" aria-label="테마 바꾸기">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"></path></svg>
   </button>
@@ -32,8 +36,8 @@
 
 <footer class="doc-foot">
   <span>fast question</span>
-  <a href="/terms">이용약관</a>
-  <a href="/privacy">개인정보 처리방침</a>
+  <a id="share-terms" href="/terms">이용약관</a>
+  <a id="share-privacy" href="/privacy">개인정보 처리방침</a>
 </footer>
 <script src="/static/doc.js"></script>
 <script src="/static/share.js"></script>

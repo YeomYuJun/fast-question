@@ -1,6 +1,6 @@
 "use strict";
 // 웹 Claude 패널(원격 모드). 서버(web/claude_chat.py)가 사용자 API 키로 대화 반복을 돌리고 진행을 SSE 로 보낸다.
-// app.js 의 $, el, fill, icon, ICONS, api, toast, store, state, refreshCats, runSearch 를 쓴다(app.js 뒤에 읽힌다).
+// app.js 의 $, el, fill, icon, ICONS, api, toast, store, state, refreshCats, runSearch, STR, t, errorText 를 쓴다(app.js 뒤에 읽힌다).
 // 대화 기록(API 형식 메시지)은 sessionStorage 에만 두고 매번 서버에 보낸다. 생각, 대체 모델 블록은 받은 그대로 돌려보낸다.
 // Claude 의 글은 mdRender() 로만 그린다(HTML 로 해석하지 않는다). 도구 결과는 MCP 도구가 돌려준 JSON 문자열이다.
 // 패널은 머리, 대화, 입력 세 띠다. 대화 띠만 스크롤하고, 패널이 열린 동안 페이지 대신 목록 칸(#app)이 스크롤한다(app.css).
@@ -11,9 +11,75 @@ const CL_OWNER = "fq-claude-owner"; // 대화 기록을 만든 계정 id
 const CL_MODELS = { "claude-opus-5-5": "Opus 5.5", "claude-sonnet-5-5": "Sonnet 5.5", "claude-haiku-5-5": "Haiku 5.5" };
 const CL_WRITES = new Set(["kb_add", "kb_update", "kb_archive", "kb_restore", "kb_link", "kb_add_category",
   "kb_rename_category"]);
-const CL_SUGS = ["최근 1주일 동안 등록한 질문을 정리해 줘", "비슷한 질문끼리 합칠 것을 찾아 줘", "열어 둔 항목의 답을 더 짧게 고쳐 줘"];
-// 목록에서 열어 둔 항목을 함께 보낼 때 사용자 말 앞에 붙이는 한 줄. 말풍선에는 보이지 않는다
-const CL_CTX = /^\[열어 둔 항목 #\d+\]\n/;
+Object.assign(STR.ko, {
+  cl_sugs: ["최근 1주일 동안 등록한 질문을 정리해 줘", "비슷한 질문끼리 합칠 것을 찾아 줘", "열어 둔 항목의 답을 더 짧게 고쳐 줘"],
+  cl_ctx: (id) => `[열어 둔 항목 #${id}]\n`,
+  cl_tools: {
+    kb_search: ["저장소 검색", "저장소 검색 중"], kb_get: ["항목 읽기", "항목 읽는 중"], kb_categories: ["분류 보기", "분류 읽는 중"],
+    kb_add: ["새 Q&A 등록", "새 Q&A 등록 중"], kb_update: ["Q&A 수정", "Q&A 수정 중"], kb_archive: ["Q&A 삭제", "Q&A 삭제 중"],
+    kb_restore: ["Q&A 복원", "Q&A 복원 중"], kb_link: ["관련 질문 연결", "관련 질문 잇는 중"],
+    kb_add_category: ["분류 추가", "분류 추가 중"], kb_rename_category: ["분류 이름 변경", "분류 이름 바꾸는 중"],
+    kb_cleanup_list: ["정리 대상 보기", "정리 대상 찾는 중"], kb_cleanup_resolve: ["정리 완료", "정리 완료 처리 중"],
+  },
+  cl_tool_busy: (name) => `${name} 실행 중`, cl_cat_arg: (c) => `분류: ${c}`, cl_busy: "진행 중",
+  cl_hits: (n) => `· ${n}건`, cl_similar: (n) => `· 비슷한 질문 ${n}건`, cl_tops: (n) => `· 대분류 ${n}개`,
+  cl_open_list: "목록에서 열기", cl_raw: "원본 보기", cl_think: "생각", cl_think_secs: (s) => `생각 · ${s}초`, cl_thinking: "생각 중",
+  cl_fallback: (m) => `${m} 가 이어서 답했습니다.`, cl_other_model: "다른 모델",
+  cl_empty_h: "무엇을 도와드릴까요?", cl_empty_p: "저장소를 찾아보고 정리합니다. 등록하거나 고친 내용은 목록에 바로 보입니다.",
+  cl_key_label: "Anthropic API 키", cl_key_add: "등록", cl_key_h: "Claude 를 이 저장소에 연결",
+  cl_key_desc: "Claude Console 에서 만든 API 키를 등록하면 이 패널에서 Claude 가 저장소를 찾아보고 정리합니다.",
+  cl_key_stale: "저장된 키를 더 쓸 수 없습니다. 다시 등록해 주세요.", cl_key_note1: "키는 서버에 암호화해 보관합니다.",
+  cl_key_note2: "대화와 저장소 검색 결과가 이 키로 Anthropic 에 전달되고, 요금은 키의 계정에 청구됩니다.",
+  cl_key_make: "API 키 만들기 ↗", cl_waiting: "응답을 기다리는 중입니다.",
+  cl_too_long: "대화가 길어 더 보낼 수 없습니다. 새 대화를 시작해 주세요.",
+  cl_cut: "응답이 도중에 끊겼습니다. 다시 보내 주세요.", cl_done: "답이 왔습니다.",
+  cl_stopped: "멈췄습니다. 이미 실행한 변경은 그대로 남습니다.", cl_stop: "멈춤", cl_send: "보내기", cl_send_key: "보내기 (Enter)",
+  cl_ctx_title: "목록에서 열어 둔 항목을 함께 보냅니다", cl_ctx_on: " 함께 보냄", cl_ctx_off: "함께 보내지 않기",
+  cl_hint: "Enter 보내기 · Shift+Enter 줄바꿈", cl_input: "Claude 에게 보낼 말", cl_input_ph: "무엇을 할까요?",
+  cl_key_delete_confirm: "등록한 Anthropic API 키를 지웁니다. 이 패널을 다시 쓰려면 키를 새로 등록해야 합니다.\n지우시겠습니까?",
+  cl_key_menu: "키 관리", cl_key_saved: "등록한 키", cl_key_change: "키 바꾸기", cl_key_delete: "키 삭제", cl_model: "모델",
+  cl_model_of: (n) => `모델: ${n}`, cl_model_change: "모델 바꾸기", cl_new: "새 대화", cl_close: "Claude 패널 닫기",
+  cl_latest: "최신 메시지로",
+});
+Object.assign(STR.en, {
+  cl_sugs: ["Summarize the questions added in the last week", "Find similar questions that could be merged",
+    "Make the answer of the open item shorter"],
+  cl_ctx: (id) => `[Open item #${id}]\n`,
+  cl_tools: {
+    kb_search: ["Search repository", "Searching repository"], kb_get: ["Read item", "Reading item"],
+    kb_categories: ["View categories", "Reading categories"], kb_add: ["Add Q&A", "Adding Q&A"],
+    kb_update: ["Edit Q&A", "Editing Q&A"], kb_archive: ["Delete Q&A", "Deleting Q&A"], kb_restore: ["Restore Q&A", "Restoring Q&A"],
+    kb_link: ["Link related questions", "Linking related questions"], kb_add_category: ["Add category", "Adding category"],
+    kb_rename_category: ["Rename category", "Renaming category"], kb_cleanup_list: ["View cleanup items", "Finding cleanup items"],
+    kb_cleanup_resolve: ["Resolve cleanup item", "Resolving cleanup item"],
+  },
+  cl_tool_busy: (name) => `Running ${name}`, cl_cat_arg: (c) => `Category: ${c}`, cl_busy: "In progress",
+  cl_hits: (n) => (n === 1 ? "· 1 hit" : `· ${n} hits`), cl_similar: (n) => `· ${n} similar`,
+  cl_tops: (n) => (n === 1 ? "· 1 top category" : `· ${n} top categories`),
+  cl_open_list: "Open in list", cl_raw: "Show raw", cl_think: "Thinking", cl_think_secs: (s) => `Thinking · ${s}s`,
+  cl_thinking: "Thinking...",
+  cl_fallback: (m) => `${m} continued the answer.`, cl_other_model: "Another model",
+  cl_empty_h: "What can I help with?",
+  cl_empty_p: "Claude searches and tidies your repository. Anything it adds or edits shows up in the list right away.",
+  cl_key_label: "Anthropic API key", cl_key_add: "Add", cl_key_h: "Connect Claude to this repository",
+  cl_key_desc: "Add an API key created in the Claude Console, and Claude searches and tidies your repository from this panel.",
+  cl_key_stale: "The saved key can no longer be used. Please add a key again.", cl_key_note1: "The key is stored encrypted on the server.",
+  cl_key_note2: "Conversations and repository search results are sent to Anthropic with this key, and usage is billed to the key's account.",
+  cl_key_make: "Create an API key ↗", cl_waiting: "Waiting for a response.",
+  cl_too_long: "The conversation is too long to continue. Please start a new conversation.",
+  cl_cut: "The response was cut off. Please send it again.", cl_done: "The answer arrived.",
+  cl_stopped: "Stopped. Changes already made stay in place.", cl_stop: "Stop", cl_send: "Send", cl_send_key: "Send (Enter)",
+  cl_ctx_title: "Sends the item open in the list along with your message", cl_ctx_on: " attached", cl_ctx_off: "Don't attach",
+  cl_hint: "Enter to send · Shift+Enter for a new line", cl_input: "Message to Claude", cl_input_ph: "What should I do?",
+  cl_key_delete_confirm: "Delete the saved Anthropic API key? You will need to add a key again to use this panel.",
+  cl_key_menu: "Key settings", cl_key_saved: "Saved key", cl_key_change: "Change key", cl_key_delete: "Delete key", cl_model: "Model",
+  cl_model_of: (n) => `Model: ${n}`, cl_model_change: "Change model", cl_new: "New conversation", cl_close: "Close Claude panel",
+  cl_latest: "Jump to latest",
+});
+const CL_SUGS = t("cl_sugs");
+// 목록에서 열어 둔 항목을 함께 보낼 때 사용자 말 앞에 붙이는 한 줄. 말풍선에는 보이지 않는다.
+// 언어를 바꾸기 전에 보낸 말도 sessionStorage 의 기록에 남아 있어 두 언어의 형태를 모두 지운다
+const CL_CTX = /^\[(?:열어 둔 항목|Open item) #\d+\]\n/;
 const cl = { key: null, history: [], think: {}, running: false, abort: null, menu: null, ctxOff: null, draft: "" };
 
 Object.assign(ICONS, {
@@ -35,21 +101,21 @@ Object.assign(ICONS, {
 // 인자는 모델이 만든 값이라 모양을 믿지 않는다(clArg 가 글자만 받는다)
 const clRef = (v) => (Number.isInteger(v) ? `#${v}` : "");
 const CL_TOOLS = {
-  kb_search: { label: "저장소 검색", busy: "저장소 검색 중", icon: "search",
-    arg: (i) => i.query || (Array.isArray(i.queries) ? i.queries.join(", ") : "") || (i.category ? `분류: ${i.category}` : "") },
-  kb_get: { label: "항목 읽기", busy: "항목 읽는 중", icon: "doc", arg: (i) => clRef(i.id) },
-  kb_categories: { label: "분류 보기", busy: "분류 읽는 중", icon: "folder" },
-  kb_add: { label: "새 Q&A 등록", busy: "새 Q&A 등록 중", icon: "plus", arg: (i) => i.category },
-  kb_update: { label: "Q&A 수정", busy: "Q&A 수정 중", icon: "pen", arg: (i) => clRef(i.id) },
-  kb_archive: { label: "Q&A 삭제", busy: "Q&A 삭제 중", icon: "trash", arg: (i) => clRef(i.id) },
-  kb_restore: { label: "Q&A 복원", busy: "Q&A 복원 중", icon: "undo", arg: (i) => clRef(i.id) },
-  kb_link: { label: "관련 질문 연결", busy: "관련 질문 잇는 중", icon: "link",
-    arg: (i) => [clRef(i.a), clRef(i.b)].filter(Boolean).join(" · ") },
-  kb_add_category: { label: "분류 추가", busy: "분류 추가 중", icon: "folder", arg: (i) => (i.parent ? `${i.parent} > ${i.name}` : i.name) },
-  kb_rename_category: { label: "분류 이름 변경", busy: "분류 이름 바꾸는 중", icon: "pen", arg: (i) => i.category },
-  kb_cleanup_list: { label: "정리 대상 보기", busy: "정리 대상 찾는 중", icon: "list" },
-  kb_cleanup_resolve: { label: "정리 완료", busy: "정리 완료 처리 중", icon: "check", arg: (i) => clRef(i.finding_id) },
+  kb_search: { icon: "search",
+    arg: (i) => i.query || (Array.isArray(i.queries) ? i.queries.join(", ") : "") || (i.category ? t("cl_cat_arg", i.category) : "") },
+  kb_get: { icon: "doc", arg: (i) => clRef(i.id) },
+  kb_categories: { icon: "folder" },
+  kb_add: { icon: "plus", arg: (i) => i.category },
+  kb_update: { icon: "pen", arg: (i) => clRef(i.id) },
+  kb_archive: { icon: "trash", arg: (i) => clRef(i.id) },
+  kb_restore: { icon: "undo", arg: (i) => clRef(i.id) },
+  kb_link: { icon: "link", arg: (i) => [clRef(i.a), clRef(i.b)].filter(Boolean).join(" · ") },
+  kb_add_category: { icon: "folder", arg: (i) => (i.parent ? `${i.parent} > ${i.name}` : i.name) },
+  kb_rename_category: { icon: "pen", arg: (i) => i.category },
+  kb_cleanup_list: { icon: "list" },
+  kb_cleanup_resolve: { icon: "check", arg: (i) => clRef(i.finding_id) },
 };
+for (const [name, [label, busy]] of Object.entries(t("cl_tools"))) Object.assign(CL_TOOLS[name], { label, busy });
 
 function clLoad() {
   try {
@@ -111,7 +177,7 @@ function clSvg(size, shapes) {
 const clStar = (size) => clSvg(size, [["path", { d: "M12 2.5l1.9 6.1 6.1 1.9-6.1 1.9L12 18.5l-1.9-6.1L4 10.5l6.1-1.9z" }],
   ["path", { d: "M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" }]]);
 const clStop = () => clSvg(11, [["rect", { x: 5, y: 5, width: 14, height: 14, rx: 2 }]]);
-const clDots = () => el("span", { class: "cl-dots", role: "img", "aria-label": "진행 중" }, el("i"), el("i"), el("i"));
+const clDots = () => el("span", { class: "cl-dots", role: "img", "aria-label": t("cl_busy") }, el("i"), el("i"), el("i"));
 
 // ---------- 마크다운(작은 부분집합): 문단, 제목, 목록, 표, 코드, 굵게, 인라인 코드, 링크 ----------
 
@@ -281,23 +347,23 @@ function clQa(item, diff) {
 function clSummary(name, data) {
   if (!data) return {};
   if (name === "kb_search" && Array.isArray(data.hits)) {
-    return { res: `· ${Number.isInteger(data.total) ? data.total : data.hits.length}건`, body: clHits(data.hits) };
+    return { res: t("cl_hits", Number.isInteger(data.total) ? data.total : data.hits.length), body: clHits(data.hits) };
   }
   if (name === "kb_get" && clIsQa(data)) return { body: clHits([data]) };
   if (name === "kb_add" && data.status === "created" && clIsQa(data.item)) return { go: data.item.id, body: [clQa(data.item)] };
   if (name === "kb_add" && data.status === "similar_found" && Array.isArray(data.similar)) {
-    return { res: `· 비슷한 질문 ${data.similar.length}건`, body: clHits(data.similar) };
+    return { res: t("cl_similar", data.similar.length), body: clHits(data.similar) };
   }
   if (name === "kb_update" && clIsQa(data)) return { go: data.id, body: [clQa(data, true)] };
   if (name === "kb_restore" && clIsQa(data)) return { go: data.id, body: clHits([data]) };
   if (name === "kb_archive" && clIsQa(data)) return { body: clHits([data], false) };
-  if (name === "kb_categories" && Array.isArray(data.categories)) return { res: `· 대분류 ${data.categories.length}개` };
+  if (name === "kb_categories" && Array.isArray(data.categories)) return { res: t("cl_tops", data.categories.length) };
   return {};
 }
 
-function clArg(t, input) {
+function clArg(tool, input) {
   try {
-    const v = input && typeof input === "object" && t.arg ? t.arg(input) : "";
+    const v = input && typeof input === "object" && tool.arg ? tool.arg(input) : "";
     return typeof v === "string" ? v : "";
   } catch (e) {
     return "";
@@ -305,27 +371,27 @@ function clArg(t, input) {
 }
 
 function clToolRow(name, input, result) {
-  const t = CL_TOOLS[name] || { label: name, busy: `${name} 실행 중`, icon: "doc" };
+  const tool = CL_TOOLS[name] || { label: name, busy: t("cl_tool_busy", name), icon: "doc" };
   const pending = result === undefined;
   const sum = pending || result.is_error ? {} : clSummary(name, clParse(result.text));
-  const arg = clArg(t, input);
-  const head = el("div", { class: "cl-act" }, clIcon(t.icon, 13), el("b", {}, pending ? t.busy : t.label),
+  const arg = clArg(tool, input);
+  const head = el("div", { class: "cl-act" }, clIcon(tool.icon, 13), el("b", {}, pending ? tool.busy : tool.label),
     arg ? el("span", { class: "arg", title: arg }, arg) : null,
     sum.res ? el("span", { class: "res" }, sum.res) : null,
     pending ? clDots() : null,
-    sum.go ? el("a", { class: "go", href: `#qa/${sum.go}` }, "목록에서 열기") : null);
+    sum.go ? el("a", { class: "go", href: `#qa/${sum.go}` }, t("cl_open_list")) : null);
   if (pending) return el("div", { class: "cl-tool" }, head);
   return el("div", { class: "cl-tool" }, head, el("div", { class: "cl-act-b" },
     result.is_error ? el("p", { class: "cl-tool-err" }, result.text) : null,
     sum.body || null,
-    el("details", { class: "cl-raw" }, el("summary", {}, "원본 보기"),
+    el("details", { class: "cl-raw" }, el("summary", {}, t("cl_raw")),
       el("pre", {}, `${name} ${JSON.stringify(input ?? {})}\n→ ${result.text}`))));
 }
 
 // ---------- 대화 그리기 ----------
 
 function clThinking(text, secs) {
-  return text ? el("details", { class: "cl-think" }, el("summary", {}, secs ? `생각 · ${secs}초` : "생각"), el("p", {}, text)) : null;
+  return text ? el("details", { class: "cl-think" }, el("summary", {}, secs ? t("cl_think_secs", secs) : t("cl_think")), el("p", {}, text)) : null;
 }
 
 function clResultText(content) {
@@ -355,7 +421,7 @@ function clMessages() {
       if (b.type === "thinking") turn.append(...[clThinking(b.thinking, cl.think[`${i}:${j}`])].filter(Boolean));
       else if (b.type === "text") turn.append(el("div", { class: "cl-md" }, mdRender(b.text)));
       else if (b.type === "tool_use") turn.append(clToolRow(b.name, b.input, results.get(b.id)));
-      else if (b.type === "fallback") turn.append(el("p", { class: "cl-note" }, `${CL_MODELS[b.to?.model] || b.to?.model || "다른 모델"} 가 이어서 답했습니다.`));
+      else if (b.type === "fallback") turn.append(el("p", { class: "cl-note" }, t("cl_fallback", CL_MODELS[b.to?.model] || b.to?.model || t("cl_other_model"))));
     });
     out.push(turn);
   });
@@ -364,10 +430,10 @@ function clMessages() {
 
 function clEmpty() {
   return el("div", { class: "cl-empty" }, el("span", { class: "mark" }, clStar(20)),
-    el("h3", {}, "무엇을 도와드릴까요?"),
-    el("p", {}, "저장소를 찾아보고 정리합니다. 등록하거나 고친 내용은 목록에 바로 보입니다."),
-    el("div", { class: "cl-sugs" }, CL_SUGS.map((t) => el("button", { class: "cl-sug", type: "button", onclick: () => clPick(t) },
-      t, el("span", { class: "k" }, clIcon("next", 13))))));
+    el("h3", {}, t("cl_empty_h")),
+    el("p", {}, t("cl_empty_p")),
+    el("div", { class: "cl-sugs" }, CL_SUGS.map((s) => el("button", { class: "cl-sug", type: "button", onclick: () => clPick(s) },
+      s, el("span", { class: "k" }, clIcon("next", 13))))));
 }
 
 // 제안을 누르면 입력칸에 넣기만 한다(바로 보내지 않는다)
@@ -407,10 +473,10 @@ function clRenderLog(live, force) {
 // ---------- 키 등록 ----------
 
 function clKeyForm(stale, replacing) {
-  const input = el("input", { class: "fld", type: "password", "aria-label": "Anthropic API 키", placeholder: "sk-ant-...",
+  const input = el("input", { class: "fld", type: "password", "aria-label": t("cl_key_label"), placeholder: "sk-ant-...",
     autocomplete: "off", spellcheck: "false" });
   const err = el("p", { class: "cl-err", role: "alert", hidden: true });
-  const btn = el("button", { class: "btn primary", type: "submit" }, "등록");
+  const btn = el("button", { class: "btn primary", type: "submit" }, t("cl_key_add"));
   const form = el("form", { class: "cl-key", onsubmit: async (ev) => {
     ev.preventDefault();
     btn.disabled = true;
@@ -425,17 +491,17 @@ function clKeyForm(stale, replacing) {
       btn.disabled = false;
     }
   } });
-  form.append(
+  fill(form,
     el("span", { class: "mark" }, clStar(20)),
-    el("h3", {}, "Claude 를 이 저장소에 연결"),
-    el("p", { class: "desc" }, "Claude Console 에서 만든 API 키를 등록하면 이 패널에서 Claude 가 저장소를 찾아보고 정리합니다."),
-    stale ? el("p", { class: "cl-err", role: "alert" }, "저장된 키를 더 쓸 수 없습니다. 다시 등록해 주세요.") : null,
-    el("div", { class: "cl-key-row" }, input, btn, replacing ? el("button", { class: "btn", type: "button", onclick: clOpen }, "취소") : null),
+    el("h3", {}, t("cl_key_h")),
+    el("p", { class: "desc" }, t("cl_key_desc")),
+    stale ? el("p", { class: "cl-err", role: "alert" }, t("cl_key_stale")) : null,
+    el("div", { class: "cl-key-row" }, input, btn, replacing ? el("button", { class: "btn", type: "button", onclick: clOpen }, t("cancel")) : null),
     err,
-    el("div", { class: "notes" }, el("span", {}, "키는 서버에 암호화해 보관합니다."),
-      el("span", {}, "대화와 저장소 검색 결과가 이 키로 Anthropic 에 전달되고, 요금은 키의 계정에 청구됩니다.")),
+    el("div", { class: "notes" }, el("span", {}, t("cl_key_note1")),
+      el("span", {}, t("cl_key_note2"))),
     el("a", { class: "cl-keylink", href: "https://console.anthropic.com/settings/keys", target: "_blank",
-      rel: "noopener noreferrer" }, "API 키 만들기 ↗"));
+      rel: "noopener noreferrer" }, t("cl_key_make")));
   return form;
 }
 
@@ -459,7 +525,7 @@ function clLive() {
     if (!think) return;
     const s = Math.max(1, Math.round((Date.now() - think.t0) / 1000));
     secs.push(s);
-    think.summary.textContent = `생각 · ${s}초`;
+    think.summary.textContent = t("cl_think_secs", s);
     think.box.open = false;
     think = null;
   };
@@ -473,7 +539,7 @@ function clLive() {
         wait = null;
         if (ev.type === "thinking") {
           if (!think) {
-            const summary = el("summary", {}, "생각 중");
+            const summary = el("summary", {}, t("cl_thinking"));
             const p = el("p");
             const box = el("details", { class: "cl-think", open: true }, summary, p);
             turn.append(box);
@@ -504,7 +570,7 @@ function clLive() {
           wait = clDots(); // 다음 응답을 기다리는 동안
           turn.append(wait);
         } else if (ev.type === "notice") {
-          turn.append(el("p", { class: "cl-note" }, ev.text));
+          turn.append(el("p", { class: "cl-note" }, errorText({ code: ev.code, error: ev.text })));
         }
       });
     },
@@ -524,7 +590,7 @@ async function clSend(text) {
   if (cl.running || !text.trim()) return;
   const input = $("#cl-input");
   const ctx = clCtxId();
-  const prompt = (ctx ? `[열어 둔 항목 #${ctx}]\n` : "") + text;
+  const prompt = (ctx ? t("cl_ctx", ctx) : "") + text;
   const before = cl.history.length;
   cl.history.push({ role: "user", content: prompt });
   input.value = "";
@@ -533,7 +599,7 @@ async function clSend(text) {
   clRenderLog(live.node, true);
   clBusy(true);
   cl.abort = new AbortController();
-  clStatus("응답을 기다리는 중입니다.");
+  clStatus(t("cl_waiting"));
   let finished = false;
   let wrote = false;
   // 실패한 요청은 기록에 남기지 않고 보낸 말을 입력칸에 되돌린다. 응답을 기다리는 동안 새로 쓴 글이 있으면 그 앞에 둔다
@@ -562,8 +628,7 @@ async function clSend(text) {
         cl.draft = text;
         return clOpen();
       }
-      return fail(r.status === 413 ? "대화가 길어 더 보낼 수 없습니다. 새 대화를 시작해 주세요."
-        : (data.error || `요청을 처리하지 못했습니다(HTTP ${r.status}).`));
+      return fail(r.status === 413 ? t("cl_too_long") : errorText(data, r.status));
     }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
@@ -586,7 +651,7 @@ async function clSend(text) {
           finished = true;
         } else if (ev.type === "error") {
           finished = true;
-          fail(ev.text);
+          fail(errorText({ code: ev.code, error: ev.text }));
         } else {
           // 멈춤으로 done 을 못 받아도 이미 실행한 쓰기는 목록에 반영한다
           if (ev.type === "tool_result" && !ev.is_error && CL_WRITES.has(ev.name)) wrote = true;
@@ -598,16 +663,16 @@ async function clSend(text) {
         }
       }
     }
-    if (!finished) fail("응답이 도중에 끊겼습니다. 다시 보내 주세요.");
+    if (!finished) fail(t("cl_cut"));
     else if (cl.history.length > before + 1) {
       clSave();
-      clStatus("답이 왔습니다.");
+      clStatus(t("cl_done"));
       clRenderLog();
     }
   } catch (e) {
     if (e.name !== "AbortError") cl.abort?.abort(); // 읽다가 실패하면 서버의 대화 반복도 멈춘다
     if (!finished) {
-      fail(e.name === "AbortError" ? "멈췄습니다. 이미 실행한 변경은 그대로 남습니다." : "서버에 연결하지 못했습니다.");
+      fail(e.name === "AbortError" ? t("cl_stopped") : t("net_fail"));
     } else if (cl.history.length > before + 1) {
       // done 을 받은 뒤 끊겼으면 끝난 대화로 둔다
       clSave();
@@ -634,8 +699,8 @@ function clBusy(on) {
   const send = $("#cl-send");
   if (!send) return;
   send.classList.toggle("stop", on);
-  send.setAttribute("aria-label", on ? "멈춤" : "보내기");
-  send.title = on ? "멈춤" : "보내기 (Enter)";
+  send.setAttribute("aria-label", on ? t("cl_stop") : t("cl_send"));
+  send.title = on ? t("cl_stop") : t("cl_send_key");
   fill(send, on ? clStop() : clIcon("up", 15, 2.4));
   for (const b of $("#claude").querySelectorAll("[data-busy-off]")) b.disabled = on;
   // 응답 중에도 입력칸은 쓸 수 있다(다음 말을 미리 쓴다). 끝나면 포커스가 패널 안이나 빈 곳이었을 때만 입력칸으로 돌린다
@@ -664,18 +729,18 @@ function clCtx() {
   if (!slot) return;
   const id = clCtxId();
   fill(slot, id
-    ? el("span", { class: "cl-ctx", title: "목록에서 열어 둔 항목을 함께 보냅니다" },
-      el("span", {}, el("span", { class: "mono" }, `#${id}`), " 함께 보냄"),
-      el("button", { type: "button", "aria-label": "함께 보내지 않기", onclick: () => {
+    ? el("span", { class: "cl-ctx", title: t("cl_ctx_title") },
+      el("span", {}, el("span", { class: "mono" }, `#${id}`), t("cl_ctx_on")),
+      el("button", { type: "button", "aria-label": t("cl_ctx_off"), onclick: () => {
         cl.ctxOff = id;
         clCtx();
         $("#cl-input").focus();
       } }, clIcon("cross", 12)))
-    : el("span", { class: "cl-hint" }, "Enter 보내기 · Shift+Enter 줄바꿈"));
+    : el("span", { class: "cl-hint" }, t("cl_hint")));
 }
 
 function clComposer() {
-  const input = el("textarea", { id: "cl-input", rows: 2, "aria-label": "Claude 에게 보낼 말", placeholder: "무엇을 할까요?",
+  const input = el("textarea", { id: "cl-input", rows: 2, "aria-label": t("cl_input"), placeholder: t("cl_input_ph"),
     value: cl.draft });
   cl.draft = ""; // 키를 다시 등록하느라 입력 띠가 사라졌던 동안 보관한 말
   input.addEventListener("input", clGrow);
@@ -693,7 +758,7 @@ function clComposer() {
 }
 
 async function clDeleteKey() {
-  if (!window.confirm("등록한 Anthropic API 키를 지웁니다. 이 패널을 다시 쓰려면 키를 새로 등록해야 합니다.\n지우시겠습니까?")) return;
+  if (!window.confirm(t("cl_key_delete_confirm"))) return;
   try {
     await api("DELETE", "/api/claude/key");
   } catch (e) {
@@ -714,17 +779,17 @@ function clMenu(kind) {
     b.classList.toggle("on", on);
   }
   if (!cl.menu) return;
-  const menu = cl.menu === "key" ? el("div", { id: "cl-menu", class: "cl-menu", role: "menu", "aria-label": "키 관리" },
-    el("div", { class: "row" }, el("span", {}, "등록한 키"), el("span", { class: "mono" }, `sk-ant-…${cl.key.last4}`)),
+  const menu = cl.menu === "key" ? el("div", { id: "cl-menu", class: "cl-menu", role: "menu", "aria-label": t("cl_key_menu") },
+    el("div", { class: "row" }, el("span", {}, t("cl_key_saved")), el("span", { class: "mono" }, `sk-ant-…${cl.key.last4}`)),
     el("button", { type: "button", role: "menuitem", onclick: () => {
       clMenu(null);
       clKeyView(false, true);
-    } }, "키 바꾸기"),
+    } }, t("cl_key_change")),
     el("button", { type: "button", role: "menuitem", class: "danger", onclick: () => {
       clMenu(null);
       clDeleteKey();
-    } }, "키 삭제"))
-    : el("div", { id: "cl-menu", class: "cl-menu model", role: "menu", "aria-label": "모델" },
+    } }, t("cl_key_delete")))
+    : el("div", { id: "cl-menu", class: "cl-menu model", role: "menu", "aria-label": t("cl_model") },
       (cl.key.models || Object.keys(CL_MODELS)).map((m) => el("button", { type: "button", role: "menuitemradio",
         "aria-checked": String(m === cl.key.model), onclick: () => clSetModel(m) },
       CL_MODELS[m] || m, m === cl.key.model ? clIcon("check", 14) : null)));
@@ -765,9 +830,9 @@ function clHead() {
   return el("div", { class: "cl-head" },
     el("span", { class: "cl-title" }, clStar(15), "Claude"),
     set ? el("button", { class: "cl-model", type: "button", "data-menu": "model", "aria-haspopup": "menu", "aria-expanded": "false",
-      "aria-label": `모델: ${name}`, title: "모델 바꾸기", onclick: () => clMenu("model") }, name, clIcon("chev", 12)) : null,
+      "aria-label": t("cl_model_of", name), title: t("cl_model_change"), onclick: () => clMenu("model") }, name, clIcon("chev", 12)) : null,
     el("div", { class: "grow" }),
-    set ? el("button", { class: "cl-ib", type: "button", "aria-label": "새 대화", title: "새 대화", "data-busy-off": "",
+    set ? el("button", { class: "cl-ib", type: "button", "aria-label": t("cl_new"), title: t("cl_new"), "data-busy-off": "",
       disabled: cl.running, onclick: () => {
         if (cl.running) return;
         cl.history = [];
@@ -777,9 +842,9 @@ function clHead() {
         $("#cl-input")?.focus();
       } }, clIcon("compose", 16)) : null,
     set ? el("button", { class: "cl-ib", type: "button", "data-menu": "key", "aria-haspopup": "menu", "aria-expanded": "false",
-      "aria-label": "키 관리", title: "키 관리", "data-busy-off": "", disabled: cl.running, onclick: () => clMenu("key") },
+      "aria-label": t("cl_key_menu"), title: t("cl_key_menu"), "data-busy-off": "", disabled: cl.running, onclick: () => clMenu("key") },
     clIcon("more", 16, 3)) : null,
-    el("button", { class: "cl-ib", type: "button", "aria-label": "Claude 패널 닫기", title: "Claude 패널 닫기",
+    el("button", { class: "cl-ib", type: "button", "aria-label": t("cl_close"), title: t("cl_close"),
       onclick: () => clToggle(false) }, clIcon("cross", 16)));
 }
 
@@ -800,7 +865,7 @@ async function clOpen() {
     if (clAtEnd(log)) $("#cl-latest").hidden = true;
   });
   const latest = el("button", { id: "cl-latest", class: "cl-latest", type: "button", hidden: true, onclick: clToEnd },
-    clIcon("down", 13), "최신 메시지로");
+    clIcon("down", 13), t("cl_latest"));
   fill(panel, clHead(), el("div", { class: "cl-scroll" }, log, latest), clComposer(),
     el("span", { id: "cl-status", class: "sr-only", role: "status" }));
   clCtx();

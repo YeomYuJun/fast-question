@@ -54,8 +54,346 @@ function fill(node, ...kids) {
   node.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
 }
 
+// ---------- 화면 언어 ----------
+// 언어는 theme.js 가 정한다(window.fqLang). 바꾸면 다시 읽으므로 화면이 떠 있는 동안 언어는 바뀌지 않는다.
+// 값이 함수인 항목은 인자를 받아 문장을 만든다(언어마다 어순이 달라 조각을 이어 붙이지 않는다)
+const LANG = window.fqLang === "en" ? "en" : "ko";
+document.documentElement.lang = LANG;
+const PROVIDERS = { github: "GitHub", google: "Google" };
+const STR = {
+  ko: {
+    doc_title: "fast question - Claude 와 같이 쓰는 Q&A 저장소",
+    side: "분류", keys: "/ 검색 · ↑↓ 이동 · Enter 펼치기 · E 편집 · Esc 지우기", new_q: "+ 새 질문",
+    connect: "연결", logout: "로그아웃", claude_panel: "Claude 패널",
+    lp_label: "사용 예시", lp_h: "Claude 와 같이 쓰는 Q&A 저장소", lp_sub: "나와 Claude 가 함께 쓰는 질문·답변 저장소.",
+    ex_label: "예시: Claude Code 가 저장소에서 지난 해결 방법을 찾아 답하고, 새로 알게 된 내용을 기록합니다",
+    ex_badge: "예시", ex_u1: "지난번에 CORS 오류 났을 때 어떻게 해결했지?", ex_arg1: "\"CORS 오류\"", ex_res1: "1건",
+    ex_q1: "API 를 부를 때 CORS 오류가 나는 이유는?",
+    ex_a1: "서버 응답에 Access-Control-Allow-Origin 이 없어서다. 개발 중에는 프록시로 같은 출처를 만든다.",
+    ex_meta1: "웹 / API · #12",
+    ex_c1: "기록해 둔 답이 있습니다. 서버가 허용 출처 헤더를 보내지 않았고, 개발 중에는 프록시로 같은 출처를 만들어 해결했습니다.",
+    ex_u2: "방금 정리한 토큰 갱신 방법도 남겨 줘", ex_arg2: "웹 / 인증", ex_res2: "#37 등록", ex_by: "방금 · Claude 가 등록",
+    ex_q2: "access 토큰이 만료되면 어떻게 다시 받나?",
+    ex_a2: "401 을 받으면 refresh 토큰으로 새 access 토큰을 받고 원래 요청을 다시 보낸다.", ex_meta2: "웹 / 인증 · #37",
+    rp_h: "fast question 시작하기", rp_sub: "GitHub 이나 Google 계정으로 바로 시작합니다. 따로 가입하지 않아도 됩니다.",
+    agree1: "계속하면 ", terms: "이용약관", agree2: "에 동의하고 ", privacy: "개인정보 처리방침", agree3: "을 확인한 것으로 봅니다.",
+    cat_new: "새 분류 이름", cat_new_ph: "이름 (중분류는 대분류 > 이름)", add: "추가", cancel: "취소", cat_add: "+ 분류 추가",
+    q_ph: "무엇이 궁금한가요?  예) CORS 오류", q_label: "질문·답변 검색", help_show: "검색 문법 보기", help: "검색 문법",
+    help_and: "모두 든 항목 (공백은 AND)", help_or: "둘 중 하나가 든 항목 (OR)", help_not: "a 가 든 항목 제외",
+    help_phrase: "공백을 포함한 구절", help_field: "질문에서만, 답변에서만", help_path: "근거 파일 경로에 x 가 든 항목",
+    since_title: "최근 24시간 안에 등록한 항목만 보기",
+    cleanup_title: "주기 작업이 찾아 둔 정리 대상(비슷한 질문, 형식 위반). Claude 가 정리합니다",
+    public: "공개 지식",
+
+    net_fail: "서버에 연결하지 못했습니다.", http_fail: (s) => `요청을 처리하지 못했습니다(HTTP ${s}).`,
+    all: "전체",
+    export_md_of: (p) => `${p} Markdown 내보내기`, export_md: "Markdown 내보내기",
+    share_of: (p) => `${p} 공개 링크 만들기`, share_short: "공개 링크",
+    rename_of: (p) => `${p} 이름 변경`, rename: "이름 변경", delete_of: (p) => `${p} 삭제`, del: "삭제",
+    new_name_of: (p) => `${p} 새 이름`, desc_of: (p) => `${p} 설명`, desc_ph: "설명 (선택)",
+    renamed: (p) => `분류 이름을 "${p}" 로 바꿨습니다.`, redescribed: (p) => `분류 "${p}" 의 설명을 바꿨습니다.`,
+    save: "저장", save_enter: "저장 (Enter)", cancel_esc: "취소 (Esc)",
+    n_children: (n) => `하위 분류 ${n}개`, n_qa: (n) => `Q&A ${n}건`,
+    cat_delete_confirm: (p, parts) => `분류 "${p}" 를 삭제합니다.` + (parts.length ? `\n${parts.join(", ")}도 모두 함께 삭제됩니다.` : "")
+      + "\n삭제하시겠습니까?",
+    cat_deleted: (p, n) => `분류 "${p}" 를 삭제했습니다.` + (n ? ` Q&A ${n}건도 함께 삭제했습니다.` : ""),
+    cat_edit: "분류 편집", cat_edit_done: "편집 종료", cat_clear: (p) => `분류 필터 해제: ${p}`,
+    since_chip: (h, n) => `최근 ${h}시간 ${n}건`, cleanup_chip: (n) => `정리 대상 ${n}건`,
+    cleanup_ask: "정리 대상을 kb_cleanup_list 로 보고 규칙대로 정리해 줘.",
+    cleanup_local: "Claude Code 에서 \"qa 정리해\" 라고 하면 정리합니다.",
+    cat_depth: "분류는 대분류 > 중분류 2단계까지 만들 수 있습니다.", cat_made: (p) => `분류 "${p}" 를 만들었습니다.`,
+    similar: "비슷한 결과", no_match: "일치하는 질문이 없습니다.",
+    no_match_similar: "일치하는 질문이 없습니다. 비슷한 결과를 아래에 보입니다.",
+    none_since: (h) => `최근 ${h}시간 안에 등록한 질문이 없습니다.`, none_yet: "아직 등록된 질문이 없습니다.",
+    add_as_new: (q) => `“${q}” 질문으로 새로 등록`,
+    relaxed_title: (q) => `"${q}" 로 검색`, relaxed: (word, n) => [word, ` 빼고 ${n}건`],
+    sum_similar: (b, n) => [b, `건 · 비슷한 결과 ${n}건`], sum_query: (b, total, g) => [b, `건 · ${g}개 분류`],
+    sum_recent: (b, n, g) => ["최근 수정 ", b, `건 · ${g}개 분류`],
+    morph_off: "형태소 검색 꺼짐", top_only: (n) => `위 ${n}건만 표시`, expand: "펴기", collapse: "접기",
+    open_vscode: (p) => `VS Code 로 열기: ${p}`, none: "없음",
+    kind: { note: "메모" }, op: { insert: "생성", update: "수정", archive: "삭제", restore: "복원" },
+    field: { question: "질문", answer: "답변", category_id: "분류", evidence_state: "근거 상태" },
+    op_fields: (op, fields) => `${op}(${fields.join("·")})`,
+    hist_latest: "최근 한 건만 보기", hist_all: (n) => `이력 ${n}건 모두 보기`,
+    loading: "읽는 중...", evidence: "근거", links: "연결", related: "관련", history: "이력", category: "분류",
+    copy: "복사", copied_qa: "Q&A 를 복사했습니다.", copy_addr: "주소 복사", copied_addr: "주소를 복사했습니다.",
+    make_share: "공개 링크 만들기", make_share_title: "공개 링크(로그인 없이 보는 주소)", edit: "편집", edit_key: "편집 (E)",
+    copy_fail: "복사하지 못했습니다. 브라우저가 클립보드 접근을 막았습니다.",
+    count_title: (n, max, ln, lines) => `가중 길이 ${n}/${max} (한글·한자는 2, 그 밖은 1로 셉니다) · ${ln}/${lines}줄`,
+    count_title_q: (n, max) => `가중 길이 ${n}/${max} (한글·한자는 2, 그 밖은 1로 셉니다)`,
+    deleted_cat: (id) => `(삭제된 분류 ${id})`,
+    question: "질문", answer: "답변", evidence_opt: "근거 (선택)",
+    evidence_ph: "근거 (선택): 경로 #앵커 · URL · 메모: 누가 확인",
+    added: "등록했습니다.", saved: "저장했습니다.", conflict_reopened: "다른 곳에서 먼저 고쳤습니다. 지금 값으로 다시 열었습니다.",
+    similar_head: "비슷한 질문이 이미 있습니다. 같은 내용이면 그 항목을 고쳐 주세요.", add_anyway: "다른 질문으로 등록",
+    delete_confirm: "삭제하시겠습니까?", deleted: "삭제했습니다.", undo: "되돌리기", restored: "되돌렸습니다.",
+    add_btn: "등록", add_key: "등록 (Ctrl+Enter)", save_key: "저장 (Ctrl+Enter)", delete_q: "이 질문 삭제",
+    pub_note: "운영자가 적재한 공개 항목입니다. 고치려면 내 저장소로 복사합니다.", copy_qa: "질문과 답 복사",
+    to_mine: "내 저장소로", pub_similar: (q) => `내 저장소에 비슷한 질문이 있습니다.\n\n${q}\n\n그래도 복사하시겠습니까?`,
+    pub_copied: (p) => `내 저장소에 등록했습니다: ${p}`,
+    no_cats: "분류가 아직 없습니다. 왼쪽 패널의 \"+ 분류 추가\" 로 먼저 만들어 주세요.",
+    not_found_id: (id) => `#${id} 를 찾지 못했습니다(삭제했거나 없는 번호입니다).`,
+    to_light: "라이트 테마로 바꾸기", to_dark: "다크 테마로 바꾸기",
+    login_with: (p) => `${p} 로 계속하기`, no_providers: "켜진 로그인 공급자가 없습니다.",
+    login_err: {
+      denied: "로그인을 취소했습니다.",
+      state: "로그인 시간이 지났거나 다른 창에서 시작했습니다. 다시 로그인해 주세요.",
+      provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
+      closed: "이 계정은 로그인할 수 없습니다.",
+      limit: "이 주소에서 한 시간 안에 만든 계정이 너무 많습니다. 한 시간 뒤에 다시 시도해 주세요.",
+    },
+    link_err: {
+      session: "로그인한 상태에서 다시 시도해 주세요.",
+      state: "시간이 지났거나 그 사이 로그아웃했습니다. 다시 시도해 주세요.",
+      provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
+      closed: "이 계정은 추가할 수 없습니다.",
+      exists: "이 공급자의 다른 계정이 이미 연결되어 있습니다.",
+      denied: "로그인 수단 추가를 취소했습니다.",
+    },
+    link_fail: "로그인 수단을 추가하지 못했습니다.",
+    linked: (p, dropped) => `${p} 로그인을 추가했습니다.` + (dropped ? " 그 계정이 쓰던 저장소는 버렸습니다." : ""),
+    account_of: (p) => `${p} 계정`, signed_in_with: (who) => `${who}으로 로그인`,
+    copy_of: (label) => `${label} 복사`,
+    token_revoke_confirm: (n) => `토큰 "${n}" 을 폐기합니다. 이 토큰을 쓰는 PC 는 더 연결되지 않습니다.\n폐기하시겠습니까?`,
+    token_revoked: "토큰을 폐기했습니다.", unnamed_app: "이름 없는 앱",
+    app_disconnect_confirm: (at, n) => `${at} 에 연결한 "${n}" 의 연결을 끊습니다. 그 앱은 다시 연결해야 이 저장소를 쓸 수 있습니다.\n끊으시겠습니까?`,
+    app_disconnected: "연결을 끊었습니다.",
+    share_copied: "공개 링크를 복사했습니다. 이 주소를 아는 사람은 로그인 없이 볼 수 있습니다.",
+    share_revoke_confirm: (title) => `"${title}" 의 공개 링크를 폐기합니다. 그 주소는 바로 열리지 않게 됩니다.\n폐기하시겠습니까?`,
+    share_revoked: "공개 링크를 폐기했습니다.", shares: "공개 링크", share_kind_qa: "질문 하나", created_on: (d) => ` · 만든 날 ${d}`,
+    share_revoke_of: (title) => `${title} 공개 링크 폐기`, revoke: "폐기",
+    shares_none: "펼친 항목의 공유 아이콘이나 분류 편집의 공유 아이콘으로 만듭니다. 주소를 아는 사람은 로그인 없이 그 내용을 읽습니다.",
+    apps: "연결된 앱", app_meta_title: (a, b) => `연결 ${a} · 마지막 사용 ${b}`, app_connected: (s) => `연결 ${s}`,
+    app_last_used: (s) => `마지막 사용 ${s}`, app_disconnect_of: (at, n) => `${at} 에 연결한 ${n} 연결 끊기`, disconnect: "끊기",
+    apps_none: "브라우저에서 승인한 연결(한 줄 연결, claude.ai 커넥터)이 없습니다.",
+    connect_touch: "Claude Code 연결(한 줄 연결, 플러그인 설치)은 Claude Code 를 쓰는 PC 의 브라우저에서 합니다. 여기서는 토큰 폐기, 연결 끊기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있습니다.",
+    connect_intro: "Claude Code 를 내 질문·답변 저장소에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Claude Code 플러그인까지 이 PC 에 설치합니다.",
+    close: "닫기", cc_connect: "Claude Code 연결", step1: "한 줄로 연결",
+    step1_note: "설치 없이 터미널에서 아래 명령을 실행합니다. 그다음 Claude Code 에서 /mcp 를 열어 fast-question 을 고르고, 브라우저에서 로그인·승인합니다.",
+    cmd_connect: "연결 명령", cmd_connect_done: "연결 명령을 복사했습니다.", step2: "PC 에 설치",
+    step2_note: "Claude Code 플러그인을 설치하고 로그인합니다. PC 에 uv 가 있어야 합니다(Windows: winget install --id astral-sh.uv -e). 아래 명령을 차례로 실행하고, 브라우저에서 로그인·승인한 뒤 Claude Code 를 다시 시작합니다.",
+    cmd_market: "마켓플레이스 추가 명령", cmd_market_done: "마켓플레이스 추가 명령을 복사했습니다.",
+    cmd_plugin: "플러그인 설치 명령", cmd_plugin_done: "플러그인 설치 명령을 복사했습니다.",
+    cmd_login: "로그인 명령", cmd_login_done: "로그인 명령을 복사했습니다.",
+    step2_after: "1단계로 등록한 fast-question 은 플러그인과 겹치므로 claude mcp remove -s user fast-question 으로 지웁니다.",
+    tokens: "만든 토큰", token_created: (d) => `만든 날 ${d}`, expired: "만료", expires: (d) => `만료 ${d}`,
+    last_used: (d) => ` · 마지막 사용 ${d}`, never_used: " · 아직 안 씀", token_revoke_of: (n) => `${n} 토큰 폐기`,
+    tokens_none: "아직 만든 토큰이 없습니다.", export: "내보내기",
+    export_note: "내 저장소 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 설정(config.json)의 db_path 로 지정하면 그대로 열립니다.",
+    export_db: "저장소 파일 받기", logins: "로그인 수단", logins_now: (list) => `지금 ${list} 로 로그인할 수 있습니다.`,
+    logins_more: " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 저장소가 열립니다. 추가하는 계정으로 이미 쓰던 저장소가 있으면 버려집니다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 저장소 파일을 받아 두세요.",
+    login_add_confirm: (p) => `${p} 로그인을 이 계정에 추가합니다.\n그 ${p} 계정으로 쓰던 fast question 저장소가 있으면 버려집니다(30일 뒤 삭제).\n추가하시겠습니까?`,
+    login_add: (p) => `${p} 로그인 추가`,
+    leave: "탈퇴", leave_word: "탈퇴", leave_word_label: "탈퇴 확인 문구",
+    leave_note: "계정을 지웁니다. 이 계정의 로그인·토큰이 모두 끊기고 저장소를 더 열 수 없습니다. 먼저 저장소 파일을 받아 두세요. 계속하려면 아래 칸에 \"탈퇴\" 를 입력하고 버튼을 누르세요.",
+  },
+  en: {
+    doc_title: "fast question - A Q&A store you share with Claude",
+    side: "Categories", keys: "/ search · ↑↓ move · Enter expand · E edit · Esc clear", new_q: "+ New question",
+    connect: "Connect", logout: "Sign out", claude_panel: "Claude panel",
+    lp_label: "Example", lp_h: "A Q&A store you share with Claude", lp_sub: "Questions and answers that you and Claude keep together.",
+    ex_label: "Example: Claude Code finds a past fix in the store, answers with it, and records what it just learned",
+    ex_badge: "Example", ex_u1: "How did I fix the CORS error last time?", ex_arg1: "\"CORS error\"", ex_res1: "1 hit",
+    ex_q1: "Why does calling the API return a CORS error?",
+    ex_a1: "The server response has no Access-Control-Allow-Origin. During development, a proxy serves both from the same origin.",
+    ex_meta1: "Web / API · #12",
+    ex_c1: "There is a recorded answer. The server did not send the allowed-origin header, and during development you fixed it with a proxy on the same origin.",
+    ex_u2: "Save the token refresh steps we just worked out, too", ex_arg2: "Web / Auth", ex_res2: "#37 added", ex_by: "Just now · added by Claude",
+    ex_q2: "How do I get a new access token when it expires?",
+    ex_a2: "On a 401, get a new access token with the refresh token and resend the original request.", ex_meta2: "Web / Auth · #37",
+    rp_h: "Get started with fast question", rp_sub: "Start right away with your GitHub or Google account. No separate sign-up.",
+    agree1: "By continuing, you agree to the ", terms: "Terms", agree2: " and acknowledge the ", privacy: "Privacy Policy", agree3: ".",
+    cat_new: "New category name", cat_new_ph: "Name (for a subcategory: Top > Name)", add: "Add", cancel: "Cancel", cat_add: "+ Add category",
+    q_ph: "What do you want to know?  e.g. CORS error", q_label: "Search questions and answers", help_show: "Show search syntax",
+    help: "Search syntax",
+    help_and: "Items containing all (space means AND)", help_or: "Items containing either (OR)", help_not: "Exclude items containing a",
+    help_phrase: "A phrase that includes spaces", help_field: "Question only, answer only", help_path: "Items whose evidence path contains x",
+    since_title: "Show only items added in the last 24 hours",
+    cleanup_title: "Cleanup items found by the scheduled job (similar questions, format violations). Claude resolves them",
+    public: "Public knowledge",
+
+    net_fail: "Could not reach the server.", http_fail: (s) => `The request failed (HTTP ${s}).`,
+    all: "All",
+    export_md_of: (p) => `Export ${p} as Markdown`, export_md: "Export as Markdown",
+    share_of: (p) => `Create a public link for ${p}`, share_short: "Public link",
+    rename_of: (p) => `Rename ${p}`, rename: "Rename", delete_of: (p) => `Delete ${p}`, del: "Delete",
+    new_name_of: (p) => `New name for ${p}`, desc_of: (p) => `Description of ${p}`, desc_ph: "Description (optional)",
+    renamed: (p) => `Renamed the category to "${p}".`, redescribed: (p) => `Updated the description of "${p}".`,
+    save: "Save", save_enter: "Save (Enter)", cancel_esc: "Cancel (Esc)",
+    n_children: (n) => (n === 1 ? "1 subcategory" : `${n} subcategories`), n_qa: (n) => (n === 1 ? "1 Q&A" : `${n} Q&As`),
+    cat_delete_confirm: (p, parts) => `Delete the category "${p}"?` + (parts.length ? `\n${parts.join(" and ")} will also be deleted.` : ""),
+    cat_deleted: (p, n) => `Deleted the category "${p}".` + (n ? ` ${n === 1 ? "1 Q&A was" : `${n} Q&As were`} deleted with it.` : ""),
+    cat_edit: "Edit categories", cat_edit_done: "Done", cat_clear: (p) => `Clear category filter: ${p}`,
+    since_chip: (h, n) => `Last ${h} hours: ${n}`, cleanup_chip: (n) => `To clean up: ${n}`,
+    cleanup_ask: "Review the cleanup items with kb_cleanup_list and resolve them according to the rules.",
+    cleanup_local: "In Claude Code, ask it to clean up your Q&A and it will resolve them.",
+    cat_depth: "Categories can be two levels deep: Top > Sub.", cat_made: (p) => `Created the category "${p}".`,
+    similar: "Similar results", no_match: "No matching questions.",
+    no_match_similar: "No matching questions. Similar results are shown below.",
+    none_since: (h) => `No questions were added in the last ${h} hours.`, none_yet: "No questions yet.",
+    add_as_new: (q) => `Add “${q}” as a new question`,
+    relaxed_title: (q) => `Search for "${q}"`, relaxed: (word, n) => ["without ", word, `: ${n}`],
+    sum_similar: (b, n) => [b, ` results · ${n} similar`],
+    sum_query: (b, total, g) => [b, ` ${total === 1 ? "result" : "results"} · ${g} ${g === 1 ? "category" : "categories"}`],
+    sum_recent: (b, n, g) => ["Recently updated: ", b, ` · ${g} ${g === 1 ? "category" : "categories"}`],
+    morph_off: "Morphological search off", top_only: (n) => `Showing the top ${n}`, expand: "Expand", collapse: "Collapse",
+    open_vscode: (p) => `Open in VS Code: ${p}`, none: "None",
+    kind: { note: "NOTE" }, op: { insert: "created", update: "edited", archive: "deleted", restore: "restored" },
+    field: { question: "question", answer: "answer", category_id: "category", evidence_state: "evidence state" },
+    op_fields: (op, fields) => `${op} (${fields.join(", ")})`,
+    hist_latest: "Show only the latest", hist_all: (n) => `Show all ${n} entries`,
+    loading: "Loading...", evidence: "Evidence", links: "Links", related: "Related", history: "History", category: "Category",
+    copy: "Copy", copied_qa: "Copied the Q&A.", copy_addr: "Copy address", copied_addr: "Copied the address.",
+    make_share: "Create public link", make_share_title: "Public link (viewable without signing in)", edit: "Edit", edit_key: "Edit (E)",
+    copy_fail: "Could not copy. The browser blocked clipboard access.",
+    count_title: (n, max, ln, lines) => `Weighted length ${n}/${max} (Hangul and CJK count 2, others 1) · ${ln}/${lines} lines`,
+    count_title_q: (n, max) => `Weighted length ${n}/${max} (Hangul and CJK count 2, others 1)`,
+    deleted_cat: (id) => `(deleted category ${id})`,
+    question: "Question", answer: "Answer", evidence_opt: "Evidence (optional)",
+    evidence_ph: "Evidence (optional): path #anchor · URL · note: who verified",
+    added: "Added.", saved: "Saved.", conflict_reopened: "It was changed elsewhere first. Reopened with the current values.",
+    similar_head: "A similar question already exists. If it is the same, edit that item instead.", add_anyway: "Add as a different question",
+    delete_confirm: "Delete this question?", deleted: "Deleted.", undo: "Undo", restored: "Restored.",
+    add_btn: "Add", add_key: "Add (Ctrl+Enter)", save_key: "Save (Ctrl+Enter)", delete_q: "Delete this question",
+    pub_note: "A public item provided by the operator. Copy it to your repository to edit it.", copy_qa: "Copy question and answer",
+    to_mine: "Copy to mine", pub_similar: (q) => `Your repository already has a similar question:\n\n${q}\n\nCopy anyway?`,
+    pub_copied: (p) => `Added to your repository: ${p}`,
+    no_cats: "There are no categories yet. Create one first with \"+ Add category\" in the left panel.",
+    not_found_id: (id) => `Could not find #${id} (it was deleted or does not exist).`,
+    to_light: "Switch to light theme", to_dark: "Switch to dark theme",
+    login_with: (p) => `Continue with ${p}`, no_providers: "No sign-in provider is enabled.",
+    login_err: {
+      denied: "Sign-in was cancelled.",
+      state: "The sign-in timed out or was started in another window. Please sign in again.",
+      provider: "Could not verify the response from the sign-in provider. Please try again.",
+      closed: "This account cannot sign in.",
+      limit: "Too many accounts were created from this address in the last hour. Please try again in an hour.",
+    },
+    link_err: {
+      session: "Sign in and try again.",
+      state: "It timed out or you signed out in the meantime. Please try again.",
+      provider: "Could not verify the response from the sign-in provider. Please try again.",
+      closed: "This account cannot be added.",
+      exists: "Another account from this provider is already linked.",
+      denied: "Adding the sign-in method was cancelled.",
+    },
+    link_fail: "Could not add the sign-in method.",
+    linked: (p, dropped) => `Added ${p} sign-in.` + (dropped ? " The repository that account used was discarded." : ""),
+    account_of: (p) => `${p} account`, signed_in_with: (who) => `Signed in with ${who}`,
+    copy_of: (label) => `Copy ${label}`,
+    token_revoke_confirm: (n) => `Revoke the token "${n}"? PCs that use this token will no longer connect.`,
+    token_revoked: "Revoked the token.", unnamed_app: "Unnamed app",
+    app_disconnect_confirm: (at, n) => `Disconnect "${n}" (connected ${at})? The app has to connect again to use this repository.`,
+    app_disconnected: "Disconnected.",
+    share_copied: "Copied the public link. Anyone with this address can view it without signing in.",
+    share_revoke_confirm: (title) => `Revoke the public link for "${title}"? The address stops working immediately.`,
+    share_revoked: "Revoked the public link.", shares: "Public links", share_kind_qa: "One question", created_on: (d) => ` · created ${d}`,
+    share_revoke_of: (title) => `Revoke the public link for ${title}`, revoke: "Revoke",
+    shares_none: "Create one with the share icon on an expanded item or in category editing. Anyone with the address can read it without signing in.",
+    apps: "Connected apps", app_meta_title: (a, b) => `Connected ${a} · last used ${b}`, app_connected: (s) => `Connected ${s}`,
+    app_last_used: (s) => `Last used ${s}`, app_disconnect_of: (at, n) => `Disconnect ${n} (connected ${at})`, disconnect: "Disconnect",
+    apps_none: "No connections approved in the browser (one-line connect, claude.ai connector).",
+    connect_touch: "Connecting Claude Code (one-line connect, plugin install) is done in the browser on the PC that runs Claude Code. Here you can revoke tokens, disconnect apps, add sign-in methods, export, and delete your account.",
+    connect_intro: "Connect Claude Code to your Q&A repository. Step 1 alone is enough; step 2 also installs the Claude Code plugin on this PC.",
+    close: "Close", cc_connect: "Connect Claude Code", step1: "Connect with one line",
+    step1_note: "Run the command below in a terminal, no install needed. Then open /mcp in Claude Code, pick fast-question, and sign in and approve in the browser.",
+    cmd_connect: "connect command", cmd_connect_done: "Copied the connect command.", step2: "Install on this PC",
+    step2_note: "Install the Claude Code plugin and sign in. The PC needs uv (Windows: winget install --id astral-sh.uv -e). Run the commands below in order, sign in and approve in the browser, then restart Claude Code.",
+    cmd_market: "marketplace command", cmd_market_done: "Copied the marketplace command.",
+    cmd_plugin: "plugin install command", cmd_plugin_done: "Copied the plugin install command.",
+    cmd_login: "login command", cmd_login_done: "Copied the login command.",
+    step2_after: "The fast-question server added in step 1 overlaps with the plugin, so remove it with claude mcp remove -s user fast-question.",
+    tokens: "Tokens", token_created: (d) => `Created ${d}`, expired: "Expired", expires: (d) => `Expires ${d}`,
+    last_used: (d) => ` · last used ${d}`, never_used: " · not used yet", token_revoke_of: (n) => `Revoke token ${n}`,
+    tokens_none: "No tokens yet.", export: "Export",
+    export_note: "Download your whole repository as one SQLite file. Set it as db_path in a local-mode config.json to open it as is.",
+    export_db: "Download repository file", logins: "Sign-in methods", logins_now: (list) => `You can sign in with ${list}.`,
+    logins_more: " After you add another sign-in, either one opens this repository. If the added account already has a repository, it is discarded (deleted after 30 days). If you need it, sign in with that account first and download its repository file.",
+    login_add_confirm: (p) => `Add ${p} sign-in to this account?\nIf that ${p} account already has a fast question repository, it is discarded (deleted after 30 days).`,
+    login_add: (p) => `Add ${p} sign-in`,
+    leave: "Delete account", leave_word: "delete", leave_word_label: "Confirmation phrase",
+    leave_note: "Deletes your account. All sign-ins and tokens for this account stop working and the repository can no longer be opened. Download the repository file first. To continue, type \"delete\" below and press the button.",
+  },
+};
+
+function t(key, ...args) {
+  const v = STR[LANG][key] ?? STR.ko[key];
+  return typeof v === "function" ? v(...args) : v ?? key;
+}
+
+// 서버 오류의 code 를 한국어 문구로 바꾸는 표. 문장이 정해진 code 만 둔다.
+// error(ValidationError 의 기본값)와 사유·숫자가 문장에 든 code(invalid, not_found, quota, db, rate_limited, too_large,
+// rejected, invalid_db)는 두지 않는다. 표에 없으면 서버의 error 문장을 그대로 보인다
+const CODE_KO = {
+  qa_question_len: "질문은 비우지 말고 가중 길이 300 까지 써 주세요(한글·한자는 2, 그 밖은 1로 셉니다).",
+  qa_question_line: "질문은 한 줄로 써 주세요.",
+  qa_answer_len: "답변은 비우지 말고 가중 길이 800 까지 써 주세요(한글·한자는 2, 그 밖은 1로 셉니다).",
+  qa_answer_lines: "답변은 6줄까지 쓸 수 있습니다.",
+  qa_evidence_state: "근거 상태 값이 올바르지 않습니다.",
+  category_name_len: "분류 이름은 1~60자 한 줄로 써 주세요.",
+  category_description_len: "분류 설명은 300자까지 쓸 수 있습니다.",
+  category_depth: "분류는 대분류와 중분류 2단계까지만 만들 수 있습니다.",
+  category_name_uq: "같은 상위 분류 아래에 같은 이름의 분류가 이미 있습니다.",
+  qa_link_order: "관련 질문 연결 값이 올바르지 않습니다.",
+  qa_link_uq: "이미 연결된 질문입니다.",
+  synonym_term_len: "동의어는 1~60자로 써 주세요.",
+  synonym_term_uq: "이미 다른 동의어 그룹에 있는 단어입니다.",
+  user_word_len: "사용자 단어는 1~40자, 공백 없이 써 주세요.",
+  user_word_tag: "사용자 단어 품사는 NNP, NNG, SL, XR, VV, VA 중 하나여야 합니다.",
+  user_word_uq: "이미 등록된 사용자 단어입니다.",
+  stopword_len: "불용어는 1~20자, 공백 없이 써 주세요.",
+  stopword_uq: "이미 등록된 불용어입니다.",
+  evidence_kind: "근거 형식은 file, dir, git, githead, url, note, github 중 하나여야 합니다.",
+  evidence_url_missing: "url 근거에 주소가 없습니다.",
+  evidence_github_url: "github 근거는 https://github.com/<owner>/<repo>/blob/<ref>/<경로> 형식의 주소여야 합니다.",
+  evidence_note_empty: "메모 근거에 내용이 없습니다. 누가 어떻게 확인했는지 적어 주세요.",
+  captured_server_kind: "url, note, github 근거는 captured 없이 보내 주세요.",
+  remote_path_evidence: "원격 서버는 사용자 PC 의 파일을 읽지 못해 파일·폴더·git 근거를 직접 만들 수 없습니다. 로컬 프록시(run_mcp.py --remote)로 등록하거나 url·메모 근거를 써 주세요.",
+  remote_user_word: "원격 서버에서는 형태소 분석 사용자 단어를 바꿀 수 없습니다. 동의어와 불용어는 바꿀 수 있습니다.",
+  no_change: "바꿀 내용이 없습니다.",
+  restore_category_needed: "이 항목의 분류가 삭제되었습니다. 되살릴 때 옮길 분류를 골라 주세요.",
+  qa_link_self: "질문을 자기 자신과 연결할 수 없습니다.",
+  synonym_group_size: "새 동의어 그룹에는 단어가 2개 이상 있어야 합니다.",
+  synonym_none: "더할 동의어가 없습니다.",
+  chat_refused: "Claude 가 이 요청을 거절했습니다.",
+  chat_truncated: "응답이 너무 길어 잘렸습니다. 요청을 나눠 주세요.",
+  chat_unreadable: "Claude 응답을 읽지 못했습니다. 다시 보내 주세요.",
+  chat_failed: "대화를 처리하지 못했습니다.",
+  api_key_rejected: "API 키가 거부되었습니다. 키를 다시 등록해 주세요.",
+  api_model_denied: "이 API 키로는 고른 모델을 쓸 수 없습니다.",
+  api_rate_limited: "Anthropic 요청 한도에 걸렸습니다. 잠시 뒤 다시 보내 주세요.",
+  api_unreachable: "Anthropic 에 연결하지 못했습니다.",
+  managed_column: "생성 정보, 수정 시각, 버전은 저장소가 정합니다.",
+  no_physical_delete: "삭제 대신 보관 처리를 써 주세요.",
+  revision_append_only: "이력은 고치거나 지울 수 없습니다.",
+  foreign_key: "가리키는 대상이 없습니다.",
+  conflict: "다른 곳에서 먼저 고쳤습니다. 현재 값을 다시 읽고 고쳐 주세요.",
+  unauthorized: "로그인이 필요합니다.",
+  no_key: "먼저 Anthropic API 키를 등록해 주세요.",
+  busy: "다른 작업을 처리하는 중입니다. 잠시 뒤 다시 시도해 주세요.",
+  share_target_invalid: "공개할 대상 번호가 올바르지 않습니다.",
+  share_exists: "이 대상의 공개 링크가 이미 있습니다. 연결 패널의 공개 링크 목록에서 폐기한 뒤 다시 만들어 주세요.",
+  share_limit: "공개 링크는 계정마다 200개까지 둘 수 있습니다. 쓰지 않는 링크를 폐기해 주세요.",
+};
+
+function errorText(data, status) {
+  if (LANG === "ko" && data && CODE_KO[data.code]) return CODE_KO[data.code];
+  return (data && data.error) || t("http_fail", status);
+}
+
+function applyStatic() {
+  document.title = t("doc_title");
+  for (const n of document.querySelectorAll("[data-t]")) n.textContent = t(n.dataset.t);
+  for (const n of document.querySelectorAll("[data-ta]")) {
+    for (const pair of n.dataset.ta.split(";")) {
+      const [attr, key] = pair.split(":");
+      n.setAttribute(attr, t(key));
+    }
+  }
+}
+
 async function api(method, url, body) {
-  const opt = { method, headers: {} };
+  const opt = { method, headers: { "X-FQ-Lang": LANG } }; // 원격 모드 서버가 새 계정 DB 에 이 언어의 기본 가이드를 넣는다
   if (body !== undefined) {
     opt.headers["Content-Type"] = "application/json";
     opt.body = JSON.stringify(body);
@@ -64,13 +402,13 @@ async function api(method, url, body) {
   try {
     r = await fetch(url, opt);
   } catch (e) {
-    throw new Error("서버에 연결하지 못했습니다."); // 브라우저의 영어 오류(Failed to fetch) 대신
+    throw new Error(t("net_fail")); // 브라우저의 오류(Failed to fetch) 대신
   }
   const data = await r.json().catch(() => ({}));
   // 원격 모드에서 세션이 끝났으면 로그인 화면으로 바꾼다
   if (r.status === 401 && data.code === "unauthorized") showLogin(data.providers || []);
   if (!r.ok) {
-    const err = new Error(data.error || `요청을 처리하지 못했습니다(HTTP ${r.status}).`);
+    const err = new Error(errorText(data, r.status));
     err.status = r.status;
     err.data = data;
     throw err;
@@ -112,9 +450,9 @@ function kst(s) {
   return { md: `${p.month}-${p.day}`, hm: `${p.hour}:${p.minute}`, full: `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}` };
 }
 
-const KIND = { file: "FILE", dir: "DIR", git: "GIT", githead: "HEAD", url: "URL", github: "GITHUB", note: "메모" };
-const OP = { insert: "생성", update: "수정", archive: "삭제", restore: "복원" };
-const FIELD = { question: "질문", answer: "답변", category_id: "분류", evidence_state: "근거 상태" };
+const KIND = { file: "FILE", dir: "DIR", git: "GIT", githead: "HEAD", url: "URL", github: "GITHUB", ...t("kind") };
+const OP = t("op");
+const FIELD = t("field");
 
 // 서버의 강조 위치는 코드 포인트 기준이다. UTF-16 으로 자르면 이모지 뒤에서 한 칸씩 밀리므로 코드 포인트로 자른다
 function marked(text, spans) {
@@ -179,7 +517,7 @@ function renderTree() {
   const countOf = (t) => (hits ? own(t) + t.children.reduce((a, c) => a + own(c), 0) : t.count);
   const total = hits ? hits.total : state.cats.reduce((a, c) => a + c.count, 0);
   fill($("#cat-tree"),
-    facet("전체", total, state.cat === null, () => setCat(null), "top"),
+    facet(t("all"), total, state.cat === null, () => setCat(null), "top"),
     state.cats.flatMap((t) => [
       facet(t.name, countOf(t), state.cat === t.id, () => setCat(t.id), "top", t.description),
       ...t.children.map((c) => facet(c.name, hits ? own(c) : c.count, state.cat === c.id, () => setCat(c.id), "child", c.description)),
@@ -194,19 +532,19 @@ function renderTreeEdit() {
       el("span", { class: "name", title: c.description || null }, c.name),
       // 내보내기는 링크다. 파일 이름은 서버의 Content-Disposition 이 정한다
       el("a", { class: "ibtn dl", href: `/api/export?category=${c.id}`, download: "",
-        "aria-label": `${c.path} Markdown 내보내기`, title: "Markdown 내보내기" }, icon("download")),
-      me && me.mode === "remote" ? ibtn("rn", "share", `${c.path} 공개 링크 만들기`, "공개 링크", () => makeShare("category", c.id)) : null,
-      ibtn("rn", "pen", `${c.path} 이름 변경`, "이름 변경", () => { state.catRenaming = c.id; renderTree(); }),
-      ibtn("del", "trash", `${c.path} 삭제`, "삭제", () => deleteCategory(c)));
+        "aria-label": t("export_md_of", c.path), title: t("export_md") }, icon("download")),
+      me && me.mode === "remote" ? ibtn("rn", "share", t("share_of", c.path), t("share_short"), () => makeShare("category", c.id)) : null,
+      ibtn("rn", "pen", t("rename_of", c.path), t("rename"), () => { state.catRenaming = c.id; renderTree(); }),
+      ibtn("del", "trash", t("delete_of", c.path), t("del"), () => deleteCategory(c)));
   };
   fill($("#cat-tree"), state.cats.flatMap((t) => [line(t, "top"), ...t.children.map((c) => line(c, "child"))]));
 }
 
 // 이름과 설명을 함께 고친다. 바뀐 값만 보낸다
 function renameForm(c, cls) {
-  const input = el("input", { class: "fld", value: c.name, "aria-label": `${c.path} 새 이름`, autocomplete: "off" });
+  const input = el("input", { class: "fld", value: c.name, "aria-label": t("new_name_of", c.path), autocomplete: "off" });
   const desc = el("input", {
-    class: "fld desc", value: c.description || "", "aria-label": `${c.path} 설명`, placeholder: "설명 (선택)",
+    class: "fld desc", value: c.description || "", "aria-label": t("desc_of", c.path), placeholder: t("desc_ph"),
     maxlength: 300, autocomplete: "off",
   });
   const cancel = () => { state.catRenaming = null; renderTree(); };
@@ -225,15 +563,15 @@ function renameForm(c, cls) {
         state.catRenaming = null;
         await refreshCats();
         runSearch();
-        toast(body.name ? `분류 이름을 "${done.path}" 로 바꿨습니다.` : `분류 "${done.path}" 의 설명을 바꿨습니다.`);
+        toast(body.name ? t("renamed", done.path) : t("redescribed", done.path));
       } catch (err) {
         toast(err.message, { err: true });
       }
     },
     onkeydown: (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } },
   }, input,
-  ibtn("ok", "check", "저장", "저장 (Enter)", null, "submit"),
-  ibtn("no", "cross", "취소", "취소 (Esc)", cancel), desc);
+  ibtn("ok", "check", t("save"), t("save_enter"), null, "submit"),
+  ibtn("no", "cross", t("cancel"), t("cancel_esc"), cancel), desc);
   setTimeout(() => { input.focus(); input.select(); }, 0);
   return form;
 }
@@ -247,17 +585,16 @@ async function deleteCategory(c) {
     return refreshCats();
   }
   const parts = [];
-  if (impact.children) parts.push(`하위 분류 ${impact.children}개`);
-  if (impact.qa) parts.push(`Q&A ${impact.qa}건`);
-  const warn = parts.length ? `\n${parts.join(", ")}도 모두 함께 삭제됩니다.` : "";
-  if (!window.confirm(`분류 "${c.path}" 를 삭제합니다.${warn}\n삭제하시겠습니까?`)) return;
+  if (impact.children) parts.push(t("n_children", impact.children));
+  if (impact.qa) parts.push(t("n_qa", impact.qa));
+  if (!window.confirm(t("cat_delete_confirm", c.path, parts))) return;
   try {
     const res = await api("POST", `/api/categories/${c.id}/archive`, { version: impact.category.version });
     const gone = new Set([c.id, ...(c.children || []).map((x) => x.id)]);
     if (gone.has(state.cat)) state.cat = null;
     await refreshCats();
     runSearch();
-    toast(`분류 "${c.path}" 를 삭제했습니다.` + (res.archived_qa ? ` Q&A ${res.archived_qa}건도 함께 삭제했습니다.` : ""));
+    toast(t("cat_deleted", c.path, res.archived_qa));
   } catch (err) {
     toast(err.message, { err: true });
     refreshCats();
@@ -268,7 +605,7 @@ function setCatEdit(on) {
   state.catEdit = on;
   state.catRenaming = null;
   const b = $("#cat-edit");
-  b.textContent = on ? "편집 종료" : "분류 편집";
+  b.textContent = on ? t("cat_edit_done") : t("cat_edit");
   b.classList.toggle("on", on);
   b.setAttribute("aria-pressed", String(on));
   renderTree();
@@ -292,7 +629,7 @@ function renderChip() {
   const c = state.flat.find((x) => x.id === state.cat);
   chip.hidden = !c;
   chip.textContent = c ? `${c.path} ×` : "";
-  if (c) chip.setAttribute("aria-label", `분류 필터 해제: ${c.path}`);
+  if (c) chip.setAttribute("aria-label", t("cat_clear", c.path));
   else chip.removeAttribute("aria-label");
 }
 
@@ -300,7 +637,7 @@ function renderChip() {
 function renderSince(n) {
   const chip = $("#since-chip");
   chip.hidden = !state.since && !n;
-  chip.textContent = `최근 24시간 ${n}건`;
+  chip.textContent = t("since_chip", SINCE_HOURS, n);
   chip.classList.toggle("on", state.since);
   chip.setAttribute("aria-pressed", String(state.since));
 }
@@ -317,15 +654,15 @@ async function renderCleanup() {
     return;
   }
   chip.hidden = !cleanupSummary.open;
-  chip.textContent = `정리 대상 ${cleanupSummary.open}건`;
+  chip.textContent = t("cleanup_chip", cleanupSummary.open);
 }
 
 function askCleanup() {
-  const ask = "정리 대상을 kb_cleanup_list 로 보고 규칙대로 정리해 줘.";
+  const ask = t("cleanup_ask");
   if (!$("#claude-btn").hidden) { // 원격 모드 로그인 상태에서만 패널 아이콘이 보인다(claude.js 가 이벤트를 받는다)
     document.dispatchEvent(new CustomEvent("fq-claude-ask", { detail: ask }));
   } else {
-    toast("Claude Code 에서 \"qa 정리해\" 라고 하면 정리합니다.");
+    toast(t("cleanup_local"));
   }
 }
 
@@ -355,7 +692,7 @@ async function addCategory(e) {
   const raw = $("#cat-name").value.trim();
   if (!raw) return;
   const parts = raw.split(">").map((s) => s.trim());
-  if (parts.length > 2) return toast("분류는 대분류 > 중분류 2단계까지 만들 수 있습니다.", { err: true });
+  if (parts.length > 2) return toast(t("cat_depth"), { err: true });
   const body = parts.length === 2 ? { name: parts[1], parent: parts[0] } : { name: parts[0] };
   try {
     const c = await api("POST", "/api/categories", body);
@@ -363,7 +700,7 @@ async function addCategory(e) {
     $("#cat-form").hidden = true;
     $("#cat-add").hidden = false;
     await refreshCats();
-    toast(`분류 "${c.path}" 를 만들었습니다.`);
+    toast(t("cat_made", c.path));
   } catch (err) {
     toast(err.message, { err: true });
   }
@@ -445,7 +782,7 @@ function render(res) {
   for (const g of groups.values()) g.classList.add("out");
   for (const key of order) {
     const hits = byKey.get(key);
-    const g = groupEl(key, similar ? "비슷한 결과" : hits[0].category_path, counts.get(key) || hits.length);
+    const g = groupEl(key, similar ? t("similar") : hits[0].category_path, counts.get(key) || hits.length);
     g.classList.remove("out");
     box.append(g);
     const container = g.querySelector(".grp-rows");
@@ -460,25 +797,25 @@ function render(res) {
   $("#empty").hidden = !empty || Boolean($("#new-slot").firstChild);
   if (empty) {
     $("#empty-msg").textContent = res.query
-      ? (similar ? "일치하는 질문이 없습니다. 비슷한 결과를 아래에 보입니다." : "일치하는 질문이 없습니다.")
-      : state.since ? `최근 ${SINCE_HOURS}시간 안에 등록한 질문이 없습니다.` : "아직 등록된 질문이 없습니다.";
-    $("#empty-new").textContent = res.query ? `“${res.query}” 질문으로 새로 등록` : "+ 새 질문";
+      ? (similar ? t("no_match_similar") : t("no_match"))
+      : state.since ? t("none_since", SINCE_HOURS) : t("none_yet");
+    $("#empty-new").textContent = res.query ? t("add_as_new", res.query) : t("new_q");
   }
   // 단어를 하나 빼면 결과가 있는 질의. 누르면 그 질의로 검색한다
   fill($("#relaxed"), empty ? (res.relaxed || []).map((r) => el("button", {
-    class: "chip", type: "button", title: `"${r.query}" 로 검색`, onclick: () => searchFor(r.query),
-  }, el("code", {}, r.dropped), ` 빼고 ${r.total}건`)) : null);
+    class: "chip", type: "button", title: t("relaxed_title", r.query), onclick: () => searchFor(r.query),
+  }, t("relaxed", el("code", {}, r.dropped), r.total))) : null);
   if (state.sel && rows.has(state.sel) && !state.details.has(state.sel)) loadDetail(state.sel);
 }
 
 function summarize(res, similar, nGroups) {
   const count = $("#sum-count");
-  if (similar) count.replaceChildren(el("b", {}, "0"), `건 · 비슷한 결과 ${res.similar.length}건`);
-  else if (res.query) count.replaceChildren(el("b", {}, res.total), `건 · ${res.groups.length}개 분류`);
-  else count.replaceChildren("최근 수정 ", el("b", {}, res.hits.length), `건 · ${nGroups}개 분류`);
+  if (similar) fill(count, t("sum_similar", el("b", {}, "0"), res.similar.length));
+  else if (res.query) fill(count, t("sum_query", el("b", {}, res.total), res.total, res.groups.length));
+  else fill(count, t("sum_recent", el("b", {}, res.hits.length), res.hits.length, nGroups));
   const notes = [];
-  if (res.query && res.morph === "off") notes.push("형태소 검색 꺼짐");
-  if (res.total > res.hits.length && res.query) notes.push(`위 ${res.hits.length}건만 표시`);
+  if (res.query && res.morph === "off") notes.push(t("morph_off"));
+  if (res.total > res.hits.length && res.query) notes.push(t("top_only", res.hits.length));
   $("#sum-note").textContent = notes.join(" · ");
   $("#sum-ms").textContent = `${res.elapsed_ms} ms`;
 }
@@ -516,7 +853,7 @@ function paintFold(key, g) {
   const shut = state.shut.has(key);
   g.classList.toggle("shut", shut);
   g.firstChild.setAttribute("aria-expanded", String(!shut));
-  g.firstChild.title = shut ? "펴기" : "접기";
+  g.firstChild.title = shut ? t("expand") : t("collapse");
 }
 
 // 묶음 마지막 행에는 구분선을 긋지 않는다(다음 묶음 머리의 줄과 겹친다)
@@ -572,7 +909,7 @@ function repaint(id) {
 
 // 행은 날짜만 오른쪽에 둔다. 작성자·근거 상태·유사도는 데이터에만 있고 행에 내지 않는다
 function viewEl(h) {
-  const t = kst(h.updated_at);
+  const at = kst(h.updated_at);
   const open = state.sel === h.id;
   const aSpans = (h.spans && h.spans.answer) || [];
   // 검색어가 답변 81자 이후에만 있으면 두 줄로 자르면 일치 부분이 가려진다
@@ -583,7 +920,7 @@ function viewEl(h) {
         el("span", { class: "qtext" }, marked(h.question, h.spans && h.spans.question))),
       el("span", { class: "line" }, el("span", { class: "tag-a" }, "A"),
         el("span", { class: "atext" + (open || deepHit ? "" : " clamp2") }, marked(h.answer, aSpans)))),
-    el("span", { class: "date", title: t.full }, t.md));
+    el("span", { class: "date", title: at.full }, at.md));
 }
 
 // ---------- 펼침 ----------
@@ -636,7 +973,7 @@ function vscodeUrl(p) {
 }
 
 function evLink(path, ...kids) {
-  return el("a", { class: "evlink", href: vscodeUrl(path), title: `VS Code 로 열기: ${path}`, onclick: (e) => e.stopPropagation() }, ...kids);
+  return el("a", { class: "evlink", href: vscodeUrl(path), title: t("open_vscode", path), onclick: (e) => e.stopPropagation() }, ...kids);
 }
 
 // 파일 경로는 폴더와 파일 이름으로 나눈다. 폴더는 앞쪽을 줄이고 파일 이름은 남긴다
@@ -646,7 +983,7 @@ function splitPath(p) {
 }
 
 function evidenceText(d) {
-  if (!d.evidence.length) return el("span", { class: "none" }, "없음");
+  if (!d.evidence.length) return el("span", { class: "none" }, t("none"));
   const f = document.createDocumentFragment();
   d.evidence.forEach((e, i) => {
     if (i) f.append(el("span", { class: "sep" }, "·"));
@@ -687,13 +1024,13 @@ function evidenceTitle(d) {
 
 function histItems(d) {
   return d.revisions.map((r) => {
-    const t = kst(r.at);
+    const at = kst(r.at);
     let op = OP[r.op] || r.op;
     if (r.op === "update" && r.before && r.after) {
       const changed = Object.keys(FIELD).filter((k) => r.before[k] !== r.after[k]).map((k) => FIELD[k]);
-      if (changed.length) op += `(${changed.join("·")})`;
+      if (changed.length) op = t("op_fields", op, changed);
     }
-    return `${t.md} ${t.hm} ${r.actor} ${op}`;
+    return `${at.md} ${at.hm} ${r.actor} ${op}`;
   });
 }
 
@@ -704,13 +1041,13 @@ function histLine(id, d) {
   const more = items.length > 1
     ? el("button", {
       class: "more", type: "button", "aria-expanded": String(open),
-      title: open ? "최근 한 건만 보기" : `이력 ${items.length}건 모두 보기`,
+      title: open ? t("hist_latest") : t("hist_all", items.length),
       onclick: () => {
         if (open) state.histOpen.delete(id);
         else state.histOpen.add(id);
         repaint(id);
       },
-    }, open ? "접기" : `+${items.length - 1}`)
+    }, open ? t("collapse") : `+${items.length - 1}`)
     : null;
   return el("span", { class: "val hist" + (open ? " wrap" : "") },
     el("span", { class: open ? "" : "ell" }, open ? items.join("  ·  ") : items[0] || ""), more);
@@ -719,25 +1056,25 @@ function histLine(id, d) {
 function detailEl(id) {
   const d = state.details.get(id);
   const label = (s) => el("span", { class: "label" }, s);
-  if (!d) return el("div", { class: "detail" }, el("div", { class: "dline" }, label(""), el("span", { class: "val hist" }, "읽는 중...")));
-  const ev = dline("근거", evidenceText(d), "ev");
+  if (!d) return el("div", { class: "detail" }, el("div", { class: "dline" }, label(""), el("span", { class: "val hist" }, t("loading"))));
+  const ev = dline(t("evidence"), evidenceText(d), "ev");
   if (d.evidence.length) ev.title = evidenceTitle(d);
   return el("div", { class: "detail" },
-    el("div", { class: "dline" }, label("근거"), ev),
+    el("div", { class: "dline" }, label(t("evidence")), ev),
     d.links.length
-      ? el("div", { class: "dline" }, label("연결"),
-        dline("연결", d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
+      ? el("div", { class: "dline" }, label(t("links")),
+        dline(t("links"), d.links.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
     // 같은 분류의 다른 항목(최근 수정순, 연결 항목 제외). 검색 한 번으로 그 주제의 이웃 항목까지 읽는다
     (d.related || []).length
-      ? el("div", { class: "dline" }, label("관련"),
-        dline("관련", d.related.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
+      ? el("div", { class: "dline" }, label(t("related")),
+        dline(t("related"), d.related.map((l) => el("a", { href: `#qa/${l.id}`, class: "ell", title: l.question }, "→ " + l.question)), "links"))
       : null,
-    el("div", { class: "dline hline" }, label("이력"), histLine(id, d),
-      ibtn("cp", "copy", "복사", "복사", () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, "Q&A 를 복사했습니다.")),
-      ibtn("cp", "link", "주소 복사", "주소 복사", () => copy(`${location.origin}/#qa/${id}`, "주소를 복사했습니다.")),
-      me && me.mode === "remote" ? ibtn("cp", "share", "공개 링크 만들기", "공개 링크(로그인 없이 보는 주소)", () => makeShare("qa", id)) : null,
-      el("button", { class: "btn small", type: "button", title: "편집 (E)", onclick: () => startEdit(id) }, "편집")));
+    el("div", { class: "dline hline" }, label(t("history")), histLine(id, d),
+      ibtn("cp", "copy", t("copy"), t("copy"), () => copy('Q:\t'+d.question+'\r\nA:\t'+ d.answer, t("copied_qa"))),
+      ibtn("cp", "link", t("copy_addr"), t("copy_addr"), () => copy(`${location.origin}/#qa/${id}`, t("copied_addr"))),
+      me && me.mode === "remote" ? ibtn("cp", "share", t("make_share"), t("make_share_title"), () => makeShare("qa", id)) : null,
+      el("button", { class: "btn small", type: "button", title: t("edit_key"), onclick: () => startEdit(id) }, t("edit"))));
 }
 
 async function copy(text, done) {
@@ -745,21 +1082,39 @@ async function copy(text, done) {
     await navigator.clipboard.writeText(text);
     toast(done);
   } catch (e) {
-    toast("복사하지 못했습니다. 브라우저가 클립보드 접근을 막았습니다.", { err: true });
+    toast(t("copy_fail"), { err: true });
   }
 }
 
 // ---------- 편집 ----------
 
+// 길이 상한은 가중 길이다. 범위 표는 kb/text.py 의 weight 와 같다(범위 안의 문자는 2, 그 밖은 1)
+const WIDE = [[0x1100, 0x115F], [0x2E80, 0xA4CF], [0xAC00, 0xD7A3], [0xF900, 0xFAFF], [0xFE30, 0xFE4F], [0xFF00, 0xFF60],
+  [0xFFE0, 0xFFE6]];
+const QUESTION_MAX = 300;
+const ANSWER_MAX = 800;
+const ANSWER_LINES = 6;
+const LINE_MAX = 240;
+
+function weight(s) {
+  let n = 0;
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    n += WIDE.some(([a, b]) => c >= a && c <= b) ? 2 : 1;
+  }
+  return n;
+}
+
 function counter(input, max, lines) {
   const c = el("span", { class: "count", "aria-live": "polite" });
   const update = () => {
     const v = input.value;
-    const n = Array.from(v.trim()).length;
-    const ln = v.split("\n").filter((s) => s.trim()).length;
+    const n = weight(v.trim());
+    const filled = v.split("\n").map((s) => s.trim()).filter(Boolean);
+    const ln = filled.length;
     c.textContent = `${n}/${max}`;
-    c.title = lines ? `${ln}/${lines}줄` : "";
-    c.classList.toggle("over", n > max || Boolean(lines && ln > lines));
+    c.title = lines ? t("count_title", n, max, ln, lines) : t("count_title_q", n, max);
+    c.classList.toggle("over", n > max || Boolean(lines && (ln > lines || filled.some((s) => weight(s) > LINE_MAX))));
   };
   input.addEventListener("input", update);
   update();
@@ -778,23 +1133,30 @@ function grow(ta) {
 }
 
 function catSelect(selected) {
-  const s = el("select", { class: "fld", "aria-label": "분류" });
+  const s = el("select", { class: "fld", "aria-label": t("category") });
   for (const c of state.flat) s.append(el("option", { value: c.id }, c.path));
-  if (selected != null && !state.flat.some((c) => c.id === selected)) s.append(el("option", { value: selected }, `(삭제된 분류 ${selected})`));
+  if (selected != null && !state.flat.some((c) => c.id === selected)) s.append(el("option", { value: selected }, t("deleted_cat", selected)));
   if (selected != null) s.value = String(selected);
   return s;
 }
 
+// 서버는 메모 근거를 "메모:" 로 돌려주고 "메모:"·"note:" 를 모두 받는다. 저장 형식은 그대로 두고 en 화면에 보일 때만 바꾼다
+function shownEvidenceLine(line) {
+  if (LANG !== "en" || !line) return line || "";
+  return line.split(" ; ").map((p) => (p.startsWith("메모:") ? "note:" + p.slice("메모:".length) : p)).join(" ; ");
+}
+
 function editForm(base, isNew, onSaved, onCancel) {
-  const fq = el("input", { class: "fld fq", "aria-label": "질문", value: base.question, autocomplete: "off" });
-  const fa = el("textarea", { class: "fld fa", "aria-label": "답변", rows: 2 });
+  const fq = el("input", { class: "fld fq", "aria-label": t("question"), value: base.question, autocomplete: "off" });
+  const fa = el("textarea", { class: "fld fa", "aria-label": t("answer"), rows: 2 });
   fa.value = base.answer;
   fa.addEventListener("input", () => grow(fa));
   setTimeout(() => grow(fa), 0);
   const fc = catSelect(base.category_id);
+  const shownLine = shownEvidenceLine(base.evidence_line);
   const fe = el("input", {
-    class: "fld fe", "aria-label": "근거 (선택)", value: base.evidence_line || "", autocomplete: "off", spellcheck: "false",
-    placeholder: "근거 (선택): 경로 #앵커 · URL · 메모: 누가 확인",
+    class: "fld fe", "aria-label": t("evidence_opt"), value: shownLine, autocomplete: "off",
+    spellcheck: "false", placeholder: t("evidence_ph"),
   });
   const msg = el("div", { class: "emsg", role: "alert" });
   const sim = el("div", { class: "similar" });
@@ -809,22 +1171,22 @@ function editForm(base, isNew, onSaved, onCancel) {
         if (fe.value.trim()) body.evidence_line = fe.value;
         const r = await api("POST", "/api/qa", body);
         if (r.status === "similar_found") return showSimilar(r.similar);
-        return onSaved(r.item, "등록했습니다.");
+        return onSaved(r.item, t("added"));
       }
       const body = { version: base.version };
       if (fq.value !== base.question) body.question = fq.value;
       if (fa.value !== base.answer) body.answer = fa.value;
       if (Number(fc.value) !== base.category_id) body.category = Number(fc.value);
-      if (fe.value.trim() !== (base.evidence_line || "")) body.evidence_line = fe.value;
+      if (fe.value.trim() !== shownLine) body.evidence_line = fe.value;
       if (Object.keys(body).length === 1) return onCancel();
-      onSaved(await api("PATCH", `/api/qa/${base.id}`, body), "저장했습니다.");
+      onSaved(await api("PATCH", `/api/qa/${base.id}`, body), t("saved"));
     } catch (e) {
       if (e.status === 409) {
         await loadDetail(base.id);
         const fresh = state.details.get(base.id);
         if (fresh) {
           form.replaceWith(editForm(fresh, false, onSaved, onCancel));
-          return toast("다른 곳에서 먼저 고쳤습니다. 지금 값으로 다시 열었습니다.", { err: true });
+          return toast(t("conflict_reopened"), { err: true });
         }
       }
       msg.textContent = e.message;
@@ -835,26 +1197,26 @@ function editForm(base, isNew, onSaved, onCancel) {
 
   function showSimilar(list) {
     fill(sim,
-      el("div", { class: "head" }, "비슷한 질문이 이미 있습니다. 같은 내용이면 그 항목을 고쳐 주세요."),
+      el("div", { class: "head" }, t("similar_head")),
       list.map((h) => el("div", {},
         el("a", { href: `#qa/${h.id}` }, h.question),
         el("span", { class: "sub" }, `${h.category_path} · ${Math.round(h.score * 100)}%`))),
-      el("div", {}, el("button", { class: "btn", type: "button", onclick: () => submit(true) }, "다른 질문으로 등록")));
+      el("div", {}, el("button", { class: "btn", type: "button", onclick: () => submit(true) }, t("add_anyway"))));
   }
 
   // 삭제는 행을 지우지 않고 보관 표시만 한다(되돌리기·MCP kb_restore 로 복원된다)
   async function remove() {
-    if (!window.confirm("삭제하시겠습니까?")) return;
+    if (!window.confirm(t("delete_confirm"))) return;
     try {
       const it = await api("POST", `/api/qa/${base.id}/archive`, { version: base.version });
       onSaved(it, null);
-      toast("삭제했습니다.", {
+      toast(t("deleted"), {
         action: {
-          label: "되돌리기",
+          label: t("undo"),
           fn: async () => {
             try {
               await api("POST", `/api/qa/${it.id}/restore`, { version: it.version });
-              toast("되돌렸습니다.");
+              toast(t("restored"));
               refreshCats();
               runSearch();
             } catch (e) {
@@ -876,13 +1238,13 @@ function editForm(base, isNew, onSaved, onCancel) {
       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onCancel(); }
     },
   },
-  el("div", { class: "eline" }, el("span", { class: "tag-q" }, "Q"), fq, counter(fq, 150)),
-  el("div", { class: "eline multi" }, el("span", { class: "tag-a" }, "A"), fa, counter(fa, 400, 6)),
+  el("div", { class: "eline" }, el("span", { class: "tag-q" }, "Q"), fq, counter(fq, QUESTION_MAX)),
+  el("div", { class: "eline multi" }, el("span", { class: "tag-a" }, "A"), fa, counter(fa, ANSWER_MAX, ANSWER_LINES)),
   el("div", { class: "erow" }, fc, fe,
-    el("button", { class: "btn primary", type: "submit", title: `${isNew ? "등록" : "저장"} (Ctrl+Enter)` }, isNew ? "등록" : "저장"),
-    el("button", { class: "btn", type: "button", title: "취소 (Esc)", onclick: () => onCancel() }, "취소"),
+    el("button", { class: "btn primary", type: "submit", title: isNew ? t("add_key") : t("save_key") }, isNew ? t("add_btn") : t("save")),
+    el("button", { class: "btn", type: "button", title: t("cancel_esc"), onclick: () => onCancel() }, t("cancel")),
     isNew ? null : el("span", { class: "spacer" }),
-    isNew ? null : ibtn("del", "trash", "이 질문 삭제", "삭제", remove)),
+    isNew ? null : ibtn("del", "trash", t("delete_q"), t("del"), remove)),
   msg, sim);
   setTimeout(() => (isNew && fq.value ? fa : fq).focus(), 0);
   return form;
@@ -942,7 +1304,7 @@ function renderPublic(found) {
     box.replaceChildren();
     return;
   }
-  const head = el("div", { class: "grp-head pub-head" }, el("span", { class: "top-name" }, "공개 지식"),
+  const head = el("div", { class: "grp-head pub-head" }, el("span", { class: "top-name" }, t("public")),
     el("span", { class: "rule" }), el("span", { class: "grp-n" }, found.total));
   fill(box, head, el("div", { class: "grp-rows" }, ...hits.map(pubRowEl)));
 }
@@ -978,13 +1340,13 @@ function pubDetailEl(h) {
   }
   const ev = d && d.evidence.length
     ? d.evidence.map((e) => e.kind === "url" ? el("a", { href: e.path, target: "_blank", rel: "noopener" }, e.path) : el("span", {}, e.text)).flatMap((n, i) => (i ? [" · ", n] : [n]))
-    : "없음";
+    : t("none");
   return el("div", { class: "detail" },
-    el("div", { class: "dline" }, label("분류"), el("span", { class: "val" }, h.category_path)),
-    el("div", { class: "dline" }, label("근거"), el("span", { class: "val wrap" }, ...[].concat(ev))),
-    el("div", { class: "dline hline" }, label(""), el("span", { class: "val hist" }, "운영자가 적재한 공개 항목입니다. 고치려면 내 저장소로 복사합니다."),
-      ibtn("cp", "copy", "복사", "질문과 답 복사", () => copy("Q:\t" + h.question + "\r\nA:\t" + h.answer, "Q&A 를 복사했습니다.")),
-      el("button", { class: "btn small", type: "button", onclick: () => copyPublic(h) }, "내 저장소로")));
+    el("div", { class: "dline" }, label(t("category")), el("span", { class: "val" }, h.category_path)),
+    el("div", { class: "dline" }, label(t("evidence")), el("span", { class: "val wrap" }, ...[].concat(ev))),
+    el("div", { class: "dline hline" }, label(""), el("span", { class: "val hist" }, t("pub_note")),
+      ibtn("cp", "copy", t("copy"), t("copy_qa"), () => copy("Q:\t" + h.question + "\r\nA:\t" + h.answer, t("copied_qa"))),
+      el("button", { class: "btn small", type: "button", onclick: () => copyPublic(h) }, t("to_mine"))));
 }
 
 // 펼침·상세 도착 때 마지막 검색 결과의 공개 묶음을 같은 데이터로 다시 그린다
@@ -1002,11 +1364,11 @@ async function copyPublic(h, force) {
   }
   if (res.status === "similar_found") {
     const first = res.similar[0];
-    if (window.confirm(`내 저장소에 비슷한 질문이 있습니다.\n\n${first.question}\n\n그래도 복사하시겠습니까?`)) return copyPublic(h, true);
+    if (window.confirm(t("pub_similar", first.question))) return copyPublic(h, true);
     return;
   }
   const it = res.item;
-  toast(`내 저장소에 등록했습니다: ${it.category_path}`);
+  toast(t("pub_copied", it.category_path));
   state.details.set(it.id, it);
   refreshCats();
   runSearch();
@@ -1024,7 +1386,7 @@ function openNew(question) {
   }
   if (!state.flat.length) {
     openSide(true);
-    toast("분류가 아직 없습니다. 왼쪽 패널의 \"+ 분류 추가\" 로 먼저 만들어 주세요.", { err: true });
+    toast(t("no_cats"), { err: true });
     return;
   }
   const firstHit = rows.size ? [...rows.values()].find((r) => !r.classList.contains("out")) : null;
@@ -1131,7 +1493,7 @@ async function openFromHash() {
     toggle(id, true);
     scrollTo(id);
   } else {
-    toast(`#${id} 를 찾지 못했습니다(삭제했거나 없는 번호입니다).`, { err: true });
+    toast(t("not_found_id", id), { err: true });
   }
 }
 
@@ -1224,23 +1586,16 @@ function openHelp(open) {
 // ---------- 테마 ----------
 
 // 저장은 사용자가 상단에서 바꿨을 때만 한다. 저장값이 없으면 계속 OS 설정을 따른다
-function setTheme(t, save) {
-  document.documentElement.setAttribute("data-theme", t);
-  if (save) store("fq-theme", t);
-  $("#theme-btn").setAttribute("aria-label", t === "dark" ? "라이트 테마로 바꾸기" : "다크 테마로 바꾸기");
+function setTheme(theme, save) {
+  document.documentElement.setAttribute("data-theme", theme);
+  if (save) store("fq-theme", theme);
+  $("#theme-btn").setAttribute("aria-label", theme === "dark" ? t("to_light") : t("to_dark"));
 }
 
 // ---------- 시작 ----------
 
 // ---------- 원격 모드 로그인 ----------
-const PROVIDERS = { github: "GitHub", google: "Google" };
-const LOGIN_ERRORS = {
-  denied: "로그인을 취소했습니다.",
-  state: "로그인 시간이 지났거나 다른 창에서 시작했습니다. 다시 로그인해 주세요.",
-  provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
-  closed: "이 계정은 로그인할 수 없습니다.",
-  limit: "이 주소에서 한 시간 안에 만든 계정이 너무 많습니다. 한 시간 뒤에 다시 시도해 주세요.",
-};
+const LOGIN_ERRORS = t("login_err");
 
 function showLogin(providers) {
   if (!$("#login").hidden) return;
@@ -1255,8 +1610,8 @@ function showLogin(providers) {
   // 로그인 뒤 지금 주소(검색어·펼친 항목)로 돌아온다
   const next = encodeURIComponent(location.pathname + location.search + location.hash);
   fill($("#login-btns"), providers.map((name) =>
-    el("a", { class: "pbtn", href: `/auth/login/${name}?next=${next}` }, `${PROVIDERS[name] || name} 로 계속하기`)));
-  if (!providers.length) fill($("#login-btns"), el("p", { class: "login-none" }, "켜진 로그인 공급자가 없습니다."));
+    el("a", { class: "pbtn", href: `/auth/login/${name}?next=${next}` }, t("login_with", PROVIDERS[name] || name))));
+  if (!providers.length) fill($("#login-btns"), el("p", { class: "login-none" }, t("no_providers")));
   $("#login-err").hidden = !code;
   $("#login-err").textContent = LOGIN_ERRORS[code] || "";
   for (const id of ["#app", "#toggle-side", "#new-btn", "#account"]) $(id).hidden = true;
@@ -1266,14 +1621,7 @@ function showLogin(providers) {
 }
 
 // 로그인 수단 추가 결과(/auth/link 콜백이 붙인 쿼리)
-const LINK_ERRORS = {
-  session: "로그인한 상태에서 다시 시도해 주세요.",
-  state: "시간이 지났거나 그 사이 로그아웃했습니다. 다시 시도해 주세요.",
-  provider: "로그인 공급자의 응답을 확인하지 못했습니다. 다시 시도해 주세요.",
-  closed: "이 계정은 추가할 수 없습니다.",
-  exists: "이 공급자의 다른 계정이 이미 연결되어 있습니다.",
-  denied: "로그인 수단 추가를 취소했습니다.",
-};
+const LINK_ERRORS = t("link_err");
 
 function linkResult() {
   const p = new URLSearchParams(location.search);
@@ -1282,16 +1630,16 @@ function linkResult() {
   for (const k of ["linked", "link_error", "discarded"]) p.delete(k);
   const rest = p.toString();
   history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
-  if (err) toast(LINK_ERRORS[err] || "로그인 수단을 추가하지 못했습니다.", { err: true });
-  else toast(`${PROVIDERS[ok] || ok} 로그인을 추가했습니다.` + (dropped ? " 그 계정이 쓰던 저장소는 버렸습니다." : ""));
+  if (err) toast(LINK_ERRORS[err] || t("link_fail"), { err: true });
+  else toast(t("linked", PROVIDERS[ok] || ok, dropped));
 }
 
 let me = null;  // 원격 모드 로그인 정보(/api/me)
 
 function showAccount(account) {
-  const fallback = account.providers.map((n) => `${PROVIDERS[n] || n} 계정`).join(", ");
+  const fallback = account.providers.map((n) => t("account_of", PROVIDERS[n] || n)).join(", ");
   $("#account-name").textContent = account.display_name || fallback;
-  $("#account-name").title = `${fallback}으로 로그인`;
+  $("#account-name").title = t("signed_in_with", fallback);
   $("#account").hidden = false;
 }
 
@@ -1322,7 +1670,7 @@ const PLUGIN_CMDS = (url) => [
 
 function cmdBox(command, label, done) {
   return el("div", { class: "cmd-box" }, el("pre", { class: "mono" }, command),
-    ibtn("cp", "copy", `${label} 복사`, `${label} 복사`, () => copy(command, done)));
+    ibtn("cp", "copy", t("copy_of", label), t("copy_of", label), () => copy(command, done)));
 }
 
 // 번호 단계 하나. 번호는 장식이라 읽지 않는다
@@ -1338,21 +1686,21 @@ function openConnect(open) {
   if (open) renderConnect();
 }
 
-async function revokeToken(t) {
-  if (!window.confirm(`토큰 "${t.name}" 을 폐기합니다. 이 토큰을 쓰는 PC 는 더 연결되지 않습니다.\n폐기하시겠습니까?`)) return;
+async function revokeToken(tk) {
+  if (!window.confirm(t("token_revoke_confirm", tk.name))) return;
   try {
-    await api("DELETE", `/api/account/tokens/${t.id}`);
+    await api("DELETE", `/api/account/tokens/${tk.id}`);
   } catch (e) {
     toast(e.message, { err: true });
     return;
   }
-  toast("토큰을 폐기했습니다.");
+  toast(t("token_revoked"));
   renderConnect();
 }
 
 // 연결된 앱: OAuth 로 승인한 연결(한 줄 연결, claude.ai 커넥터). 다시 연결할 때마다 클라이언트가 새로 등록되어
 // 이름이 같은 줄이 생기므로 연결한 시각까지 보인다
-const appName = (a) => a.name || "이름 없는 앱";
+const appName = (a) => a.name || t("unnamed_app");
 const stamp = (iso) => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -1361,14 +1709,14 @@ const stamp = (iso) => {
 };
 
 async function disconnectApp(a) {
-  if (!window.confirm(`${stamp(a.connected_at)} 에 연결한 "${appName(a)}" 의 연결을 끊습니다. 그 앱은 다시 연결해야 이 저장소를 쓸 수 있습니다.\n끊으시겠습니까?`)) return;
+  if (!window.confirm(t("app_disconnect_confirm", stamp(a.connected_at), appName(a)))) return;
   try {
     await api("DELETE", `/api/account/apps/${encodeURIComponent(a.client_id)}`);
   } catch (e) {
     toast(e.message, { err: true });
     return;
   }
-  toast("연결을 끊었습니다.");
+  toast(t("app_disconnected"));
   renderConnect();
 }
 
@@ -1376,17 +1724,17 @@ async function disconnectApp(a) {
 async function makeShare(kind, id) {
   try {
     const made = await api("POST", "/api/account/shares", { kind, id });
-    await copy(made.url, "공개 링크를 복사했습니다. 이 주소를 아는 사람은 로그인 없이 볼 수 있습니다.");
+    await copy(made.url, t("share_copied"));
   } catch (e) {
     toast(e.message, { err: true });
   }
 }
 
 async function revokeShare(s) {
-  if (!window.confirm(`"${s.title}" 의 공개 링크를 폐기합니다. 그 주소는 바로 열리지 않게 됩니다.\n폐기하시겠습니까?`)) return;
+  if (!window.confirm(t("share_revoke_confirm", s.title))) return;
   try {
     await api("DELETE", `/api/account/shares/${s.id}`);
-    toast("공개 링크를 폐기했습니다.");
+    toast(t("share_revoked"));
     renderConnect();
   } catch (e) {
     toast(e.message, { err: true });
@@ -1395,27 +1743,27 @@ async function revokeShare(s) {
 
 function sharesBlock(shares) {
   return el("div", { class: "cn-sec tokens" },
-    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "공개 링크"), el("span", { class: "cn-count" }, shares.length)),
+    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, t("shares")), el("span", { class: "cn-count" }, shares.length)),
     shares.length
       ? el("ul", { class: "token-list" }, shares.map((s) => el("li", { class: "token-item" },
         el("div", { class: "tk" }, el("span", { class: "name" }, s.title),
-          el("span", { class: "meta mono" }, s.kind === "qa" ? "질문 하나" : "분류", ` · 만든 날 ${(s.created_at || "").slice(0, 10)}`)),
-        el("button", { class: "btn small", type: "button", "aria-label": `${s.title} 공개 링크 폐기`, onclick: () => revokeShare(s) }, "폐기"))))
-      : el("p", { class: "connect-note" }, "펼친 항목의 공유 아이콘이나 분류 편집의 공유 아이콘으로 만듭니다. 주소를 아는 사람은 로그인 없이 그 내용을 읽습니다."));
+          el("span", { class: "meta mono" }, s.kind === "qa" ? t("share_kind_qa") : t("category"), t("created_on", (s.created_at || "").slice(0, 10)))),
+        el("button", { class: "btn small", type: "button", "aria-label": t("share_revoke_of", s.title), onclick: () => revokeShare(s) }, t("revoke")))))
+      : el("p", { class: "connect-note" }, t("shares_none")));
 }
 
 function appsBlock(apps) {
   return el("div", { class: "cn-sec tokens" },
-    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "연결된 앱"), el("span", { class: "cn-count" }, apps.length)),
+    el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, t("apps")), el("span", { class: "cn-count" }, apps.length)),
     apps.length
       ? el("ul", { class: "token-list" }, apps.map((a) => el("li", { class: "token-item" },
         el("div", { class: "tk" }, el("span", { class: "name" }, appName(a)),
-          el("span", { class: "meta mono", title: `연결 ${a.connected_at} · 마지막 사용 ${a.last_used_at}` },
-            el("span", { class: "nw" }, `연결 ${stamp(a.connected_at)}`), " · ",
-            el("span", { class: "nw" }, `마지막 사용 ${stamp(a.last_used_at)}`))),
-        el("button", { class: "btn small", type: "button", "aria-label": `${stamp(a.connected_at)} 에 연결한 ${appName(a)} 연결 끊기`,
-          onclick: () => disconnectApp(a) }, "끊기"))))
-      : el("p", { class: "connect-note" }, "브라우저에서 승인한 연결(한 줄 연결, claude.ai 커넥터)이 없습니다."));
+          el("span", { class: "meta mono", title: t("app_meta_title", a.connected_at, a.last_used_at) },
+            el("span", { class: "nw" }, t("app_connected", stamp(a.connected_at))), " · ",
+            el("span", { class: "nw" }, t("app_last_used", stamp(a.last_used_at))))),
+        el("button", { class: "btn small", type: "button", "aria-label": t("app_disconnect_of", stamp(a.connected_at), appName(a)),
+          onclick: () => disconnectApp(a) }, t("disconnect")))))
+      : el("p", { class: "connect-note" }, t("apps_none")));
 }
 
 async function renderConnect() {
@@ -1437,38 +1785,36 @@ async function renderConnect() {
   const pluginCmds = PLUGIN_CMDS(location.origin);
   fill($("#connect"),
     el("div", { class: "cn-head" },
-      el("div", {}, el("h2", {}, "연결"),
-        el("p", { class: "connect-note" }, touchOnly
-          ? "Claude Code 연결(한 줄 연결, 플러그인 설치)은 Claude Code 를 쓰는 PC 의 브라우저에서 합니다. 여기서는 토큰 폐기, 연결 끊기, 로그인 수단 추가, 내보내기, 탈퇴를 할 수 있습니다."
-          : "Claude Code 를 내 질문·답변 저장소에 연결합니다. 1단계만으로 쓸 수 있고, 2단계는 Claude Code 플러그인까지 이 PC 에 설치합니다.")),
-      el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, "닫기")),
-    touchOnly ? null : el("div", { class: "cn-sec code" }, el("span", { class: "cn-label" }, "Claude Code 연결"),
-      cnStep("1", "한 줄로 연결",
-        el("p", { class: "connect-note" }, "설치 없이 터미널에서 아래 명령을 실행합니다. 그다음 Claude Code 에서 /mcp 를 열어 fast-question 을 고르고, 브라우저에서 로그인·승인합니다."),
-        cmdBox(oneLine, "연결 명령", "연결 명령을 복사했습니다.")),
-      cnStep("2", "PC 에 설치",
-        el("p", { class: "connect-note" }, "Claude Code 플러그인을 설치하고 로그인합니다. PC 에 uv 가 있어야 합니다(Windows: winget install --id astral-sh.uv -e). 아래 명령을 차례로 실행하고, 브라우저에서 로그인·승인한 뒤 Claude Code 를 다시 시작합니다."),
-        cmdBox(pluginCmds[0], "마켓플레이스 추가 명령", "마켓플레이스 추가 명령을 복사했습니다."),
-        cmdBox(pluginCmds[1], "플러그인 설치 명령", "플러그인 설치 명령을 복사했습니다."),
-        cmdBox(pluginCmds[2], "로그인 명령", "로그인 명령을 복사했습니다."),
-        el("p", { class: "connect-note" }, "1단계로 등록한 fast-question 은 플러그인과 겹치므로 claude mcp remove -s user fast-question 으로 지웁니다."))),
+      el("div", {}, el("h2", {}, t("connect")),
+        el("p", { class: "connect-note" }, touchOnly ? t("connect_touch") : t("connect_intro"))),
+      el("button", { class: "btn small", type: "button", onclick: () => openConnect(false) }, t("close"))),
+    touchOnly ? null : el("div", { class: "cn-sec code" }, el("span", { class: "cn-label" }, t("cc_connect")),
+      cnStep("1", t("step1"),
+        el("p", { class: "connect-note" }, t("step1_note")),
+        cmdBox(oneLine, t("cmd_connect"), t("cmd_connect_done"))),
+      cnStep("2", t("step2"),
+        el("p", { class: "connect-note" }, t("step2_note")),
+        cmdBox(pluginCmds[0], t("cmd_market"), t("cmd_market_done")),
+        cmdBox(pluginCmds[1], t("cmd_plugin"), t("cmd_plugin_done")),
+        cmdBox(pluginCmds[2], t("cmd_login"), t("cmd_login_done")),
+        el("p", { class: "connect-note" }, t("step2_after")))),
     el("div", { class: "cn-sec tokens" },
-      el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, "만든 토큰"), el("span", { class: "cn-count" }, tokens.length)),
+      el("div", { class: "cn-label-row" }, el("span", { class: "cn-label" }, t("tokens")), el("span", { class: "cn-count" }, tokens.length)),
       tokens.length
-        ? el("ul", { class: "token-list" }, tokens.map((t) => el("li", { class: "token-item" + (t.expired ? " expired" : "") },
-          el("div", { class: "tk" }, el("span", { class: "name" }, t.name),
-            el("span", { class: "meta mono", title: `만든 날 ${t.created_at}` },
-              t.expired ? "만료" : `만료 ${day(t.expires_at)}`, t.last_used_at ? ` · 마지막 사용 ${day(t.last_used_at)}` : " · 아직 안 씀")),
-          ibtn("del", "trash", `${t.name} 토큰 폐기`, "폐기", () => revokeToken(t)))))
-        : el("p", { class: "connect-note" }, "아직 만든 토큰이 없습니다.")),
+        ? el("ul", { class: "token-list" }, tokens.map((tk) => el("li", { class: "token-item" + (tk.expired ? " expired" : "") },
+          el("div", { class: "tk" }, el("span", { class: "name" }, tk.name),
+            el("span", { class: "meta mono", title: t("token_created", tk.created_at) },
+              tk.expired ? t("expired") : t("expires", day(tk.expires_at)), tk.last_used_at ? t("last_used", day(tk.last_used_at)) : t("never_used"))),
+          ibtn("del", "trash", t("token_revoke_of", tk.name), t("revoke"), () => revokeToken(tk)))))
+        : el("p", { class: "connect-note" }, t("tokens_none"))),
     appsBlock(apps),
     sharesBlock(shares),
     loginBlock(),
-    el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "내보내기"),
-      el("p", { class: "connect-note" }, "내 저장소 전체를 SQLite 파일 하나로 받습니다. 로컬 모드 설정(config.json)의 db_path 로 지정하면 그대로 열립니다."),
-      el("div", { class: "cn-row" }, el("a", { class: "btn", href: "/api/export/db", download: "" }, "저장소 파일 받기"))),
+    el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, t("export")),
+      el("p", { class: "connect-note" }, t("export_note")),
+      el("div", { class: "cn-row" }, el("a", { class: "btn", href: "/api/export/db", download: "" }, t("export_db")))),
     leaveForm(),
-    el("div", { class: "cn-foot" }, el("a", { href: "/terms" }, "이용약관"), el("a", { href: "/privacy" }, "개인정보 처리방침")));
+    el("div", { class: "cn-foot" }, el("a", { href: "/terms" }, t("terms")), el("a", { href: "/privacy" }, t("privacy"))));
 }
 
 // 로그인 수단: 지금 계정에 다른 공급자 로그인을 붙인다. 그 공급자 계정이 이미 쓰던 DB 는 버린다
@@ -1476,18 +1822,17 @@ function loginBlock() {
   const mine = me?.account?.providers || [];
   const more = (me?.available || []).filter((n) => !mine.includes(n));
   const label = (n) => PROVIDERS[n] || n;
-  return el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, "로그인 수단"),
-    el("p", { class: "connect-note" }, `지금 ${mine.map(label).join(" · ")} 로 로그인할 수 있습니다.`
-      + (more.length ? " 다른 로그인을 추가하면 어느 쪽으로 들어와도 이 저장소가 열립니다. 추가하는 계정으로 이미 쓰던 저장소가 있으면 버려집니다(30일 뒤 삭제). 필요하면 먼저 그 계정으로 로그인해 저장소 파일을 받아 두세요." : "")),
+  return el("div", { class: "cn-sec" }, el("span", { class: "cn-label" }, t("logins")),
+    el("p", { class: "connect-note" }, t("logins_now", mine.map(label).join(" · ")) + (more.length ? t("logins_more") : "")),
     more.length ? el("div", { class: "cn-row" }, more.map((n) =>
       el("form", { method: "post", action: `/auth/link/${n}`, onsubmit: (ev) => {
-        if (!window.confirm(`${label(n)} 로그인을 이 계정에 추가합니다.\n그 ${label(n)} 계정으로 쓰던 fast question 저장소가 있으면 버려집니다(30일 뒤 삭제).\n추가하시겠습니까?`)) ev.preventDefault();
-      } }, el("button", { class: "btn", type: "submit" }, `${label(n)} 로그인 추가`)))) : null);
+        if (!window.confirm(t("login_add_confirm", label(n)))) ev.preventDefault();
+      } }, el("button", { class: "btn", type: "submit" }, t("login_add", label(n)))))) : null);
 }
 
-// 탈퇴: 확인 문구를 입력해야 버튼이 동작한다
+// 탈퇴: 확인 문구를 입력해야 버튼이 동작한다. 서버(web/auth.py 의 LEAVE_WORDS)가 "탈퇴" 와 "delete" 를 모두 받는다
 function leaveForm() {
-  const word = el("input", { class: "fld", "aria-label": "탈퇴 확인 문구", placeholder: "탈퇴", autocomplete: "off" });
+  const word = el("input", { class: "fld", "aria-label": t("leave_word_label"), placeholder: t("leave_word"), autocomplete: "off" });
   return el("form", { class: "cn-sec", onsubmit: async (ev) => {
     ev.preventDefault();
     try {
@@ -1499,9 +1844,9 @@ function leaveForm() {
     document.dispatchEvent(new Event("fq-logout"));
     location.href = "/";
   } },
-  el("span", { class: "cn-label" }, "탈퇴"),
-  el("p", { class: "connect-note" }, "계정을 지웁니다. 이 계정의 로그인·토큰이 모두 끊기고 저장소를 더 열 수 없습니다. 먼저 저장소 파일을 받아 두세요. 계속하려면 아래 칸에 \"탈퇴\" 를 입력하고 버튼을 누르세요."),
-  el("div", { class: "cn-row" }, word, el("button", { class: "btn danger", type: "submit" }, "탈퇴")));
+  el("span", { class: "cn-label" }, t("leave")),
+  el("p", { class: "connect-note" }, t("leave_note")),
+  el("div", { class: "cn-row" }, word, el("button", { class: "btn danger", type: "submit" }, t("leave"))));
 }
 
 // 로컬 모드는 그대로 시작한다. 원격 모드는 로그인했을 때만 true
@@ -1519,6 +1864,8 @@ async function whoami() {
 }
 
 function init() {
+  applyStatic();
+  window.fqLangButtons();
   const q = $("#q");
   // 검색어를 입력하면 펼친 행과 편집을 닫는다
   q.addEventListener("input", () => {

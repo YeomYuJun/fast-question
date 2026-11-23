@@ -24,7 +24,8 @@ def test_share_qa_is_readable_without_login_until_revoked(app, cfg):
         assert made["url"].startswith(f"{URL}/s/") and made["title"] == a["question"]
         token = made["url"].rsplit("/", 1)[1]
         # 같은 대상은 두 번 만들지 않는다
-        assert c.post("/api/account/shares", json={"kind": "qa", "id": a["id"]}).status_code == 400
+        dup = c.post("/api/account/shares", json={"kind": "qa", "id": a["id"]})
+        assert dup.status_code == 400 and dup.json()["code"] == "share_exists"
         assert [s["id"] for s in c.get("/api/account/shares").json()["shares"]] == [made["id"]]
     with TestClient(app, base_url=URL) as anon:
         assert anon.get(f"/s/{token}").status_code == 200 and "share.js" in anon.get(f"/s/{token}").text
@@ -93,7 +94,7 @@ def test_share_limit_per_account(tmp_path):
             share.create(conn, acc, "qa", 3)
             assert False, "상한을 넘겼다"
         except share.ShareRefused as e:
-            assert "2개" in str(e)
+            assert "up to 2 share links" in str(e) and e.code == "share_limit"
     finally:
         share.SHARE_MAX = keep
         conn.close()

@@ -38,8 +38,34 @@ def pkce() -> tuple[str, str]:
     return verifier, base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-DONE_PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>fast-question</title></head>
+DONE_PAGE = """<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><title>fast-question</title></head>
 <body><p>{text}</p></body></html>"""
+DONE_TEXT = {
+    "ko": {"ok": "로그인을 마쳤습니다. 이 창을 닫고 터미널로 돌아가세요.", "denied": "연결을 거부했습니다. 이 창을 닫아도 됩니다."},
+    "en": {"ok": "Sign-in complete. Close this window and return to the terminal.",
+           "denied": "You denied the connection. You can close this window."},
+}
+
+
+def pick_lang(accept_language: str | None) -> str:
+    """Accept-Language 에서 ko·en 중 가중치(q)가 가장 높은 쪽. 같으면 앞의 것, 둘 다 없으면 en.
+    서버의 web/cli_login.py pick_lang 과 같은 규칙이다(이 패키지는 web/ 을 담지 않는다)."""
+    best, best_q = "en", 0.0
+    for part in (accept_language or "").split(","):
+        tag, *params = (s.strip() for s in part.split(";"))
+        tag = tag.lower()
+        lang = "ko" if tag == "ko" or tag.startswith("ko-") else "en" if tag == "en" or tag.startswith("en-") else None
+        q = 1.0
+        for p in params:
+            k, _, v = p.partition("=")
+            if k.strip().lower() == "q":
+                try:
+                    q = float(v)
+                except ValueError:
+                    q = 0.0
+        if lang and q > best_q:
+            best, best_q = lang, q
+    return best
 
 
 class CallbackServer(HTTPServer):
@@ -58,9 +84,9 @@ class CallbackServer(HTTPServer):
                     self.send_error(404)
                     return
                 outer.result = q
-                text = ("로그인을 마쳤습니다. 이 창을 닫고 터미널로 돌아가세요." if q.get("code")
-                        else "연결을 거부했습니다. 이 창을 닫아도 됩니다.")
-                body = DONE_PAGE.format(text=text).encode("utf-8")
+                lang = pick_lang(self.headers.get("Accept-Language"))
+                text = DONE_TEXT[lang]["ok" if q.get("code") else "denied"]
+                body = DONE_PAGE.format(text=text, lang=lang).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -100,15 +126,15 @@ def exchange(url: str, code: str, verifier: str, replaces: str = "", opener=urlo
             msg = json.loads(e.read().decode("utf-8")).get("error")
         except ValueError:
             msg = None
-        raise LoginError(msg or f"서버가 토큰 발급을 거부했습니다(HTTP {e.code}).") from None
+        raise LoginError(msg or f"The server refused to issue a token (HTTP {e.code}).") from None
     except URLError as e:
-        raise LoginError(f"서버에 연결하지 못했습니다: {url} ({e.reason})") from None
+        raise LoginError(f"Could not connect to the server: {url} ({e.reason})") from None
 
 
 def resolve_url(given: str | None, old: dict | None) -> str:
     url = (given or (old["url"] if old else "") or DEFAULT_URL).strip().rstrip("/")
     if not url.startswith(("https://", "http://")):
-        raise LoginError(f"서버 주소는 https:// 로 시작해야 합니다: {url}")
+        raise LoginError(f"The server address must start with https://: {url}")
     return url
 
 
@@ -129,9 +155,9 @@ def login(url: str | None = None, *, path: Path | None = None, open_browser: Cal
     finally:
         server.server_close()
     if got is None:
-        raise LoginError(f"{int(wait_s // 60)}분 안에 승인하지 않아 끝냈습니다. 다시 실행하세요.")
+        raise LoginError(f"No approval within {int(wait_s // 60)} minutes, so login stopped. Run it again.")
     if not got.get("code"):
-        raise LoginError("브라우저에서 연결을 거부했습니다.")
+        raise LoginError("The connection was denied in the browser.")
     made = exchange(url, got["code"], verifier, replaces, opener)
     saved = save_credentials(url, made["token"], path=path)
     acc = made.get("account") or {}
@@ -148,6 +174,6 @@ def main(url: str | None = None) -> int:
         print(str(e))
         return 1
     except OSError as e:
-        print(f"자격 증명 파일을 쓰지 못했습니다: {credentials_path()} ({e})")
+        print(f"Could not write the credentials file: {credentials_path()} ({e})")
         return 1
     return 0

@@ -47,6 +47,15 @@ def test_delete_account_cuts_every_access(cfg, app):
         conn.close()
 
 
+def test_delete_account_takes_english_confirmation(app):
+    with TestClient(app, base_url=URL) as c:
+        login(c)
+        r = c.post("/api/account/delete", json={"confirm": "네"}, headers={"Origin": URL})
+        assert r.status_code == 400 and "'delete'" in r.json()["error"] and "'탈퇴'" in r.json()["error"]
+        assert c.post("/api/account/delete", json={"confirm": "delete"}, headers={"Origin": URL}).json() == {"ok": True}
+        assert c.get("/api/me").status_code == 401
+
+
 def test_closed_account_identity_is_purged_after_30_days_then_can_sign_up_again(tmp_path):
     conn = control.connect_control(tmp_path / "control.sqlite3")
     t0 = datetime(2026, 10, 16, tzinfo=timezone.utc)

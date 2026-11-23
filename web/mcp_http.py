@@ -36,7 +36,7 @@ class RemoteMcp:
     def open_store(self) -> Store:
         token = get_access_token()
         if token is None or not (token.subject or "").isdigit():
-            raise ValueError("인증된 계정이 없습니다.")
+            raise ValueError("There is no authenticated account.")
         path = tenant.db_path_for(self.cfg.data_dir, int(token.subject))
         return Store(self.opener(path), "claude", analyzer=self.analyzer, remote=True)
 
@@ -71,6 +71,6 @@ class RemoteMcp:
         if self._app is None:  # lifespan 밖(기동 전·종료 뒤)
             if scope["type"] == "http":
                 from starlette.responses import JSONResponse
-                await JSONResponse({"error": "MCP 가 준비되지 않았습니다."}, status_code=503)(scope, receive, send)
+                await JSONResponse({"error": "MCP is not ready.", "code": "unavailable"}, status_code=503)(scope, receive, send)
             return
         await self._app(scope, receive, send)

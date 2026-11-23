@@ -27,7 +27,7 @@ def export_markdown(store: Store, category_id: int) -> tuple[str, str]:
     tree = store.categories()
     cat = next((c for t in tree for c in [t, *t["children"]] if c["id"] == category_id), None)
     if cat is None:
-        raise NotFoundError(f"분류를 찾지 못했습니다: {category_id}")
+        raise NotFoundError(f"Category not found: {category_id}")
 
     def items(cid: int) -> list[str]:
         rows = store.conn.execute(
@@ -47,7 +47,7 @@ def routes(calls, tmp_dir: Path | None, importing: set[Path]) -> list[Route]:
     async def markdown(request: Request) -> Response:
         raw = request.query_params.get("category", "")
         if not raw.isdigit():
-            return JSONResponse({"error": "category 에 분류 id 가 필요합니다."}, status_code=400)
+            return JSONResponse({"error": "category requires a category id.", "code": "invalid"}, status_code=400)
         try:
             cat_path, text = await calls.run(request, lambda s: export_markdown(s, int(raw)))
         except calls.Reply as r:
@@ -63,7 +63,7 @@ def routes(calls, tmp_dir: Path | None, importing: set[Path]) -> list[Route]:
         if db is None:
             return calls.unauthorized()
         if db in importing:
-            return JSONResponse({"error": "이 계정의 가져오기나 내보내기가 진행 중입니다. 끝난 뒤 다시 시도해 주세요.",
+            return JSONResponse({"error": "An import or export is in progress for this account. Try again after it finishes.",
                                  "code": "busy"}, status_code=409)
         importing.add(db)
 

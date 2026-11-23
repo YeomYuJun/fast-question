@@ -16,7 +16,7 @@ from web import auth
 
 REDIRECT = "http://localhost:33418/callback"
 RESOURCE = f"{URL}/mcp"
-CONSENT = "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다"
+CONSENT = "Claude Code will read and write your Q&amp;A repository"  # Accept-Language 가 없으면 영어 화면이다
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}}
 
@@ -150,6 +150,22 @@ def test_login_page_without_session(app):
         assert "/static/tokens.css" in page.text
         assert login(c, "google", next_=path).headers["location"] == path
         assert CONSENT in c.get(path).text
+
+
+def test_oauth_pages_follow_accept_language(app):
+    """로그인·동의·끝 화면은 Accept-Language 에서 가중치가 높은 쪽(ko·en)으로 그린다. 없으면 영어다."""
+    ko = {"Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8"}
+    with client(app) as c:
+        _, _, path = pending(c)
+        assert '<html lang="en">' in c.get(path).text and "Sign in with Google" in c.get(path).text
+        page = c.get(path, headers=ko).text
+        assert '<html lang="ko">' in page and "Google 로 로그인" in page and "이용약관" in page
+        assert "Sign in with" in c.get(path, headers={"Accept-Language": "ko;q=0.3, en;q=0.9"}).text
+        login(c, next_=path)
+        assert "Claude Code 가 내 질문·답변 저장소를 읽고 씁니다" in c.get(path, headers=ko).text
+        assert CONSENT in c.get(path, headers={"Accept-Language": "fr-FR"}).text
+        assert "연결 요청이 끝났습니다" in c.get("/oauth/continue/none", headers=ko).text
+        assert "This connection request has ended" in c.get("/oauth/continue/none").text
 
 
 def test_oauth_pages_have_csp_and_no_inline_style(app):

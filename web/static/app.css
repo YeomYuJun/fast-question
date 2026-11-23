@@ -36,6 +36,14 @@ mark.hit { background: var(--match-bg); color: var(--match-ink); border-radius: 
 }
 .iconbtn:hover { border-color: var(--accent-line); color: var(--accent); }
 .iconbtn:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.langs { display: flex; gap: 4px; }
+.lang {
+  border: 1px solid var(--line); background: transparent; border-radius: var(--radius-md);
+  padding: 3px 8px; font-size: 12px; line-height: 20px; cursor: pointer; color: var(--muted);
+}
+.lang:hover { border-color: var(--accent-line); color: var(--accent); }
+.lang.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+.lang:focus-visible { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .fld {
   min-width: 0; border: 1px solid var(--line-strong); background: var(--surface);
   border-radius: var(--radius-md); padding: 4px 8px;
@@ -209,6 +217,8 @@ a.ibtn:hover { text-decoration: none; }
 }
 .dline { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
 .dline .label { flex: none; width: 28px; font-size: 11px; font-weight: 600; color: var(--faint); }
+/* 영어 이름표(Evidence, Related, History)는 한글 두 글자보다 길다 */
+html:lang(en) .dline .label { width: 54px; }
 .dline .val { flex: 1; min-width: 0; }
 .dline .val.ell { cursor: pointer; }
 .dline .val.wrap { white-space: normal; overflow-wrap: anywhere; }
@@ -257,6 +267,7 @@ a.ibtn:hover { text-decoration: none; }
   /* 이력 글이 잘리지 않게 복사·주소 복사·편집 버튼은 다음 줄 오른쪽으로 보낸다 */
   .dline.hline { flex-wrap: wrap; row-gap: 4px; }
   .dline.hline > .hist { flex-basis: calc(100% - 38px); }
+  html:lang(en) .dline.hline > .hist { flex-basis: calc(100% - 64px); }
   .dline.hline > .hist + * { margin-left: auto; }
 }
 .emsg { padding-left: 20px; font-size: 12.5px; color: var(--stale); }
@@ -542,6 +553,14 @@ body.claude-open .keys { display: none; }
 }
 @media (min-width: 901px) and (max-width: 1000px) {
   body.claude-open .account-name { display: none; }
+}
+/* 언어 버튼까지 두면 계정 버튼이 Claude 버튼 밑으로 겹친다. 패널을 닫으면 다시 보인다 */
+@media (min-width: 901px) and (max-width: 1200px) {
+  body.claude-open .langs { display: none; }
+}
+/* 영어 버튼 글자는 한글보다 길어 1000px 이하에서는 한 줄에 들지 않는다. 겹치지 않게 두 줄로 꺾는다 */
+@media (min-width: 901px) and (max-width: 1000px) {
+  html:lang(en) body.claude-open .top { flex-wrap: wrap; }
 }
 /* 남은 폭이 좁으면 분류 패널이 목록 위로 꺾인다. 그때 화면 높이를 다 차지하지 않게 하고, 목록은 360px 까지 옆에 둔다 */
 body.claude-open .side { min-height: 0; }

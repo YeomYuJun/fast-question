@@ -64,9 +64,10 @@ def browser():
         b.close()
 
 
-def new_page(browser, site, logged_in: bool, errors: list[str]):
+def new_page(browser, site, logged_in: bool, errors: list[str], locale: str = "ko-KR"):
+    """화면 언어는 navigator.language 를 따르므로 브라우저 언어를 정해 연다."""
     url, cookie, token = site
-    ctx = browser.new_context(base_url=url, viewport={"width": 1280, "height": 900})
+    ctx = browser.new_context(base_url=url, viewport={"width": 1280, "height": 900}, locale=locale)
     if logged_in:
         ctx.add_cookies([{"name": cookie, "value": token, "url": url}])
     page = ctx.new_page()
@@ -134,5 +135,96 @@ def test_share_link_opens_without_login_and_stops_after_revoke(browser, site, pa
     assert page.request.delete(f"/api/account/shares/{listed[0]['id']}").ok
     guest.reload()
     expect(guest.locator("#share-items")).not_to_contain_text(hit["question"])
+    expect(guest.locator("#share-title")).to_have_text("공개 링크를 찾지 못했습니다")
+    ctx.close()
+    assert errors == []
+
+
+# ---- 화면 언어: 로그인한 원격 모드에만 있는 화면(연결 패널, Claude 패널, 로그인 화면, 공개 링크) ----
+
+from tests.test_e2e_screen import HANGUL_IN_UI  # noqa: E402
+
+
+@pytest.fixture
+def en_page(browser, site):
+    errors: list[str] = []
+    ctx, pg = new_page(browser, site, True, errors, "en-US")
+    yield pg
+    ctx.close()
+    assert errors == [], errors
+
+
+def test_english_connect_and_claude_panels_have_no_korean_ui(en_page):
+    page = en_page
+    page.goto("/")
+    expect(page.locator("#account")).to_be_visible()
+    expect(page.locator("#connect-btn")).to_have_text("Connect")
+    page.click("#connect-btn")
+    panel = page.locator("#connect")
+    expect(panel.locator("h2")).to_have_text("Connect")
+    expect(panel).to_contain_text("Delete account")
+    assert page.evaluate(HANGUL_IN_UI, "#connect") == []
+    page.click("#claude-btn")
+    expect(page.locator("#claude h3")).to_have_text("Connect Claude to this repository")
+    assert page.evaluate(HANGUL_IN_UI, "#claude, header.top") == []
+
+
+HEADER_OVERLAP = """() => [...document.querySelectorAll('.top > *')].some((a, i, all) => all.slice(i + 1).some((b) => {
+  const p = a.getBoundingClientRect(), q = b.getBoundingClientRect();
+  return p.width && q.width && p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
+}))"""
+
+
+@pytest.mark.parametrize("locale", ["ko-KR", "en-US"])
+@pytest.mark.parametrize("width", [902, 960, 1100, 1201])
+def test_header_buttons_do_not_overlap_with_claude_panel_open(browser, site, locale, width):
+    """패널이 열리면 상단은 남은 폭에 든다. 영어 버튼 글자는 길어 좁은 폭에서 언어 버튼을 숨기거나 두 줄로 꺾는다."""
+    errors: list[str] = []
+    ctx, page = new_page(browser, site, True, errors, locale)
+    page.set_viewport_size({"width": width, "height": 700})
+    page.goto("/")
+    expect(page.locator("#account")).to_be_visible()
+    page.click("#claude-btn")
+    expect(page.locator("#claude h3")).to_be_visible()
+    assert page.evaluate(HEADER_OVERLAP) is False
+    ctx.close()
+    assert errors == []
+
+
+def test_korean_connect_and_claude_panels(page):
+    page.goto("/")
+    page.click("#connect-btn")
+    expect(page.locator("#connect h2")).to_have_text("연결")
+    expect(page.locator("#connect")).to_contain_text("탈퇴")
+    page.click("#claude-btn")
+    expect(page.locator("#claude h3")).to_have_text("Claude 를 이 저장소에 연결")
+    expect(page.locator("#claude")).not_to_contain_text("null")  # 키가 유효할 때 빈 경고 자리가 글자로 남지 않는다
+
+
+def test_english_login_screen_without_providers(browser, site):
+    errors: list[str] = []
+    ctx, page = new_page(browser, site, False, errors, "en-US")
+    page.goto("/")
+    expect(page.locator("#login")).to_be_visible()
+    expect(page.locator("#login-title")).to_have_text("Get started with fast question")
+    expect(page.locator("#login-btns")).to_have_text("No sign-in provider is enabled.")
+    assert page.evaluate(HANGUL_IN_UI, "#login, header.top") == []
+    ctx.close()
+    assert errors == []
+
+
+def test_english_share_page(browser, site, page):
+    page.goto("/")
+    hit = page.request.get("/api/search", params={"q": ""}).json()["hits"][0]
+    made = page.request.post("/api/account/shares", data={"kind": "qa", "id": hit["id"]}).json()
+    errors: list[str] = []
+    ctx, guest = new_page(browser, site, False, errors, "en-US")
+    guest.goto(made["url"])
+    expect(guest.locator("#share-title")).to_have_text("Shared question")
+    assert guest.evaluate("document.documentElement.lang") == "en"
+    expect(guest.locator(".doc-foot")).to_contain_text("Privacy Policy")
+    guest.goto(made["url"] + "x")
+    expect(guest.locator("#share-title")).to_have_text("Public link not found")
+    expect(guest.locator("#share-lead")).to_have_text("It was revoked or the address does not exist.")
     ctx.close()
     assert errors == []

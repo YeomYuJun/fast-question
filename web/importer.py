@@ -3,16 +3,16 @@ POST /api/import/db/plan 은 같은 파일을 받아 쓰기 없이 처리 방식
 
 요청 본문은 SQLite 파일 그대로(application/octet-stream)이고 IMPORT_MAX_BYTES 까지 받는다. 사용자 PC 쪽은
 scripts/push_local.py 가 온라인 백업 사본을 만들어 개인 토큰으로 올린다. 브라우저 세션으로도 부를 수 있다.
-받은 파일은 integrity_check → meta.schema_version(이 서버와 같아야 한다) → 표 목록(kb/schema.py 와 같아야 한다) → 뷰 없음
-순서로 검사하고, 하나라도 틀리면 400 으로 거부하고 사용자 DB 를 건드리지 않는다.
+받은 파일은 integrity_check → meta.schema_version(이 서버보다 새 버전이면 거부, 옛 버전이면 받은 파일에 스키마 이전을 적용)
+→ 표 목록(kb/schema.py 와 같아야 한다) → 뷰 없음 순서로 검사하고, 하나라도 틀리면 400 으로 거부하고 사용자 DB 를 건드리지 않는다.
 검사를 통과한 파일에서 system 이 만든 Q&A(올린 PC 의 로컬 기본 가이드)를 행째 지운다(kb.dbcopy.prune).
 로컬 가이드는 로컬 화면 주소와 저장소 파일 근거를 담고 있어 원격 계정에 맞지 않는다.
 - 사용자 DB 가 없거나 비었으면(system 이 아닌 주체가 만든 행이 없다. 기본 가이드만 있는 DB 도 여기에 든다)
   SQLite 백업 API 로 파일 내용을 통째로 바꾼다. revision 이력까지 그대로 옮겨진다. 바꾼 뒤 원격 기본 가이드
   (guide_data)를 다시 넣는다. 바꾸기 전에 정리한 파일의 행 수(kb.store.QUOTAS, 삭제한 행 포함)와 크기
   (kb.store.DB_MAX_BYTES)를 계정당 상한과 견주고, 넘으면 400(code quota)으로 거부한다. 미리보기도 같다.
-- 비어 있지 않으면 살아 있는 항목을 하나씩 add_qa 로 넣는다. 가져오기 전부터 있던 항목과 질문이 비슷하면
-  (Store.similar 와 같은 기준) 넣지 않고 skipped 로 돌려준다. 근거는 파일의 캡처값을 그대로 넣고(Store(remote=True)
+- 비어 있지 않으면 살아 있는 항목을 하나씩 add_qa 로 넣는다. 가져오기 전부터 있던 항목과 질문이 등록을 막는 수준으로
+  비슷하면(kb.text.similar_level 의 block, add_qa 가 similar_found 로 막는 기준) 넣지 않고 skipped 로 돌려준다. 근거는 파일의 캡처값을 그대로 넣고(Store(remote=True)
   의 captured 경로) 판정은 same 으로 시작한다. 보관한 항목, 관련 질문 연결, 사전(동의어·불용어·사용자 단어)은
   옮기지 않는다.
 - 쿼리 origin(올린 PC 의 device_id)이 있으면 파일·폴더·git 근거의 캡처값에 origin 으로 붙인다. 로컬 검사기는 자기
@@ -38,13 +38,13 @@ from starlette.routing import Route
 from kb import guide
 from kb import search as search_mod
 from kb import store as store_mod
-from kb.db import BUMP, connect, tx
+from kb.db import BUMP, connect, set_meta, tx
 from kb.dbcopy import prune
 from kb.errors import KbError
 from kb.evidence import ROW_KEYS, spec_of
 from kb.schema import SCHEMA_VERSION
 from kb.store import Store
-from kb.text import SIMILAR_MIN, bigrams, dice
+from kb.text import similar_level
 
 IMPORT_MAX_BYTES = 200 * 1024 * 1024
 CHECKED_KINDS = ("file", "dir", "git", "githead")
@@ -73,35 +73,43 @@ def _tables(conn: sqlite3.Connection) -> frozenset[str]:
 
 
 def validate(path: Path) -> None:
-    """kb.db.connect 는 스키마를 깔고 이전하므로 쓰지 않고 sqlite3 로 그대로 연다."""
+    """kb.db.connect 는 스키마를 깔고 이전하므로 검사 전에는 쓰지 않고 sqlite3 로 그대로 연다.
+    무결성과 schema_version 을 확인한 뒤 옛 버전이면 그 파일에 kb.db.connect 의 이전을 적용하고 나머지를 검사한다."""
     try:
         conn = sqlite3.connect(str(path))
     except sqlite3.Error as e:
-        raise ImportRefused(f"SQLite 파일을 열지 못했습니다: {e}") from None
+        raise ImportRefused(f"Could not open the SQLite file: {e}") from None
     try:
         try:
             check = [r[0] for r in conn.execute("PRAGMA integrity_check").fetchall()]
         except sqlite3.DatabaseError as e:
-            raise ImportRefused(f"SQLite 파일이 아니거나 손상됐습니다: {e}") from None
+            raise ImportRefused(f"Not a SQLite file, or the file is damaged: {e}") from None
         if check != ["ok"]:
-            raise ImportRefused(f"파일이 손상됐습니다(integrity_check): {'; '.join(check[:3])}")
+            raise ImportRefused(f"The file is damaged (integrity_check): {'; '.join(check[:3])}")
         try:
             row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         except sqlite3.DatabaseError:
             row = None
         if row is None:
-            raise ImportRefused("fast question 저장소 파일이 아닙니다(meta.schema_version 이 없습니다).")
-        if row[0] != SCHEMA_VERSION:
-            raise ImportRefused(f"스키마 버전이 {row[0]} 입니다. 이 서버는 {SCHEMA_VERSION} 만 받습니다. "
-                                "로컬 저장소를 최신으로 올리고 웹 서버를 한 번 띄운 뒤 다시 올려 주세요.")
+            raise ImportRefused("Not a fast question store file (meta.schema_version is missing).")
+        if row[0].isdigit() and int(row[0]) < int(SCHEMA_VERSION):
+            conn.close()
+            try:
+                connect(path).close()
+            except sqlite3.Error as e:
+                raise ImportRefused(f"Could not upgrade the file from schema version {row[0]}: {e}") from None
+            conn = sqlite3.connect(str(path))
+        elif row[0] != SCHEMA_VERSION:
+            raise ImportRefused(f"The schema version is {row[0]}. This server accepts {SCHEMA_VERSION} and older. "
+                                "Update this server, then upload again.")
         tables = _tables(conn)
         if tables != expected_tables():
             diff = sorted(tables ^ expected_tables())
-            raise ImportRefused(f"표 목록이 이 서버의 스키마와 다릅니다: {', '.join(diff)}")
+            raise ImportRefused(f"The table list differs from this server's schema: {', '.join(diff)}")
         # 뷰는 서버 스키마에 없다. 올린 파일의 트리거는 prune 이 서버 것으로 바꾸지만 뷰는 남으므로 받지 않는다
         views = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'view'")]
         if views:
-            raise ImportRefused(f"이 서버의 스키마에 없는 뷰가 있습니다: {', '.join(sorted(views)[:5])}")
+            raise ImportRefused(f"There are views not in this server's schema: {', '.join(sorted(views)[:5])}")
     finally:
         conn.close()
 
@@ -130,20 +138,23 @@ def check_quota(upload: Path) -> None:
         for table, (label, limit) in store_mod.QUOTAS.items():
             n = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             if n > limit:
-                raise ImportRefused(f"올린 파일에 {label} {n}건이 있습니다(삭제한 것 포함). 계정당 {limit}건까지 받습니다.",
+                raise ImportRefused(f"The uploaded file has {n} {label} (deleted ones included). Each account accepts up to {limit}.",
                                     code="quota")
         size = store_mod.db_bytes(conn)
     finally:
         conn.close()
     if size > store_mod.DB_MAX_BYTES:
-        raise ImportRefused(f"올린 파일이 {size // store_mod.MB} MB 입니다. 계정당 DB 파일은 "
-                            f"{store_mod.DB_MAX_BYTES // store_mod.MB} MB 까지 받습니다.", code="quota")
+        raise ImportRefused(f"The uploaded file is {size // store_mod.MB} MB. Each account accepts a DB file of up to "
+                            f"{store_mod.DB_MAX_BYTES // store_mod.MB} MB.", code="quota")
 
 
-def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[], dict] | None = None) -> dict:
+def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[str], dict] | None = None) -> dict:
+    fresh = not db.exists()
     src = sqlite3.connect(str(upload))
     dst = connect(db)
     try:
+        # 계정의 가이드 언어는 올린 파일의 meta 로 바뀌지 않는다. 이 가져오기가 만든 DB 는 meta 가 없어도 기존 계정이 아니다
+        lang = guide.DEFAULT_LANG if fresh else guide.lang_of(dst)
         src.backup(dst)  # 파일을 바꿔 끼우지 않는다. 남은 -wal 이 새 파일에 다시 적용되는 일을 막는다
         dst.execute("PRAGMA journal_mode = WAL")
         with tx(dst):  # 로컬의 마지막 백업 시각이 따라오면 서버 백업이 그만큼 미뤄진다
@@ -152,7 +163,8 @@ def replace(db: Path, upload: Path, origin: str = "", guide_data: Callable[[], d
             _stamp_origin(dst, origin)
         items = _live_items(dst)
         if guide_data is not None:
-            guide.seed(Store(dst, "system"), guide_data())
+            set_meta(dst, "guide_lang", lang)
+            guide.seed(Store(dst, "system"), guide_data(lang))
     finally:
         dst.close()
         src.close()
@@ -196,13 +208,13 @@ def _evidence_specs(src: sqlite3.Connection, qa_id: int, origin: str = "") -> li
 
 def _sort(src: sqlite3.Connection, conn: sqlite3.Connection) -> tuple[list, list]:
     """올린 파일의 살아 있는 항목을 (넣을 행, 건너뛸 항목)으로 나눈다. 가져오기 전부터 있던 항목과 질문이
-    비슷하면 건너뛴다. 미리보기와 실제 병합이 같은 판정을 쓴다."""
-    before = [(r[0], r[1], bigrams(r[1])) for r in conn.execute("SELECT id, question FROM qa WHERE deleted_at IS NULL")]
+    kb.text.similar_level 의 block 수준이면 건너뛴다(notice 수준은 넣는다). 미리보기와 실제 병합이 같은 판정을 쓴다."""
+    before = [(r[0], r[1]) for r in conn.execute("SELECT id, question FROM qa WHERE deleted_at IS NULL")]
     rows, skipped = [], []
     for r in src.execute("SELECT id, category_id, question, answer FROM qa WHERE deleted_at IS NULL ORDER BY id"):
-        target = bigrams(r["question"])
-        similar = sorted(((round(dice(target, b), 2), i, q) for i, q, b in before
-                          if dice(target, b) >= SIMILAR_MIN), reverse=True)[:5]
+        levels = ((similar_level(r["question"], q), i, q) for i, q in before)
+        similar = sorted(((round(score, 2), i, q) for (score, level), i, q in levels if level == "block"),
+                         reverse=True)[:5]
         if similar:
             skipped.append({"question": r["question"],
                             "similar": [{"id": i, "question": q, "score": sc} for sc, i, q in similar]})
@@ -245,9 +257,9 @@ def _will_replace(db: Path) -> bool:
 
 
 def run_import(db: Path, upload: Path, analyzer=None, lock=None, origin: str = "",
-               guide_data: Callable[[], dict] | None = None) -> dict:
+               guide_data: Callable[[str], dict] | None = None) -> dict:
     if origin and not ORIGIN_RE.fullmatch(origin):
-        raise ImportRefused("origin 은 영문·숫자·- 64자 이하여야 합니다.")
+        raise ImportRefused("origin must be at most 64 letters, digits or hyphens.")
     validate(upload)
     prune(upload)
     with lock or threading.Lock():
@@ -278,11 +290,11 @@ def plan(db: Path, upload: Path) -> dict:
 
 
 def routes(db_for: Callable[[Request], Path | None], tmp_root: Path, analyzer,
-           lock_for: Callable[[Path], threading.Lock], guide_data: Callable[[], dict] | None = None,
+           lock_for: Callable[[Path], threading.Lock], guide_data: Callable[[str], dict] | None = None,
            importing: set[Path] | None = None) -> list[Route]:
     """db_for: 요청의 계정 DB 경로(로그인 전이면 None). tmp_root: 받은 파일을 잠시 둘 폴더(데이터 디스크 안).
     lock_for: 계정 DB 의 잠금(web/app.py 가 새 DB 를 만들 때도 같은 잠금을 쓴다).
-    guide_data: 통째로 바꾼 뒤 다시 넣을 원격 기본 가이드(kb.guide.load_remote).
+    guide_data: 언어(바꾸기 전 계정 DB 의 kb.guide.lang_of, 계정 DB 가 없었으면 kb.guide.DEFAULT_LANG)를 받아 통째로 바꾼 뒤 다시 넣을 원격 기본 가이드.
     importing: 가져오기가 진행 중인 계정 DB 경로(resolve 한 값). 이벤트 루프에서만 읽고 쓴다."""
     importing = set() if importing is None else importing
 
@@ -301,13 +313,13 @@ def handler(db_for: Callable[[Request], Path | None], tmp_root: Path,
     async def import_db(request: Request) -> JSONResponse:
         db = db_for(request)
         if db is None:
-            return JSONResponse({"error": "로그인이 필요합니다.", "code": "unauthorized"}, status_code=401)
+            return JSONResponse({"error": "Login is required.", "code": "unauthorized"}, status_code=401)
         length = request.headers.get("content-length", "")
         if length.isdigit() and int(length) > IMPORT_MAX_BYTES:
             return _too_large()
         key = db.resolve()
         if key in importing:  # 확인과 표시 사이에 await 가 없어 같은 계정의 요청 둘이 함께 들어오지 못한다
-            return JSONResponse({"error": "이 계정의 가져오기가 이미 진행 중입니다. 끝난 뒤 다시 시도하세요.",
+            return JSONResponse({"error": "An import is already in progress for this account. Try again after it finishes.",
                                  "code": "busy"}, status_code=409)
         importing.add(key)
         try:
@@ -331,14 +343,14 @@ async def _receive_and_run(request: Request, db: Path, tmp_root: Path,
                     return _too_large()
                 f.write(chunk)
         if size == 0:
-            return JSONResponse({"error": "요청 본문에 SQLite 파일이 없습니다.", "code": "invalid_db"},
+            return JSONResponse({"error": "The request body has no SQLite file.", "code": "invalid_db"},
                                 status_code=400)
         try:
             result = await run_in_threadpool(run, request, db, upload)
         except ImportRefused as e:
             return JSONResponse({"error": e.message, "code": e.code}, status_code=e.status)
         except sqlite3.OperationalError as e:
-            return JSONResponse({"error": f"저장소가 다른 쓰기로 잠겨 있습니다. 잠시 뒤 다시 시도해 주세요. ({e})",
+            return JSONResponse({"error": f"The store is locked by another write. Try again shortly. ({e})",
                                  "code": "busy"}, status_code=503)
         return JSONResponse(result)
     finally:
@@ -346,5 +358,5 @@ async def _receive_and_run(request: Request, db: Path, tmp_root: Path,
 
 
 def _too_large() -> JSONResponse:
-    return JSONResponse({"error": f"가져올 파일은 {IMPORT_MAX_BYTES // (1024 * 1024)} MB 까지 받습니다.",
+    return JSONResponse({"error": f"Import files can be at most {IMPORT_MAX_BYTES // (1024 * 1024)} MB.",
                          "code": "too_large"}, status_code=413)

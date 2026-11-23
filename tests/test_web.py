@@ -68,7 +68,8 @@ def test_page_has_csp_and_no_inline_code(client):
 def test_terms_and_privacy_pages(client):
     """약관·처리방침은 정적 페이지다. 본 화면처럼 인라인 코드 없이 테마를 먼저 정하고, 서로 링크한다."""
     import re
-    for path, title in (("/terms", "이용약관"), ("/privacy", "개인정보 처리방침")):
+    for path, title in (("/terms", "이용약관"), ("/privacy", "개인정보 처리방침"),
+                        ("/terms/en", "Terms of Service"), ("/privacy/en", "Privacy Policy")):
         r = client.get(path)
         assert r.status_code == 200 and "text/html" in r.headers["content-type"], path
         assert r.headers["cache-control"] == "no-cache"
@@ -79,8 +80,30 @@ def test_terms_and_privacy_pages(client):
         assert r.text.index('<script src="/static/theme.js"></script>') < r.text.index("/static/tokens.css")
         assert '<meta name="robots" content="noindex">' in r.text, path  # 검색 결과에는 첫 화면만 나온다
     assert "운영자는 장애 대응·백업 복구를 위해" in client.get("/privacy").text
+    assert "The operator can access stored data" in client.get("/privacy/en").text
+    assert "대화 내용은 자동으로 수집하지 않습니다." in client.get("/privacy").text
+    assert "We do not automatically collect conversation content." in client.get("/privacy/en").text
+    assert "이용자가 등록이나 수정을 요청했을 때만 질문과 답변을 저장합니다." in client.get("/privacy").text
+    assert "only when you ask it to add or change them." in client.get("/privacy/en").text
     for path in ("/static/doc.js", "/static/favicon.svg"):
         assert client.get(path).status_code == 200, path
+
+
+def test_terms_and_privacy_link_the_other_language(client):
+    """두 언어판은 <head> 에서 theme.js 보다 먼저 다른 언어판을 <link rel="alternate"> 로 가리키고(theme.js 가 화면
+    언어에 맞춰 옮긴다) 언어 버튼을 둔다. 본문의 약관·처리방침 링크는 같은 언어판을 가리킨다."""
+    import re
+    pairs = (("/terms", "ko", "/terms/en"), ("/terms/en", "en", "/terms"),
+             ("/privacy", "ko", "/privacy/en"), ("/privacy/en", "en", "/privacy"))
+    for path, lang, other in pairs:
+        html = client.get(path).text
+        assert f'<html lang="{lang}">' in html, path
+        other_lang = "en" if lang == "ko" else "ko"
+        alt = f'<link rel="alternate" hreflang="{other_lang}" href="{other}">'
+        assert alt in html and html.index(alt) < html.index('<script src="/static/theme.js"></script>'), path
+        assert 'data-lang="ko"' in html and 'data-lang="en"' in html, path
+        hrefs = set(re.findall(r'href="(/(?:terms|privacy)[^"#]*)', html)) - {other}
+        assert all(h.endswith("/en") == (lang == "en") for h in hrefs), (path, hrefs)
 
 
 def test_favicon_ico_at_root(client):
@@ -144,7 +167,7 @@ def test_create_and_search_grouped(client):
 def test_validation_is_400(client):
     add_basics(client)
     r = client.post("/api/qa", json={"category": "이관", "question": "질문", "answer": "1\n2\n3\n4\n5\n6\n7"})
-    assert r.status_code == 400 and "6줄" in r.json()["error"]
+    assert r.status_code == 400 and r.json()["code"] == "qa_answer_lines"
 
 
 def test_conflict_is_409_with_current(client):
@@ -213,7 +236,7 @@ def test_evidence_line_on_create_and_edit(client, tmp_path):
 
     bad = client.patch(f"/api/qa/{item['id']}", json={"version": cleared["version"],
                                                       "evidence_line": str(tmp_path / "없는 파일")})
-    assert bad.status_code == 400 and "근거 경로가 없습니다" in bad.json()["error"]
+    assert bad.status_code == 400 and bad.json()["code"] == "evidence_path_missing"
 
 
 def test_search_by_category(client):
@@ -234,7 +257,7 @@ def test_locked_db_is_503(client, monkeypatch):
         raise sqlite3.OperationalError("database is locked")
     monkeypatch.setattr(S, "add_category", locked)
     r = client.post("/api/categories", json={"name": "잠김"})
-    assert r.status_code == 503 and "잠겨" in r.json()["error"]
+    assert r.status_code == 503 and r.json()["code"] == "busy"
 
 
 def test_app_start_warms_up_analyzer(db):
