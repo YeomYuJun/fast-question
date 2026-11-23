@@ -12,6 +12,8 @@ name = "fast-question"
 dynamic = ["version"]
 description = "fast-question PC client: local MCP proxy, prompt hook and draft linter for a remote fast-question server"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 # 프록시(mcp_server/proxy.py)가 직접 import 하는 것. 테스트를 돌리는 저장소 가상환경(.venv)과 같은 버전으로 둔다
 dependencies = ["mcp==2.0.0", "anyio==4.14.2", "httpx2==2.13.1"]
 
