@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from mcp.server.mcpserver import MCPServer
+from mcp_types import ToolAnnotations
 
 from kb import cleanup, public_kb
 from kb.db import connect
@@ -21,7 +22,12 @@ from kb.errors import ConflictError, KbError
 from kb.morph import reindex
 from kb.rules import check_claude_qa
 from kb.store import Store
-from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, ADD_MANY_REMOTE, INSTRUCTIONS
+from mcp_server.instructions import (ADD_MANY_DOC, ADD_MANY_FILE, ADD_MANY_REMOTE, PROXY_INSTRUCTIONS,
+                                     REMOTE_INSTRUCTIONS)
+
+READ = ToolAnnotations(read_only_hint=True)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=False)
+DESTRUCTIVE = ToolAnnotations(read_only_hint=False, destructive_hint=True)
 
 HIT_KEYS = ("id", "category_path", "question", "answer", "tier", "matched", "evidence_state", "archived",
             "created_by", "updated_at", "version")
@@ -49,7 +55,7 @@ def store_factory(db_path: Path, analyzer) -> Callable[[], Store]:
 def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool = False, auth=None,
                  auth_server_provider=None, open_public: Callable[[], Store | None] | None = None) -> MCPServer:
     """open_public: 공개 지식 층(kb/public_kb.py)의 Store 를 여는 함수(원격 서버). 없거나 None 을 돌려주면 공개 층이 없다."""
-    server = MCPServer("fast-question", instructions=INSTRUCTIONS, auth=auth,
+    server = MCPServer("fast-question", instructions=REMOTE_INSTRUCTIONS if remote else PROXY_INSTRUCTIONS, auth=auth,
                        auth_server_provider=auth_server_provider)
     base = web_url.rstrip("/")
 
@@ -59,7 +65,7 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
     def public_store_or_error() -> Store:
         pub = public()
         if pub is None:
-            raise KbError("이 서버에는 공개 지식이 없습니다.")
+            raise KbError("This server has no public knowledge layer.")
         return pub
 
     def link(qa_id: int) -> str:
@@ -71,6 +77,9 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
     def detail(item: dict) -> dict:
         return {**_detail(item), "url": link(item["id"])}
 
+    def candidate(item: dict) -> dict:
+        return {**hit(item), "level": item["level"]}
+
     def with_hint(s: Store, out: dict, force: bool = False) -> dict:
         """열린 정리 건이 있고 마지막 정리가 오래됐으면(또는 force) cleanup_hint 를 붙인다. Skill 이 사용자에게 정리를 권한다."""
         h = cleanup.hint(s.conn, force=force)
@@ -81,24 +90,26 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
         try:
             return fn(store)
         except ConflictError as e:
-            raise ValueError(f"{e.message} 현재 값: {json.dumps(_detail(e.current), ensure_ascii=False)}") from e
+            raise ValueError(f"{e.message} Current value: {json.dumps(_detail(e.current), ensure_ascii=False)}") from e
         except KbError as e:
             raise ValueError(e.message) from e
         finally:
             store.conn.close()
 
-    @server.tool()
+    @server.tool(title="Search Q&As", annotations=READ)
     def kb_search(query: str = "", queries: list[str] | None = None, regex: bool = False,
                   category: str | None = None, limit: int = 20, include_archived: bool = False) -> dict:
-        """KB(사용자가 전에 확인해 둔 Q&A)를 검색한다. 사용자의 프로젝트·시스템·사내 절차에 대한 사실이 필요할 때와,
-        등록 전에 같은 질문이 있는지 볼 때 쓴다. 공백으로 나눈 단어는 AND 다. 문법: a | b (OR), -a (제외), "a b" (구절),
-        q:a / a:a (질문만 / 답변만), path:파일이름 (그 파일을 근거로 단 항목).
-        queries 에 표현 여러 개를 주면 한 번에 찾고, 항목마다 걸린 질의(matched)와 걸린 질의 수 순으로 돌려준다.
-        regex=true 면 query 를 정규식(200자 이하, 중첩 반복 금지)으로 질문·답변에서 찾는다. 문법·동의어·형태소는 쓰지 않는다.
-        hits 의 tier 는 exact(그대로 일치), synonym(동의어), morph(형태소: 활용형·조사 차이)다.
-        hits 가 0건이면 similar 에 비슷한 결과가 온다. category 는 "대분류" 또는 "대분류 > 중분류".
-        서버에 공개 지식 층이 있으면 public.hits 에 운영자가 적재한 공개 Q&A(scope=public, 읽기 전용)가 따로 온다.
-        공개 항목을 쓰려면 kb_get(id, public=true) 로 읽고, 내 DB 에 두려면 kb_add 로 등록한다."""
+        """Searches the KB (Q&As the user confirmed earlier) for facts about the user's projects, systems and internal
+        procedures, and for an existing question before adding one. Space-separated words are ANDed. Syntax: a | b (OR),
+        -a (exclude), "a b" (phrase), q:a / a:a (question only / answer only), path:<file name> (items with that file as evidence).
+        queries takes several expressions in one call; each item lists the queries it matched (matched) and items are
+        ordered by the number of matched queries.
+        regex=true treats query as a regular expression (at most 200 characters, no nested repetition) over questions and
+        answers, without syntax, synonyms or morphology.
+        tier of a hit is exact (literal match), synonym, or morph (morphology: inflection and particle differences).
+        When hits is empty, similar holds close results. category is "<top>" or "<top> > <sub>".
+        If the server has a public knowledge layer, public.hits separately holds public Q&As loaded by the operator
+        (scope=public, read-only). Read a public item with kb_get(id, public=true); add it to your own DB with kb_add."""
         def go(s: Store):
             cid = s.resolve_category(category) if category else None
             opts = {"category_id": cid, "include_archived": include_archived, "limit": limit}
@@ -117,10 +128,11 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             return with_hint(s, out)
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Get Q&A", annotations=READ)
     def kb_get(id: int, public: bool = False) -> dict:
-        """Q&A 한 건을 근거, 관련 질문, 최근 이력 5건과 함께 읽는다. 고치기 전에 version 을 여기서 읽는다.
-        public=true 면 공개 지식 층의 항목을 읽는다(읽기 전용. 고치려면 kb_add 로 내 DB 에 등록한다)."""
+        """Reads one Q&A with its evidence, related questions and last 5 revisions, including the version that
+        kb_update and kb_archive require. public=true reads an item of the public knowledge layer (read-only; to change
+        it, add it to your own DB with kb_add)."""
         def go(s: Store):
             if not public:
                 return detail(s.get_qa(id))
@@ -131,110 +143,120 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                 pub.conn.close()
         return run(go)
 
-    @server.tool()
+    @server.tool(title="List categories", annotations=READ)
     def kb_categories() -> dict:
-        """분류 트리(대분류 > 중분류)와 분류별 Q&A 수."""
+        """Returns the category tree (top > sub) with the Q&A count of each category."""
         return run(lambda s: {"categories": s.categories()})
 
-    @server.tool()
+    @server.tool(title="Add category", annotations=WRITE)
     def kb_add_category(name: str, parent: str | None = None, description: str = "") -> dict:
-        """분류를 만든다. parent 를 주면 그 대분류 아래 중분류가 된다(2단계까지)."""
+        """Creates a category. With parent, it becomes a subcategory under that top-level category (two levels at most)."""
         return run(lambda s: s.add_category(name, parent=parent, description=description))
 
-    @server.tool()
+    @server.tool(title="Add Q&A", annotations=WRITE)
     def kb_add(category: str, question: str, answer: str, evidence: list[dict] | None = None,
                links: list[int] | None = None, force: bool = False) -> dict:
-        """Q&A 를 등록한다. 비슷한 질문이 있으면 등록하지 않고 status=similar_found 와 후보를 돌려준다.
-        후보와 다른 질문이 맞으면 force=true 로 다시 부른다.
-        evidence 형식: {"kind": "auto"|"file"|"dir", "path", "anchor"?}, {"kind": "git", "repo", "paths": [...]},
-        {"kind": "githead", "repo"}, {"kind": "url", "url"}, {"kind": "github", "url": "https://github.com/<owner>/<repo>/blob/<ref>/<경로>", "anchor"?}
-        (서버가 GitHub API 로 바뀜을 판정한다), {"kind": "note", "text"}."""
+        """Adds a Q&A. If a nearly identical question exists, it adds nothing and returns status=similar_found with the
+        candidates; if the question really differs from them, call again with force=true. If only somewhat similar
+        questions exist, it adds the Q&A and returns status=created with those candidates in similar.
+        Each candidate has level: block (nearly identical) or notice (somewhat similar).
+        evidence forms: {"kind": "auto"|"file"|"dir", "path", "anchor"?}, {"kind": "git", "repo", "paths": [...]},
+        {"kind": "githead", "repo"}, {"kind": "url", "url"}, {"kind": "github", "url": "https://github.com/<owner>/<repo>/blob/<ref>/<path>", "anchor"?}
+        (the server detects changes through the GitHub API), {"kind": "note", "text"}."""
         def go(s: Store):
             check_claude_qa(question, answer, evidence)
             res = s.add_qa(category, question, answer, evidence=evidence, links=links, force=force)
             if res["status"] == "similar_found":
                 # 비슷한 질문을 막 발견한 순간은 쌓인 중복도 함께 정리할 때라 마지막 정리 시점과 상관없이 권한다
-                return with_hint(s, {"status": "similar_found", "similar": [hit(i) for i in res["similar"]]}, force=True)
-            return with_hint(s, {"status": "created", "item": detail(res["item"])})
+                return with_hint(s, {"status": "similar_found", "similar": [candidate(i) for i in res["similar"]]},
+                                 force=True)
+            out = {"status": "created", "item": detail(res["item"])}
+            if res.get("similar"):
+                out["similar"] = [candidate(i) for i in res["similar"]]
+            return with_hint(s, out)
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Update Q&A", annotations=WRITE)
     def kb_update(id: int, version: int, question: str | None = None, answer: str | None = None,
                   category: str | None = None, reason: str | None = None) -> dict:
-        """Q&A 를 고친다. version 은 kb_get 으로 읽은 값이다. 다르면 현재 값과 함께 거부된다."""
+        """Changes a Q&A. version is the value read with kb_get; if it differs, the call is rejected with the current value."""
         def go(s: Store):
             check_claude_qa(question, answer)
             return detail(s.update_qa(id, version, question=question, answer=answer,
                                       category=category, note=reason))
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Archive Q&A", annotations=DESTRUCTIVE)
     def kb_archive(id: int, version: int, reason: str | None = None) -> dict:
-        """Q&A 를 삭제한다(화면의 삭제와 같다). 행은 남고 검색 기본값에서 빠진다. kb_restore 로 되살린다."""
+        """Deletes a Q&A (the same as delete in the web screen). The row stays and drops out of default search results.
+        kb_restore brings it back."""
         return run(lambda s: _detail(s.archive_qa(id, version, note=reason)))
 
-    @server.tool()
+    @server.tool(title="Restore Q&A", annotations=WRITE)
     def kb_restore(id: int, version: int, reason: str | None = None, category: str | None = None) -> dict:
-        """삭제한 Q&A 를 되살린다. 삭제한 항목은 kb_search(include_archived=true) 로 찾는다.
-        그 항목의 분류가 삭제되어 있으면 category 에 옮길 분류를 준다."""
+        """Restores a deleted Q&A. Find deleted items with kb_search(include_archived=true).
+        If the item's category has been deleted, give the category to move it to in category."""
         return run(lambda s: _detail(s.restore_qa(id, version, note=reason, category=category)))
 
-    @server.tool()
+    @server.tool(title="Rename category", annotations=WRITE)
     def kb_rename_category(category: str, version: int, name: str, reason: str | None = None) -> dict:
-        """분류 이름을 바꾼다. category 는 id, "대분류" 또는 "대분류 > 중분류", version 은 kb_categories 의 값이다.
-        name 은 새 이름 하나다(상위 분류는 바뀌지 않는다)."""
+        """Renames a category. category is an id, "<top>" or "<top> > <sub>"; version is the value from kb_categories.
+        name is the single new name (the parent category does not change)."""
         def go(s: Store):
             return s.update_category(s.resolve_category(category), version, name=name, note=reason)
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Delete category", annotations=DESTRUCTIVE)
     def kb_delete_category(category: str, version: int, confirm: bool = False, reason: str | None = None) -> dict:
-        """분류를 삭제한다. 하위 분류와 그 안의 Q&A 도 모두 함께 삭제된다.
-        confirm 없이 부르면 아무것도 지우지 않고 함께 삭제될 하위 분류 수·Q&A 수와 경고문을 돌려준다.
-        그 경고문을 사용자에게 그대로 보여 주고, 사용자가 승인했을 때만 confirm=true 로 다시 부른다."""
+        """Deletes a category together with all its subcategories and the Q&As in them.
+        Without confirm, it deletes nothing and returns the number of subcategories and Q&As that would be deleted,
+        with a warning to show the user as it is. confirm=true deletes; use it only after the user approves."""
         def go(s: Store):
             impact = s.category_impact(s.resolve_category(category))
             cat = impact["category"]
             if not confirm:
                 return {"deleted": False, "category": cat["path"], "version": cat["version"],
                         "children": impact["children"], "qa": impact["qa"],
-                        "warning": (f"분류 '{cat['path']}' 를 삭제하면 하위 분류 {impact['children']}개와 "
-                                    f"Q&A {impact['qa']}건이 모두 함께 삭제됩니다. 사용자가 승인하면 confirm=true 로 다시 불러 주세요.")}
+                        "warning": (f"Deleting category '{cat['path']}' also deletes its {impact['children']} "
+                                    f"subcategories and {impact['qa']} Q&As. If the user approves, call again with confirm=true.")}
             res = s.archive_category(cat["id"], version, note=reason)
             return {"deleted": True, "category": res["category"]["path"],
                     "archived_children": res["archived_children"], "archived_qa": res["archived_qa"]}
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Link Q&As", annotations=WRITE)
     def kb_link(a: int, b: int, remove: bool = False) -> dict:
-        """두 Q&A 를 관련 질문으로 잇는다. remove=true 면 연결을 끊는다."""
+        """Links two Q&As as related questions. remove=true removes the link."""
         return run(lambda s: s.unlink(a, b) if remove else s.link(a, b))
 
-    @server.tool()
+    @server.tool(title="Edit evidence", annotations=DESTRUCTIVE)
     def kb_evidence(action: str, id: int | None = None, evidence_id: int | None = None,
                     spec: dict | None = None) -> dict:
-        """근거를 다룬다. action=add(id, spec), recapture(evidence_id: 근거를 다시 읽은 뒤 지금 상태로 재기록),
-        archive(evidence_id). 결과는 그 Q&A 전체다. spec(evidence_id) 은 그 근거를 다시 캡처할 spec 만 돌려준다."""
+        """Changes evidence. action is add(id, spec), recapture(evidence_id: records the evidence again in its current
+        state after you reread it) or archive(evidence_id). The result is the whole Q&A."""
         def go(s: Store):
             if action == "add":
                 if id is None or not spec:
-                    raise KbError("add 에는 id 와 spec 이 필요합니다.")
+                    raise KbError("add needs id and spec.")
                 check_claude_qa(evidence=[spec])
                 return _detail(s.add_evidence(id, spec))
-            if action in ("recapture", "archive", "spec"):
+            if action in ("recapture", "archive"):
                 if evidence_id is None:
-                    raise KbError(f"{action} 에는 evidence_id 가 필요합니다.")
+                    raise KbError(f"{action} needs evidence_id.")
                 if action == "archive":
                     return _detail(s.archive_evidence(evidence_id))
-                if action == "spec":
-                    return {"spec": s.evidence_spec(evidence_id)}
                 return _detail(s.recapture_evidence(evidence_id, captured=(spec or {}).get("captured")))
-            raise KbError(f"알 수 없는 근거 동작입니다: {action}")
+            raise KbError(f"Unknown evidence action: {action}. Use add, recapture or archive.")
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Get evidence spec", annotations=READ)
+    def kb_evidence_spec(evidence_id: int) -> dict:
+        """Returns the spec for capturing one evidence again."""
+        return run(lambda s: {"spec": s.evidence_spec(evidence_id)})
+
+    @server.tool(title="Recheck evidence", annotations=WRITE)
     def kb_recheck(id: int | None = None) -> dict:
-        """근거를 다시 판정한다. id 를 주면 그 Q&A 만, 없으면 전체."""
+        """Judges evidence again. With id, only that Q&A; without it, all Q&As."""
         def go(s: Store):
             results = s.recheck(id)
             ids = sorted({r["qa_id"] for r in results})
@@ -243,15 +265,18 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                               for i in s.items(ids)]}
         return run(go)
 
-    @server.tool()
-    def kb_dict(action: str, terms: list[str] | None = None, group_id: int | None = None,
-                word: str | None = None, tag: str | None = None, id: int | None = None) -> dict:
-        """사전을 다룬다. action 은 snapshot, synonym_add(terms, group_id?), synonym_remove(id),
-        stopword_add(word), stopword_remove(id), user_word_add(word, tag?), user_word_remove(id).
-        사용자 단어를 바꾸면 형태소 색인을 다시 만든다."""
+    @server.tool(title="Get dictionary", annotations=READ)
+    def kb_dict_get() -> dict:
+        """Returns the search dictionary: synonym groups, stopwords and morphology user words."""
+        return run(lambda s: {"snapshot": s.dictionary()})
+
+    @server.tool(title="Edit dictionary", annotations=DESTRUCTIVE)
+    def kb_dict_edit(action: str, terms: list[str] | None = None, group_id: int | None = None,
+                     word: str | None = None, tag: str | None = None, id: int | None = None) -> dict:
+        """Changes the search dictionary. action is synonym_add(terms, group_id?), synonym_remove(id),
+        stopword_add(word), stopword_remove(id), user_word_add(word, tag?) or user_word_remove(id).
+        Changing user words rebuilds the morphology index. The result has the dictionary after the change."""
         def go(s: Store):
-            if action == "snapshot":
-                return {"snapshot": s.dictionary(), "reindex_needed": False}
             kw = {k: v for k, v in {"terms": terms, "group_id": group_id, "word": word, "tag": tag,
                                     "id": id}.items() if v is not None}
             res = s.dict_action(action, **kw)
@@ -260,17 +285,19 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             return res
         return run(go)
 
-    @server.tool(description=ADD_MANY_DOC + (ADD_MANY_REMOTE if remote else ADD_MANY_FILE))
+    @server.tool(title="Add many Q&As", description=ADD_MANY_DOC + (ADD_MANY_REMOTE if remote else ADD_MANY_FILE),
+                 annotations=WRITE)
     def kb_add_many(items: list[dict] | None = None, file: str | None = None) -> dict:
         if file and remote:
-            raise ValueError("원격 서버는 사용자 PC 의 파일을 읽을 수 없습니다. 로컬 프록시가 파일을 읽어 items 로 보냅니다.")
+            raise ValueError("The remote server cannot read files on the user's PC. "
+                             "The local proxy reads the file and sends it as items.")
         if file:
             # 윈도우에서 만든 JSON 은 BOM 이 붙어 온다
             items = json.loads(Path(file).read_text(encoding="utf-8-sig"))
         if not items:
-            raise ValueError("kb_add_many 에는 items 나 file 이 필요합니다.")
+            raise ValueError("kb_add_many needs items or file.")
         if len(items) > ADD_MANY_MAX:
-            raise ValueError(f"kb_add_many 는 한 번에 {ADD_MANY_MAX}건까지 받습니다. 지금 {len(items)}건입니다.")
+            raise ValueError(f"kb_add_many takes at most {ADD_MANY_MAX} items per call; got {len(items)}.")
 
         def go(s: Store):
             results = []
@@ -283,41 +310,46 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
                     results.append({"index": n, "status": "error", "error": e.message})
                     continue
                 except KeyError as e:
-                    results.append({"index": n, "status": "error", "error": f"{e.args[0]} 이(가) 없습니다."})
+                    results.append({"index": n, "status": "error", "error": f"Missing key: {e.args[0]}."})
                     continue
+                brief = [{k: i[k] for k in ("id", "question", "answer")} for i in res.get("similar", [])]
                 if res["status"] == "similar_found":
-                    results.append({"index": n, "status": "similar_found",
-                                    "similar": [{k: i[k] for k in ("id", "question", "answer")} for i in res["similar"]]})
+                    results.append({"index": n, "status": "similar_found", "similar": brief})
                 else:
                     results.append({"index": n, "status": "created", "id": res["item"]["id"],
-                                    "question": res["item"]["question"], "url": link(res["item"]["id"])})
+                                    "question": res["item"]["question"], "url": link(res["item"]["id"]),
+                                    **({"similar": brief} if brief else {})})
             return {"results": results, "created": sum(r["status"] == "created" for r in results)}
         return run(go)
 
-    @server.tool()
-    def kb_harvest(action: str, root: str | None = None, state: dict | None = None) -> dict:
-        """qa-harvest Skill 의 수확 기록. action=get(root): 그 대상 경로의 마지막 기록(없으면 null),
-        set(root, state): 기록을 바꾼다(state 예: {"repos": {"<저장소 경로>": "<HEAD sha>"}, "created": 12, "note": "..."}),
-        list: 모든 기록. 경로는 / 구분자·소문자로 맞춰 저장한다."""
+    @server.tool(title="Get harvest record", annotations=READ)
+    def kb_harvest_get(root: str | None = None) -> dict:
+        """Reads the harvest records of the qa-harvest Skill. With root: record holds the last record of that target
+        path (null if none). Without root: records holds all records."""
         def go(s: Store):
-            if action == "list":
-                return {"records": s.harvest_list()}
             if not root:
-                raise KbError(f"{action} 에는 root 가 필요합니다.")
-            if action == "get":
-                return {"record": s.harvest_get(root)}
-            if action == "set":
-                return {"record": s.harvest_set(root, state or {})}
-            raise KbError(f"알 수 없는 수확 기록 동작입니다: {action}")
+                return {"records": s.harvest_list()}
+            return {"record": s.harvest_get(root)}
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Set harvest record", annotations=WRITE)
+    def kb_harvest_set(root: str, state: dict | None = None) -> dict:
+        """Replaces the harvest record of a target path for the qa-harvest Skill
+        (state example: {"repos": {"<repository path>": "<HEAD sha>"}, "created": 12, "note": "..."}).
+        Paths are stored with / separators in lowercase."""
+        def go(s: Store):
+            if not root:
+                raise KbError("kb_harvest_set needs root.")
+            return {"record": s.harvest_set(root, state or {})}
+        return run(go)
+
+    @server.tool(title="List cleanup items", annotations=READ)
     def kb_cleanup_list(rule: str | None = None, limit: int = 20) -> dict:
-        """정리할 항목 목록. 주기 작업이 하루 한 번 찾아 둔 건과 근거 상태가 나쁜 항목이다.
-        rule 은 duplicate(질문이 비슷한 항목. other 가 먼저 등록된 쪽), rule_violation(지금 형식 규칙 위반),
-        evidence_stale(근거 파일이 기록 뒤에 바뀜), evidence_unknown(근거를 판정하지 못함)이다.
-        duplicate·rule_violation 은 고치거나 보관한 뒤 kb_cleanup_resolve 로 닫는다. 근거 건(id 가 null)은 근거를
-        다시 기록하면 목록에서 빠진다."""
+        """Lists items to clean up: findings that the daily job recorded, and items whose evidence state is bad.
+        rule is duplicate (similar questions; other is the one added first), rule_violation (breaks the current format
+        rules), evidence_stale (the evidence file changed after it was recorded) or evidence_unknown (the evidence
+        could not be judged). Close duplicate and rule_violation findings with kb_cleanup_resolve after fixing or
+        archiving the item. Evidence findings (id is null) leave the list once the evidence is recorded again."""
         def go(s: Store):
             res = cleanup.open_list(s, rule=rule, limit=limit)
             for f in res["findings"]:
@@ -327,10 +359,11 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
             return res
         return run(go)
 
-    @server.tool()
+    @server.tool(title="Resolve cleanup item", annotations=WRITE)
     def kb_cleanup_resolve(finding_id: int, resolution: str, note: str | None = None) -> dict:
-        """정리 건을 닫는다. resolution=fixed: 항목을 고치거나 보관했다(조건을 다시 확인해 아직 걸리면 거부한다).
-        kept: 확인해 보니 문제가 아니다(그 항목의 질문·답이 바뀌기 전까지 다시 올라오지 않는다). note 에 판단 근거를 적는다."""
+        """Closes a cleanup finding. resolution=fixed: the item was fixed or archived (the condition is checked again
+        and the call is rejected if it still holds). kept: on inspection it is not a problem (it does not come back
+        until the item's question or answer changes). note records the reason for the judgment."""
         return run(lambda s: cleanup.resolve(s, finding_id, resolution, note))
 
     return server
@@ -338,5 +371,6 @@ def build_server(open_store: Callable[[], Store], *, web_url: str, remote: bool 
 
 ADD_MANY_MAX = 100
 TOOLS = ("kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update", "kb_archive",
-         "kb_restore", "kb_rename_category", "kb_delete_category", "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest",
+         "kb_restore", "kb_rename_category", "kb_delete_category", "kb_link", "kb_evidence", "kb_evidence_spec",
+         "kb_recheck", "kb_dict_get", "kb_dict_edit", "kb_add_many", "kb_harvest_get", "kb_harvest_set",
          "kb_cleanup_list", "kb_cleanup_resolve")

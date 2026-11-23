@@ -5,13 +5,37 @@ import pytest
 from mcp.client import Client
 
 from kb.db import connect
+from mcp_server.instructions import PROXY_INSTRUCTIONS, REMOTE_INSTRUCTIONS
 from mcp_server.server import TOOLS, build_server, store_factory
 
-EXPECTED_TOOLS = {"kb_search", "kb_get", "kb_categories", "kb_add_category", "kb_add", "kb_update",
-                  "kb_archive", "kb_restore", "kb_rename_category", "kb_delete_category",
-                  "kb_link", "kb_evidence", "kb_recheck", "kb_dict", "kb_add_many", "kb_harvest",
-                  "kb_cleanup_list", "kb_cleanup_resolve"}
+READ, WRITE, DESTRUCTIVE = (True, None), (False, False), (False, True)
+EXPECTED_ANNOTATIONS = {
+    "kb_search": READ, "kb_get": READ, "kb_categories": READ, "kb_cleanup_list": READ,
+    "kb_dict_get": READ, "kb_evidence_spec": READ, "kb_harvest_get": READ,
+    "kb_add": WRITE, "kb_add_many": WRITE, "kb_add_category": WRITE, "kb_update": WRITE, "kb_restore": WRITE,
+    "kb_rename_category": WRITE, "kb_link": WRITE, "kb_recheck": WRITE, "kb_cleanup_resolve": WRITE,
+    "kb_harvest_set": WRITE,
+    "kb_archive": DESTRUCTIVE, "kb_delete_category": DESTRUCTIVE, "kb_dict_edit": DESTRUCTIVE,
+    "kb_evidence": DESTRUCTIVE,
+}
+EXPECTED_TOOLS = set(EXPECTED_ANNOTATIONS)
 WEB = "http://127.0.0.1:9999"
+
+
+def tool_marks(tools) -> dict:
+    out = {}
+    for t in tools:
+        a = t.annotations.model_dump(by_alias=True, exclude_none=True) if t.annotations else {}
+        out[t.name] = (t.title, a.get("readOnlyHint"), a.get("destructiveHint"))
+    return out
+
+
+def assert_contract(tools):
+    marks = tool_marks(tools)
+    assert set(marks) == EXPECTED_TOOLS and len(marks) == 21
+    assert {n: m[1:] for n, m in marks.items()} == EXPECTED_ANNOTATIONS
+    assert all(m[0] and m[0].isascii() for m in marks.values())
+    assert all(t.description and t.description.isascii() for t in tools)
 
 
 @pytest.fixture
@@ -40,6 +64,29 @@ def test_tool_list(server):
         async with Client(server) as c:
             return {t.name for t in (await c.list_tools()).tools}
     assert asyncio.run(go()) == EXPECTED_TOOLS == set(TOOLS)
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_tool_titles_and_annotations(db, remote):
+    async def go():
+        async with Client(build_server(store_factory(db, None), web_url=WEB, remote=remote)) as c:
+            return (await c.list_tools()).tools
+    assert_contract(asyncio.run(go()))
+
+
+def test_instructions_by_mode(db):
+    async def go(remote):
+        async with Client(build_server(store_factory(db, None), web_url=WEB, remote=remote)) as c:
+            return c.instructions
+    assert asyncio.run(go(False)) == PROXY_INSTRUCTIONS
+    assert asyncio.run(go(True)) == REMOTE_INSTRUCTIONS
+    assert REMOTE_INSTRUCTIONS.isascii() and PROXY_INSTRUCTIONS.isascii()
+    for text in ("even if the user did not ask", "without asking the user", "on the spot"):
+        assert text in PROXY_INSTRUCTIONS and text not in REMOTE_INSTRUCTIONS
+    assert "only when the user asks to add or change a Q&A" in REMOTE_INSTRUCTIONS
+    assert "only when the user asks to add or change" not in PROXY_INSTRUCTIONS
+    for text in ("300", "800", "240", "weighted length"):
+        assert text in REMOTE_INSTRUCTIONS and text in PROXY_INSTRUCTIONS
 
 
 def test_add_then_search_as_claude(server):
@@ -84,29 +131,45 @@ def test_similar_question_reported(server):
     call(server, "kb_add", {"category": "이관", "question": ".nas-tmp 가 NAS 안에 있는 이유", "answer": "같은 볼륨"})
     err, res = call(server, "kb_add", {"category": "이관", "question": ".nas-tmp 가 NAS 안에 있는 까닭",
                                        "answer": "같은 볼륨이어야 한다."})
-    assert not err and res["status"] == "similar_found"
+    assert not err and res["status"] == "similar_found" and res["similar"][0]["level"] == "block"
+
+
+def test_somewhat_similar_question_is_added_with_candidates(server):
+    call(server, "kb_add_category", {"name": "web"})
+    first = call(server, "kb_add", {"category": "web", "question": "Where is the deploy config file of the web server?",
+                                    "answer": "It is deploy/config.json."})[1]["item"]
+    err, res = call(server, "kb_add", {"category": "web", "question": "Where is the deploy log file of the web server?",
+                                       "answer": "It is data/web.log."})
+    assert not err and res["status"] == "created"
+    assert [(c["id"], c["level"]) for c in res["similar"]] == [(first["id"], "notice")]
+    assert res["similar"][0]["url"] == f"{WEB}/#qa/{first['id']}"
+    many = call(server, "kb_add_many", {"items": [
+        {"category": "web", "question": "Where is the backup config file of the web server?", "answer": "It is backup/config.json."}]})[1]
+    got = many["results"][0]
+    assert got["status"] == "created" and {c["id"] for c in got["similar"]} >= {first["id"]}
+    assert set(got["similar"][0]) == {"id", "question", "answer"}
 
 
 def test_validation_error_is_tool_error(server):
     call(server, "kb_add_category", {"name": "이관"})
     err, text = call(server, "kb_add", {"category": "이관", "question": "질문", "answer": "1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7"})
-    assert err and "6줄까지" in text
+    assert err and "up to 6 lines" in text
 
 
 def test_format_rules_reject_claude_writes(server):
     call(server, "kb_add_category", {"name": "이관"})
     err, text = call(server, "kb_add", {"category": "이관", "question": "세 문장 답의 질문",
                                         "answer": "하나다. 둘이다. 셋이다."})
-    assert err and "3문장" in text and "rules.md" in text
+    assert err and "3 sentences" in text and "rules.md" in text
     assert call(server, "kb_search", {"query": "세 문장"})[1]["total"] == 0
 
     item = call(server, "kb_add", {"category": "이관", "question": "운영 DB 위치", "answer": "설정 파일에 있다."})[1]["item"]
     err, text = call(server, "kb_update", {"id": item["id"], "version": item["version"],
                                            "answer": "10.20.30.40 에 있다."})
-    assert err and "IP 주소" in text
+    assert err and "IP address" in text
     err, text = call(server, "kb_evidence", {"action": "add", "id": item["id"],
                                              "spec": {"kind": "note", "text": "hong@example.com 확인"}})
-    assert err and "이메일" in text
+    assert err and "email address" in text
 
 
 def test_format_rules_do_not_apply_to_user_writes(db):
@@ -121,16 +184,19 @@ def test_conflict_reports_current_value(server):
     item = call(server, "kb_add", {"category": "이관", "question": "질문 하나", "answer": "답변 하나"})[1]["item"]
     call(server, "kb_update", {"id": item["id"], "version": item["version"], "answer": "고친 답변"})
     err, text = call(server, "kb_update", {"id": item["id"], "version": item["version"], "answer": "또 고친 답변"})
-    assert err and "현재 값" in text and "고친 답변" in text
+    assert err and "Current value" in text and "고친 답변" in text
 
 
 def test_dictionary_and_synonym_search(server):
     call(server, "kb_add_category", {"name": "이관"})
     call(server, "kb_add", {"category": "이관", "question": "API Gateway 라우팅 룰 출처", "answer": "NHN 콘솔에만 있다."})
-    err, res = call(server, "kb_dict", {"action": "synonym_add", "terms": ["규칙", "룰"]})
+    err, res = call(server, "kb_dict_edit", {"action": "synonym_add", "terms": ["규칙", "룰"]})
     assert not err and res["reindex_needed"] is False
     hits = call(server, "kb_search", {"query": "라우팅 규칙"})[1]["hits"]
     assert hits and hits[0]["tier"] == "synonym"
+    err, got = call(server, "kb_dict_get")
+    assert not err and got == {"snapshot": res["snapshot"]} and got["snapshot"]["synonyms"]
+    assert call(server, "kb_dict_edit", {"action": "snapshot"})[0]
 
 
 def test_evidence_add_and_recapture(server, tmp_path):
@@ -148,6 +214,11 @@ def test_evidence_add_and_recapture(server, tmp_path):
     ev_id = call(server, "kb_get", {"id": item["id"]})[1]["evidence"][0]["id"]
     err, after = call(server, "kb_evidence", {"action": "recapture", "evidence_id": ev_id})
     assert not err and after["evidence_state"] == "trusted"
+
+    err, res = call(server, "kb_evidence_spec", {"evidence_id": ev_id})
+    assert not err and res["spec"]["path"] == str(f.resolve())
+    err, text = call(server, "kb_evidence", {"action": "spec", "evidence_id": ev_id})
+    assert err and "add, recapture or archive" in text
 
 
 def test_archive_and_link(server):
@@ -178,7 +249,7 @@ def test_rename_category(server):
     tree = call(server, "kb_categories")[1]["categories"]
     assert tree[0]["children"][0]["path"] == "이관 사업 > NAS"
     err, msg = call(server, "kb_rename_category", {"category": "이관 사업", "version": top["version"], "name": "x"})
-    assert err and "먼저 고쳤습니다" in msg
+    assert err and "changed elsewhere first" in msg
 
 
 def test_delete_category_needs_confirm(server):
@@ -189,7 +260,7 @@ def test_delete_category_needs_confirm(server):
     err, preview = call(server, "kb_delete_category", {"category": "이관", "version": top["version"]})
     assert not err and preview["deleted"] is False
     assert (preview["children"], preview["qa"]) == (1, 1)
-    assert "1건" in preview["warning"] and "confirm" in preview["warning"]
+    assert "1 Q&As" in preview["warning"] and "confirm" in preview["warning"]
     assert call(server, "kb_categories")[1]["categories"][0]["name"] == "이관"
 
     err, done = call(server, "kb_delete_category", {"category": "이관", "version": top["version"], "confirm": True})
@@ -232,7 +303,7 @@ def test_search_syntax_queries_and_regex(server):
     err, res = call(server, "kb_search", {"query": r"\(\d{3}\)", "regex": True})
     assert not err and [h["question"] for h in res["hits"]] == ["TypeHandler 가 맡는 일"]
     err, text = call(server, "kb_search", {"query": "(a+)+", "regex": True})
-    assert err and "반복" in text
+    assert err and "cannot repeat a group" in text
 
 
 def test_add_many_reports_each_item(server):
@@ -247,19 +318,19 @@ def test_add_many_reports_each_item(server):
     assert not err
     assert [r["status"] for r in res["results"]] == ["created", "similar_found", "error", "error"]
     assert res["created"] == 1 and res["results"][1]["similar"][0]["question"].startswith(".nas-tmp")
-    assert "3문장" in res["results"][2]["error"]
+    assert "3 sentences" in res["results"][2]["error"]
     assert call(server, "kb_search", {"query": "PETRA"})[1]["total"] == 1
 
 
 def test_harvest_record_roundtrip(server):
-    err, res = call(server, "kb_harvest", {"action": "get", "root": r"D:\work"})
+    err, res = call(server, "kb_harvest_get", {"root": r"D:\work"})
     assert not err and res["record"] is None
     state = {"repos": {"D:/work/app": "abc123"}, "created": 12}
-    err, res = call(server, "kb_harvest", {"action": "set", "root": "D:/work/", "state": state})
+    err, res = call(server, "kb_harvest_set", {"root": "D:/work/", "state": state})
     assert not err and res["record"]["repos"] == state["repos"] and res["record"]["at"]
-    err, res = call(server, "kb_harvest", {"action": "get", "root": r"d:\work"})
+    err, res = call(server, "kb_harvest_get", {"root": r"d:\work"})
     assert res["record"]["created"] == 12
-    err, res = call(server, "kb_harvest", {"action": "list"})
+    err, res = call(server, "kb_harvest_get")
     assert [r["root"] for r in res["records"]] == ["d:/work"]
 
 
@@ -272,7 +343,7 @@ def test_add_many_reads_draft_file(server, tmp_path):
     assert not err and res["created"] == 1
     assert call(server, "kb_search", {"query": "뺐다"})[1]["hits"][0]["answer"] == items[0]["answer"]
     err, text = call(server, "kb_add_many", {})
-    assert err and "items 나 file" in text
+    assert err and "items or file" in text
 
 
 def test_add_many_description_offers_file_only_locally(db):
@@ -281,5 +352,5 @@ def test_add_many_description_offers_file_only_locally(db):
             return {t.name: t.description for t in (await c.list_tools()).tools}
     local = asyncio.run(docs(build_server(store_factory(db, None), web_url=WEB)))["kb_add_many"]
     remote = asyncio.run(docs(build_server(store_factory(db, None), web_url=WEB, remote=True)))["kb_add_many"]
-    assert "초안 파일을 그대로" in local
-    assert "초안 파일을 그대로" not in remote and "file 을 쓸 수 없다" in remote
+    assert "draft file as it is" in local
+    assert "draft file as it is" not in remote and "file is not available" in remote

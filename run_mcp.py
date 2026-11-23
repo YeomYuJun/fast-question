@@ -30,7 +30,8 @@ def main() -> None:
         from mcp_server.proxy import Remote, run_stdio
         cred = load_credentials()
         if cred is None:
-            sys.exit(f"원격 자격 증명이 없거나 형식이 틀렸다: {credentials_path()} (scripts/install.py --remote 로 만든다)")
+            sys.exit(f"Remote credentials are missing or malformed: {credentials_path()} "
+                     "(create them with scripts/install.py --remote)")
         anyio.run(run_stdio, Remote(cred["url"], cred["token"], cred["device_id"]))
         return
     cfg = load_config(args.config)

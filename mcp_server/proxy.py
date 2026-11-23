@@ -1,10 +1,10 @@
 """로컬 프록시 MCP(stdio). Claude Code 가 `run_mcp.py --remote` 로 띄우고, 원격 <url>/mcp 를 개인 토큰으로 부른다.
 
-도구 목록은 원격 서버의 것을 그대로 내보낸다(같은 18개 이름·인자). kb_add_many 설명만 file 을 이 PC 에서 읽으므로
+도구 목록은 원격 서버의 것을 그대로 내보낸다(같은 21개 이름·인자·주석). kb_add_many 설명만 file 을 이 PC 에서 읽으므로
 로컬 서버의 설명으로 바꿔 내보낸다. 호출은 그대로 넘기되, 사용자 PC 에서만 할 수 있는 일을 여기서 먼저 한다.
 - 근거 spec(kb_add, kb_add_many 항목, kb_evidence add)은 이 PC 에서 capture() 해 captured 로 붙인다(url·note 제외).
 - kb_add_many file= 은 이 PC 의 파일을 읽어 items 로 보낸다. 캡처에 실패한 항목은 그 항목만 오류로 돌려준다.
-- kb_evidence recapture 는 원격에서 근거 spec 을 받아 이 PC 에서 다시 캡처한 값을 보낸다.
+- kb_evidence recapture 는 원격 kb_evidence_spec 으로 근거 spec 을 받아 이 PC 에서 다시 캡처한 값을 보낸다.
 - 캡처값에는 이 PC 의 device_id 를 origin 으로 붙인다. kb_recheck 는 원격에서 이 PC 의 근거만 받아
   (/api/evidence/check) 이 PC 에서 판정하고 /api/evidence/verdicts 로 보고한다.
 호출마다 MCP 세션을 새로 연다(원격은 세션을 메모리에 두지 않는다).
@@ -24,8 +24,7 @@ from mcp.server.lowlevel.server import Server
 from kb.errors import KbError
 from kb.evidence import capture
 from kb.remote import judge
-from mcp_server.instructions import INSTRUCTIONS
-from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE
+from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, PROXY_INSTRUCTIONS
 
 SERVER_KINDS = ("url", "note", "github")  # 서버가 직접 만드는 근거(github 는 서버가 GitHub API 로 기록·판정한다)
 LOCAL_DOCS = {"kb_add_many": ADD_MANY_DOC + ADD_MANY_FILE}
@@ -104,7 +103,7 @@ async def _add_many(remote: Remote, args: dict) -> types.CallToolResult:
 
 
 async def _recapture(remote: Remote, args: dict) -> types.CallToolResult:
-    got = await remote.call("kb_evidence", {"action": "spec", "evidence_id": args.get("evidence_id")})
+    got = await remote.call("kb_evidence_spec", {"evidence_id": args.get("evidence_id")})
     if got.is_error:
         return got
     spec = json.loads(got.content[0].text)["spec"]
@@ -115,8 +114,8 @@ async def _recapture(remote: Remote, args: dict) -> types.CallToolResult:
 
 async def _recheck(remote: Remote, args: dict) -> types.CallToolResult:
     if not remote.device_id:
-        return text_result("credentials.json 에 device_id 가 없습니다. fast-question login(저장소 설치는 "
-                           "scripts/install.py --remote)으로 다시 만들어 주세요.", is_error=True)
+        return text_result("credentials.json has no device_id. Create it again with fast-question login "
+                           "(for a repository install, scripts/install.py --remote).", is_error=True)
     params = {"origin": remote.device_id}
     if args.get("id") is not None:
         params["qa"] = str(args["id"])
@@ -161,9 +160,9 @@ def build_proxy(remote: Remote) -> Server:
         except (OSError, ValueError) as e:
             return text_result(f"{type(e).__name__}: {e}", is_error=True)
         except Exception as e:  # noqa: BLE001 - 연결 실패 등은 도구 오류로 돌려 Claude 가 읽게 한다
-            return text_result(f"원격 서버 {remote.endpoint} 호출 실패: {type(e).__name__}: {e}", is_error=True)
+            return text_result(f"Call to remote server {remote.endpoint} failed: {type(e).__name__}: {e}", is_error=True)
 
-    return Server("fast-question", instructions=INSTRUCTIONS, on_list_tools=list_tools, on_call_tool=call_tool)
+    return Server("fast-question", instructions=PROXY_INSTRUCTIONS, on_list_tools=list_tools, on_call_tool=call_tool)
 
 
 async def run_stdio(remote: Remote) -> None:

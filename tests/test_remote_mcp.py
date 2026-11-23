@@ -12,6 +12,7 @@ from starlette.testclient import TestClient
 from kb import control, tenant
 from kb.evidence import capture
 from mcp_server.server import TOOLS
+from tests.test_mcp import assert_contract
 from tests.test_auth import URL, analyzer, app, cfg, idp, secrets_env  # noqa: F401 - 픽스처
 
 
@@ -48,6 +49,7 @@ def test_tool_list_is_the_same(cfg, app):
     _, token = new_token(cfg)
     names = session(app, token, lambda c: c.list_tools())
     assert {t.name for t in names.tools} == set(TOOLS)
+    assert_contract(names.tools)
 
 
 def test_add_and_search_as_claude_in_own_db(cfg, app):
@@ -56,7 +58,8 @@ def test_add_and_search_as_claude_in_own_db(cfg, app):
     err, res = call(app, token, "kb_add", {"category": "이관", "question": ".part 를 쓰는 이유",
                                            "answer": "다 쓴 뒤 rename 으로 확정한다."})
     assert not err and res["item"]["created_by"] == "claude"
-    err, found = call(app, token, "kb_search", {"query": "rename"})
+    # 화면 없이 MCP 로 처음 연 계정은 영어 기본 가이드를 받고, 그 안에도 rename 이 든 항목이 있다
+    err, found = call(app, token, "kb_search", {"query": "rename", "category": "이관"})
     assert [h["id"] for h in found["hits"]] == [res["item"]["id"]]
     assert tenant.db_path_for(cfg.data_dir, acc).exists()
     url = f"{URL}/#qa/{res['item']['id']}"
@@ -105,7 +108,7 @@ def test_path_evidence_needs_captured_value(cfg, app, tmp_path):
     q = {"category": "이관", "question": "근거 질문", "answer": "근거가 있는 답이다."}
 
     err, msg = call(app, token, "kb_add", {**q, "evidence": [{"kind": "file", "path": str(src)}]})
-    assert err and "로컬 프록시" in msg
+    assert err and "local proxy" in msg
 
     row = capture({"kind": "file", "path": str(src)})
     err, res = call(app, token, "kb_add", {**q, "evidence": [{"kind": "file", "path": str(src), "captured": row}]})
@@ -127,7 +130,7 @@ def test_path_evidence_needs_captured_value(cfg, app, tmp_path):
     ({"kind": "auto", "path": "x"}, "kind"),
     ({"kind": "file", "path": "x", "captured_json": "{not json"}, "JSON"),
     ({"kind": "file", "path": "x" * 70000}, "KB"),
-    ({"kind": "note", "captured_json": "{}"}, "url·note"),
+    ({"kind": "note", "captured_json": "{}"}, "without captured"),
 ])
 def test_bad_captured_value_is_refused(cfg, app, captured, needle):
     _, token = new_token(cfg)
@@ -147,8 +150,8 @@ def test_url_and_note_evidence_still_work(cfg, app):
 
 
 @pytest.mark.parametrize("name, args, needle", [
-    ("kb_add_many", {"file": "C:/x.json"}, "로컬 프록시"),
-    ("kb_dict", {"action": "user_word_add", "word": "망연계"}, "사용자 단어"),
+    ("kb_add_many", {"file": "C:/x.json"}, "local proxy"),
+    ("kb_dict_edit", {"action": "user_word_add", "word": "망연계"}, "User words"),
 ])
 def test_server_side_file_work_is_refused(cfg, app, name, args, needle):
     _, token = new_token(cfg)
@@ -158,5 +161,5 @@ def test_server_side_file_work_is_refused(cfg, app, name, args, needle):
 
 def test_synonyms_still_work_remotely(cfg, app):
     _, token = new_token(cfg)
-    err, res = call(app, token, "kb_dict", {"action": "synonym_add", "terms": ["룰", "규칙"]})
+    err, res = call(app, token, "kb_dict_edit", {"action": "synonym_add", "terms": ["룰", "규칙"]})
     assert not err and res["snapshot"]["synonyms"]

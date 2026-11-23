@@ -13,9 +13,11 @@ from mcp.client import Client
 
 from kb import remote as remote_mod
 from kb import tenant
+from kb.evidence import capture
 from mcp_server.proxy import Remote, build_proxy
 from mcp_server.server import TOOLS
 from tests.test_auth import URL, analyzer, app, cfg, idp, secrets_env  # noqa: F401 - 픽스처
+from tests.test_mcp import assert_contract
 from tests.test_remote_mcp import new_token
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -59,6 +61,7 @@ def test_proxy_lists_the_remote_tools(cfg, app):
     assert {t.name for t in tools} == set(TOOLS)
     add = next(t for t in tools if t.name == "kb_add")
     assert "evidence" in add.input_schema["properties"]
+    assert_contract(tools)
 
 
 def test_file_evidence_is_captured_on_this_pc(cfg, app, tmp_path):
@@ -75,7 +78,7 @@ def test_file_evidence_is_captured_on_this_pc(cfg, app, tmp_path):
 
     err, msg = call(app, token, "kb_add", {"category": "이관", "question": "없는 근거", "answer": "답이다.",
                                            "evidence": [{"kind": "file", "path": str(tmp_path / "없음.txt")}]})
-    assert err and "근거 경로가 없습니다" in msg
+    assert err and "Evidence path does not exist" in msg
 
 
 def test_add_many_reads_local_file_and_reports_per_item(cfg, app, tmp_path):
@@ -96,7 +99,7 @@ def test_add_many_reads_local_file_and_reports_per_item(cfg, app, tmp_path):
 
     assert not err, res
     assert [(r["index"], r["status"]) for r in res["results"]] == [(0, "created"), (1, "error"), (2, "error"), (3, "created")]
-    assert "근거 경로가 없습니다" in res["results"][1]["error"]
+    assert "Evidence path does not exist" in res["results"][1]["error"]
     assert res["created"] == 2
     assert all(r["url"] == f"{URL}/#qa/{r['id']}" for r in res["results"] if r["status"] == "created")
 
@@ -114,7 +117,9 @@ def test_recapture_uses_this_pc(cfg, app, tmp_path):
     err, res = call(app, token, "kb_evidence", {"action": "recapture", "evidence_id": ev["id"]})
 
     assert not err, res
-    assert captured_of(cfg, acc, ev["id"]) != before
+    after = captured_of(cfg, acc, ev["id"])
+    assert after != before
+    assert after == json.loads(capture({"kind": "file", "path": str(src)})["captured_json"])
 
 
 def test_unreachable_server_is_a_tool_error(cfg, app):
@@ -124,7 +129,7 @@ def test_unreachable_server_is_a_tool_error(cfg, app):
         raise httpx2.ConnectError("연결 거부")
 
     err, msg = call(app, token, "kb_search", {"query": "x"}, transport=httpx2.MockTransport(refuse))
-    assert err and "호출 실패" in msg
+    assert err and "failed" in msg
 
 
 def test_credentials_round_trip(tmp_path, monkeypatch):
@@ -152,4 +157,4 @@ def test_proxy_add_many_description_offers_file(cfg, app):
     _, token = new_token(cfg)
     tools = via_proxy(app, token, lambda c: c.list_tools()).tools
     doc = next(t for t in tools if t.name == "kb_add_many").description
-    assert "초안 파일을 그대로" in doc and "file 을 쓸 수 없다" not in doc
+    assert "draft file as it is" in doc and "file is not available" not in doc
