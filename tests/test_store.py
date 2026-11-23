@@ -32,14 +32,14 @@ def test_category_tree_and_resolve(user):
 
 
 def test_unknown_category_not_found(user):
-    with pytest.raises(NotFoundError, match="분류를 찾지 못했습니다"):
+    with pytest.raises(NotFoundError, match="Category not found"):
         user.resolve_category("없는 분류")
 
 
-def test_third_level_category_rejected_in_korean(user):
+def test_third_level_category_rejected(user):
     user.add_category("대")
     user.add_category("중", parent="대")
-    with pytest.raises(ValidationError, match="2단계"):
+    with pytest.raises(ValidationError, match="two levels"):
         user.add_category("소", parent="대 > 중")
 
 
@@ -96,9 +96,9 @@ def test_update_conflict_returns_current(user, claude):
 def test_update_validation_message(user):
     user.add_category("이관")
     item = user.add_qa("이관", "질문 하나", "답변 하나")["item"]
-    with pytest.raises(ValidationError, match="지금 7줄"):
+    with pytest.raises(ValidationError, match="7 lines now"):
         user.update_qa(item["id"], item["version"], answer="1\n2\n3\n4\n5\n6\n7")
-    with pytest.raises(ValidationError, match="바꿀 값"):
+    with pytest.raises(ValidationError, match="nothing to change"):
         user.update_qa(item["id"], item["version"])
 
 
@@ -187,7 +187,7 @@ def test_rename_category(user):
     renamed = user.update_category(top["id"], top["version"], name="이관 사업")
     assert renamed["path"] == "이관 사업"
     assert user.resolve_category("이관 사업 > NAS")
-    with pytest.raises(ValidationError, match="같은 이름"):
+    with pytest.raises(ValidationError, match="same name"):
         user.update_category(top["id"], renamed["version"], name="기타")
 
 
@@ -197,7 +197,7 @@ def test_restore_into_archived_category_needs_target(user):
     item = user.add_qa("이관", "질문 하나", "답변 하나")["item"]
     user.archive_category(top["id"], top["version"])
     archived = user.get_qa(item["id"])
-    with pytest.raises(ValidationError, match="분류가 삭제"):
+    with pytest.raises(ValidationError, match="category has been deleted"):
         user.restore_qa(item["id"], archived["version"])
     restored = user.restore_qa(item["id"], archived["version"], category="기타")
     assert restored["archived"] is False and restored["category_path"] == "기타"

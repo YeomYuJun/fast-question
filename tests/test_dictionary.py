@@ -26,13 +26,13 @@ def test_synonym_group_lifecycle(user, conn):
 
 
 def test_synonym_new_group_needs_two_terms(user):
-    with pytest.raises(ValidationError, match="2개 이상"):
+    with pytest.raises(ValidationError, match="at least 2"):
         user.dict_action("synonym_add", terms=["룰"])
 
 
 def test_synonym_term_in_two_groups_rejected(user):
     user.dict_action("synonym_add", terms=["규칙", "룰"])
-    with pytest.raises(ValidationError, match="이미 다른 동의어 그룹"):
+    with pytest.raises(ValidationError, match="already in another synonym group"):
         user.dict_action("synonym_add", terms=["룰", "rule"])
 
 
@@ -49,12 +49,12 @@ def test_user_word_requires_reindex(user, conn):
     res = user.dict_action("user_word_add", word="망연계")
     assert res["reindex_needed"] is True
     assert load_user_words(conn) == [("망연계", "NNP")]
-    with pytest.raises(ValidationError, match="품사"):
+    with pytest.raises(ValidationError, match="tag must be one of"):
         user.dict_action("user_word_add", word="칵테일", tag="ZZ")
 
 
 def test_unknown_action_rejected(user):
-    with pytest.raises(ValidationError, match="알 수 없는 사전 동작"):
+    with pytest.raises(ValidationError, match="Unknown dictionary action"):
         user.dict_action("drop_all")
 
 

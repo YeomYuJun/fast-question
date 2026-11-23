@@ -44,7 +44,7 @@ def add(s, q, a="rename 으로 확정한다.", cat="이관 > NAS", **kw):
 # ---------- 스키마 ----------
 
 def test_schema_4_creates_cleanup_table(conn):
-    assert get_meta(conn, "schema_version") == "5"
+    assert get_meta(conn, "schema_version") == "6"
     cols = {r[1] for r in conn.execute("PRAGMA table_info(cleanup_finding)")}
     assert {"qa_id", "other_qa_id", "rule", "detail", "qa_version", "content_hash", "found_at",
             "resolved_at", "resolution", "resolved_by", "note"} <= cols
@@ -57,7 +57,7 @@ def test_schema_3_db_gets_cleanup_table_on_connect(tmp_path):
     set_meta(c, "schema_version", "3")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == "6"
     assert c.execute("SELECT count(*) FROM cleanup_finding").fetchone()[0] == 0
     c.close()
 
@@ -74,7 +74,7 @@ def test_duplicate_found_in_same_top_category_only(claude, conn):
     assert (new["id"], old["id"]) in pairs
     assert all(f["qa_id"] != 3 and f["other_qa_id"] != 3 for f in dup)
     assert out["duplicate"] == len(dup)
-    assert "유사도" in dup[0]["detail"]
+    assert "similarity" in dup[0]["detail"]
 
 
 def test_duplicate_with_shared_evidence_uses_lower_threshold(claude, conn, tmp_path):
@@ -91,7 +91,7 @@ def test_duplicate_with_shared_evidence_uses_lower_threshold(claude, conn, tmp_p
     cleanup.scan(conn)
     pairs = {(x["qa_id"], x["other_qa_id"]) for x in findings(conn, "duplicate")}
     assert (b["id"], a["id"]) in pairs
-    assert "같은 근거" in findings(conn, "duplicate")[0]["detail"]
+    assert "same evidence" in findings(conn, "duplicate")[0]["detail"]
 
 
 def test_scan_is_idempotent_and_closes_gone_findings(claude, conn):
@@ -132,7 +132,7 @@ def test_rule_violation_on_claude_items_only(claude, conn):
     cleanup.scan(conn)
     got = {f["qa_id"]: f for f in findings(conn, "rule_violation")}
     assert set(got) == {c_item["id"], later["id"]}
-    assert "추정 표현" in got[c_item["id"]]["detail"]
+    assert "speculation" in got[c_item["id"]]["detail"]
     assert u_item["id"] not in got and edited["id"] not in got
 
 
@@ -167,12 +167,12 @@ def test_resolve_fixed_rechecks_rule(claude, conn):
     item = add(claude, "임시 파일을 쓰는 이유는?", a="임시 파일을 쓰는 것 같다.")
     cleanup.scan(conn)
     fid = findings(conn, "rule_violation")[0]["id"]
-    with pytest.raises(KbError, match="아직"):
+    with pytest.raises(KbError, match="still matches"):
         cleanup.resolve(claude, fid, "fixed")
     claude.update_qa(item["id"], item["version"], answer="다른 Pod 가 쓰는 중인 파일을 읽지 않게 한다.")
     res = cleanup.resolve(claude, fid, "fixed")
     assert res["resolution"] == "fixed" and res["resolved_by"] == "claude"
-    with pytest.raises(KbError, match="이미"):
+    with pytest.raises(KbError, match="already closed"):
         cleanup.resolve(claude, fid, "kept")
     with pytest.raises(KbError):
         cleanup.resolve(claude, 999, "kept")
@@ -183,7 +183,7 @@ def test_resolve_fixed_duplicate_needs_one_side_archived_or_changed(claude, conn
     b = add(claude, ".part 확장자에 먼저 쓰는 이유는 무엇인가?")
     cleanup.scan(conn)
     fid = findings(conn, "duplicate")[0]["id"]
-    with pytest.raises(KbError, match="아직"):
+    with pytest.raises(KbError, match="still matches"):
         cleanup.resolve(claude, fid, "fixed")
     claude.archive_qa(b["id"], b["version"])
     assert cleanup.resolve(claude, fid, "fixed")["resolution"] == "fixed"
@@ -298,7 +298,7 @@ def test_mcp_cleanup_list_resolve_and_search_mark(server):
     assert {h["id"]: h.get("cleanup") for h in found["hits"]} == {1: ["duplicate"], 2: ["duplicate"]}
 
     err, msg = call(srv, "kb_cleanup_resolve", {"finding_id": f["id"], "resolution": "fixed"})
-    assert err and "아직" in msg
+    assert err and "still matches" in msg
     err, res = call(srv, "kb_cleanup_resolve", {"finding_id": f["id"], "resolution": "kept",
                                                 "note": "묻는 대상이 다르다"})
     assert not err and res["resolution"] == "kept"
@@ -389,7 +389,7 @@ def test_hint_only_when_open_and_stale_or_forced(claude, conn):
     assert cleanup.hint(conn) is None
     assert cleanup.hint(conn, force=True)["open"] == 1  # 비슷한 질문을 발견한 순간은 예외
     set_meta(conn, cleanup.LAST_RESOLVED_KEY, "2000-01-01T00:00:00Z")
-    assert "정리 대상이 1건" in cleanup.hint(conn)["message"]
+    assert "Open cleanup findings: 1" in cleanup.hint(conn)["message"]
 
 
 def test_related_items_are_same_category_neighbors_without_links(claude):

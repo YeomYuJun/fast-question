@@ -2,7 +2,7 @@
 
 사용: fast-question inventory <대상 폴더> [<대상 폴더> ...] [--since <기록 JSON>] [--out <출력 JSON>]
   (저장소에서는 python fq_client/inventory.py 로 같은 인자를 준다. 표준 라이브러리만 쓴다)
-  --since: {"repos": {"<저장소 경로>": "<기록한 HEAD sha>"}} 형식(kb_harvest get 의 record). 주면 저장소마다
+  --since: {"repos": {"<저장소 경로>": "<기록한 HEAD sha>"}} 형식(kb_harvest_get 의 record). 주면 저장소마다
            그 sha 이후 바뀐 파일과 커밋을 함께 낸다.
 출력(UTF-8 JSON): 대상 폴더마다 git 저장소(HEAD, 추적 파일 수, 확장자·최상위 폴더 분포, 자주 바뀐 파일,
 오류 수정 커밋), git 이 아닌 최상위 폴더(파일 수, 확장자 분포), 문서 파일 목록.

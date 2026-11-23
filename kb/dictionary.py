@@ -43,7 +43,7 @@ def snapshot(conn: sqlite3.Connection) -> dict:
 def _word(value: str, what: str) -> str:
     w = clean(value or "")
     if not w:
-        raise ValidationError(f"{what}이(가) 비어 있습니다.")
+        raise ValidationError(f"The {what} is empty.", code="dict_word_empty")
     return w
 
 
@@ -51,25 +51,25 @@ def _archive(conn: sqlite3.Connection, table: str, id: int, actor: str) -> None:
     n = conn.execute(f"UPDATE {table} SET deleted_at = {NOW}, deleted_by = ?, updated_by = ?, {BUMP} "
                      "WHERE id = ? AND deleted_at IS NULL", (actor, actor, id)).rowcount
     if n == 0:
-        raise ValidationError(f"사전 항목을 찾지 못했습니다: {table} {id}")
+        raise ValidationError(f"Dictionary entry not found: {table} {id}", code="dict_entry_missing")
 
 
 def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
     """사전 동작을 실행하고 재색인이 필요한지 돌려준다."""
     ins = "INSERT INTO {t}({cols}, created_by, updated_by) VALUES ({marks}, ?, ?)"
     if action == "synonym_add":
-        terms = list(dict.fromkeys(_word(t, "동의어") for t in kw.get("terms") or []))
+        terms = list(dict.fromkeys(_word(t, "synonym") for t in kw.get("terms") or []))
         group_id = kw.get("group_id")
         if group_id is None:
             if len(terms) < 2:
-                raise ValidationError("새 동의어 그룹은 단어가 2개 이상이어야 합니다.")
+                raise ValidationError("A new synonym group needs at least 2 words.", code="synonym_group_size")
             group_id = conn.execute("SELECT ifnull(max(group_id), 0) + 1 FROM synonym").fetchone()[0]
         else:
             if not conn.execute("SELECT 1 FROM synonym WHERE group_id = ? AND deleted_at IS NULL",
                                 (group_id,)).fetchone():
-                raise ValidationError(f"동의어 그룹을 찾지 못했습니다: {group_id}")
+                raise ValidationError(f"Synonym group not found: {group_id}", code="dict_entry_missing")
             if not terms:
-                raise ValidationError("추가할 동의어가 없습니다.")
+                raise ValidationError("There are no synonyms to add.", code="synonym_none")
         for t in terms:
             conn.execute(ins.format(t="synonym", cols="group_id, term", marks="?, ?"),
                          (group_id, t, actor, actor))
@@ -78,7 +78,7 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
         _archive(conn, "synonym", int(kw["id"]), actor)
         return False
     if action == "stopword_add":
-        conn.execute(ins.format(t="stopword", cols="word", marks="?"), (_word(kw.get("word"), "불용어"), actor, actor))
+        conn.execute(ins.format(t="stopword", cols="word", marks="?"), (_word(kw.get("word"), "stopword"), actor, actor))
         return False
     if action == "stopword_remove":
         _archive(conn, "stopword", int(kw["id"]), actor)
@@ -86,7 +86,7 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
     if action in ("user_word_add", "user_word_remove"):
         if action == "user_word_add":
             conn.execute(ins.format(t="user_word", cols="word, tag", marks="?, ?"),
-                         (_word(kw.get("word"), "사용자 단어"), kw.get("tag") or "NNP", actor, actor))
+                         (_word(kw.get("word"), "user word"), kw.get("tag") or "NNP", actor, actor))
         else:
             _archive(conn, "user_word", int(kw["id"]), actor)
         from kb.morph import compute_version  # morph 가 이 모듈을 불러오므로 함수 안에서 불러온다
@@ -94,4 +94,4 @@ def apply(conn: sqlite3.Connection, actor: str, action: str, **kw) -> bool:
                      "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                      (compute_version(load_user_words(conn)),))
         return True
-    raise ValidationError(f"알 수 없는 사전 동작입니다: {action}")
+    raise ValidationError(f"Unknown dictionary action: {action}", code="dict_action")

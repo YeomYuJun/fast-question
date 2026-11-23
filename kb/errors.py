@@ -1,31 +1,31 @@
-"""오류 형식과 SQLite 오류의 한국어 변환."""
+"""오류 형식과 SQLite 오류의 메시지 변환."""
 import re
 import sqlite3
 
 MESSAGES = {
-    "qa_question_len": "질문은 1~150자로 써 주세요.",
-    "qa_question_line": "질문은 한 줄로 써 주세요.",
-    "qa_answer_len": "답변은 1~400자로 써 주세요.",
-    "qa_answer_lines": "답변은 6줄까지 쓸 수 있습니다.",
-    "qa_evidence_state": "근거 상태 값이 올바르지 않습니다.",
-    "category_name_len": "분류 이름은 1~60자 한 줄로 써 주세요.",
-    "category_description_len": "분류 설명은 300자까지 쓸 수 있습니다.",
-    "category_depth": "분류는 대분류와 중분류 2단계까지만 만들 수 있습니다.",
-    "category_name_uq": "같은 상위 분류 아래에 같은 이름의 분류가 이미 있습니다.",
-    "qa_link_order": "관련 질문 연결 값이 올바르지 않습니다.",
-    "qa_link_uq": "이미 연결된 질문입니다.",
-    "synonym_term_len": "동의어는 1~60자로 써 주세요.",
-    "synonym_term_uq": "이미 다른 동의어 그룹에 있는 단어입니다.",
-    "user_word_len": "사용자 단어는 1~40자, 공백 없이 써 주세요.",
-    "user_word_tag": "사용자 단어 품사는 NNP, NNG, SL, XR, VV, VA 중 하나여야 합니다.",
-    "user_word_uq": "이미 등록된 사용자 단어입니다.",
-    "stopword_len": "불용어는 1~20자, 공백 없이 써 주세요.",
-    "stopword_uq": "이미 등록된 불용어입니다.",
-    "evidence_kind": "근거 형식은 file, dir, git, githead, url, note 중 하나여야 합니다.",
-    "managed_column": "생성 정보, 수정 시각, 버전은 저장소가 정합니다.",
-    "no_physical_delete": "삭제 대신 보관 처리를 써 주세요.",
-    "revision_append_only": "이력은 고치거나 지울 수 없습니다.",
-    "foreign_key": "가리키는 대상이 없습니다.",
+    "qa_question_len": "The question must be 1-300 characters.",
+    "qa_question_line": "The question must be a single line.",
+    "qa_answer_len": "The answer must be 1-800 characters.",
+    "qa_answer_lines": "The answer can have at most 6 lines.",
+    "qa_evidence_state": "The evidence state value is invalid.",
+    "category_name_len": "The category name must be a single line of 1-60 characters.",
+    "category_description_len": "The category description can be at most 300 characters.",
+    "category_depth": "Categories can only be two levels deep (top level and subcategory).",
+    "category_name_uq": "A category with the same name already exists under the same parent.",
+    "qa_link_order": "The related-question link value is invalid.",
+    "qa_link_uq": "These questions are already linked.",
+    "synonym_term_len": "A synonym must be 1-60 characters.",
+    "synonym_term_uq": "This word is already in another synonym group.",
+    "user_word_len": "A user word must be 1-40 characters with no spaces.",
+    "user_word_tag": "The user word tag must be one of NNP, NNG, SL, XR, VV, VA.",
+    "user_word_uq": "This user word is already registered.",
+    "stopword_len": "A stopword must be 1-20 characters with no spaces.",
+    "stopword_uq": "This stopword is already registered.",
+    "evidence_kind": "The evidence kind must be one of file, dir, git, githead, url, note, github.",
+    "managed_column": "Creation info, update time and version are set by the store.",
+    "no_physical_delete": "Rows cannot be deleted. Archive them instead.",
+    "revision_append_only": "History cannot be changed or deleted.",
+    "foreign_key": "The referenced target does not exist.",
 }
 
 
@@ -68,4 +68,4 @@ def from_sqlite(exc: sqlite3.Error) -> KbError:
         code = "foreign_key"
     if code in MESSAGES:
         return ValidationError(MESSAGES[code], code=code)
-    return KbError(f"DB 오류: {msg}", code="db")
+    return KbError(f"Database error: {msg}", code="db")

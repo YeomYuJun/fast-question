@@ -74,7 +74,7 @@ def detail(pub: Store, qa_id: int) -> dict:
     """공개 항목 상세. 이력은 빼고 근거는 url·note 만 남긴다(공개 DB 의 파일 근거는 운영자 PC 의 것이다)."""
     item = pub.get_qa(qa_id)
     if item["archived"]:
-        raise NotFoundError(f"공개 항목을 찾지 못했습니다: {qa_id}")
+        raise NotFoundError(f"Public item not found: {qa_id}")
     item.pop("revisions", None)
     item["evidence"] = [e for e in item["evidence"] if e["kind"] in ("url", "note", "github")]
     return {**item, "scope": SCOPE}

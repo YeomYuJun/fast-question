@@ -199,13 +199,14 @@ def _spans(text: str, patterns: list[re.Pattern]) -> list[list[int]]:
 
 def _regex(q: str, case_sensitive: bool) -> re.Pattern:
     if len(q) > REGEX_MAX:
-        raise ValidationError(f"정규식은 {REGEX_MAX}자까지 쓸 수 있습니다. 지금 {len(q)}자입니다.")
+        raise ValidationError(f"A regular expression can be up to {REGEX_MAX} characters. It has {len(q)} characters now.")
     if _REPEATED_GROUP.search(q):
-        raise ValidationError("정규식에 반복되는 그룹((a+)+, (a|b)* 같은 형태)을 쓸 수 없습니다. 검색 시간이 끝없이 늘 수 있습니다.")
+        raise ValidationError("A regular expression cannot repeat a group (forms like (a+)+ or (a|b)*). "
+                              "Such patterns can make the search run without end.")
     try:
         return re.compile(q, 0 if case_sensitive else re.IGNORECASE)
     except re.error as e:
-        raise ValidationError(f"정규식이 올바르지 않습니다: {e}") from e
+        raise ValidationError(f"The regular expression is invalid: {e}") from e
 
 
 def search(store: "Store", query: str, *, analyzer=None, category_id: int | None = None,
@@ -218,7 +219,7 @@ def search(store: "Store", query: str, *, analyzer=None, category_id: int | None
     conn = store.conn
     q = unicodedata.normalize("NFC", query or "").strip()
     if len(q) > QUERY_MAX:
-        raise ValidationError(f"검색어는 {QUERY_MAX}자까지 쓸 수 있습니다. 지금 {len(q)}자입니다.")
+        raise ValidationError(f"A search query can be up to {QUERY_MAX} characters. It has {len(q)} characters now.")
     ok = _filter(store, include_archived, category_id, since_hours)
     # 빈 검색(최근 목록)에는 형태소가 필요 없으므로 Kiwi 를 띄우지 않는다
     morph_on = bool(q and analyzer is not None and analyzer.ready(conn))
@@ -343,7 +344,7 @@ def _morph_ids(conn, analyzer, docs: dict[int, Doc], q: str, parsed: Query,
     연산자가 있으면 대안마다 분석해 그룹은 AND, 대안은 OR, 제외 단어는 NOT 으로 찾는다.
     질문·답변 한정 대안은 색인에 범위가 없으므로 후보를 그 범위의 형태소로 다시 확인한다.
     morph_terms 에 범위별 강조할 형태소를 채운다."""
-    stop = load_stopwords(conn)
+    stop = analyzer.stop_forms(load_stopwords(conn))
 
     def content(text: str) -> list[str]:
         return [m for m in analyzer.query_morphs(text) if m not in stop]
@@ -398,7 +399,7 @@ def search_many(store: "Store", queries: list[str], *, analyzer=None, limit: int
     t0 = time.perf_counter()
     qs = [q for q in dict.fromkeys(unicodedata.normalize("NFC", q or "").strip() for q in queries) if q]
     if not qs:
-        raise ValidationError("queries 에 검색어가 하나 이상 필요합니다.")
+        raise ValidationError("queries needs at least one search query.")
     best: dict[int, dict] = {}
     matched: dict[int, list[str]] = {}
     similar: dict[int, dict] = {}

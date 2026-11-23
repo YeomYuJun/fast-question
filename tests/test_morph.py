@@ -139,6 +139,52 @@ def test_morph_or_and_exclude(store):
     assert tiers(store.search("옮긴 -PETRA"), "morph") == {1}
 
 
+@pytest.fixture
+def en_store(conn, shared_analyzer):
+    s = Store(conn, "user", analyzer=shared_analyzer)
+    s.add_category("Ops")
+    for q, a in [("Where is the config file?", "It is in deploy/config.json."),
+                 ("Which configs does the web server read?", "It reads config.json and secrets.json."),
+                 ("When was the app deployed?", "The app is deployed by CI on every push."),
+                 ("How do I deploy the app?", "Run the deploy workflow.")]:
+        s.add_qa("Ops", q, a, force=True)
+    return s
+
+
+@pytest.mark.parametrize("query, ids", [
+    ("configs", {1, 2}), ("config", {1, 2}), ("deployed", {1, 3, 4}), ("deploy", {1, 3, 4}),
+    ("deploying app", {3, 4}),
+])
+def test_english_stems_find_each_other(en_store, query, ids):
+    res = en_store.search(query)
+    assert {h["id"] for h in res["hits"]} == ids, res["hits"]
+
+
+def test_english_index_keeps_form_and_stem(shared_analyzer, conn):
+    shared_analyzer.ready(conn)
+    assert shared_analyzer.index_text("deployed configs") == "deployed deploy configs config"
+    assert shared_analyzer.query_morphs("deployed configs") == ["deploy", "config"]
+
+
+def test_english_stopword_filters_its_stem(en_store):
+    assert {h["id"] for h in en_store.search("does configs")["hits"]} == {2}
+    en_store.dict_action("stopword_add", word="does")  # 어간은 doe
+    assert {h["id"] for h in en_store.search("does configs")["hits"]} == {1, 2}
+
+
+def test_english_stem_spans_cover_original_word(en_store):
+    hit = next(h for h in en_store.search("configs")["hits"] if h["id"] == 1)
+    assert [hit["question"][s:e] for s, e in hit["spans"]["question"]] == ["config"]
+
+
+def test_rules_change_makes_rows_pending(en_store, monkeypatch):
+    from kb import morph
+    assert "sl-stem=snowballstemmer-" in morph.RULES
+    assert pending_count(en_store.conn) == 0
+    monkeypatch.setattr(morph, "RULES", "v1;keep=NNG,NNP,NP,NR,SH,SL,SN,VA,VV,XR;xsn-join;lower")
+    assert pending_count(en_store.conn) == 4
+
+
 def test_morph_respects_field_scope(store):
     assert tiers(store.search("a:옮긴"), "morph") == {1, 8}
     assert tiers(store.search("q:옮긴"), "morph") == set()

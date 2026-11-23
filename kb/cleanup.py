@@ -2,7 +2,7 @@
 
 탐지(scan)는 주기 작업(kb/jobs.py)이 하루 한 번 돌린다. 로컬 모드는 그 DB, 원격 모드는 사용자 DB 마다 돈다.
 DB 내용만 보므로 두 모드의 동작이 같다.
-- duplicate: 살아 있는 항목끼리 같은 대분류에서 질문 2글자 조각 겹침(dice)이 SIMILAR_MIN 이상, 또는 같은 근거
+- duplicate: 살아 있는 항목끼리 같은 대분류에서 등록을 막는 수준으로 비슷한 질문(kb.text.similar_level 의 block), 또는 같은 근거
   (파일·저장소 경로와 anchor)를 단 두 항목이 SHARED_EVIDENCE_MIN 이상. qa_id 는 나중에 등록한 쪽이다.
 - rule_violation: 질문·답을 마지막으로 쓴 주체가 claude 인 항목에 kb.rules.problems 를 다시 적용한다.
   사람이 웹에서 고친 항목은 형식 규칙 대상이 아니라서 뺀다.
@@ -24,12 +24,12 @@ from itertools import combinations
 from kb import rules
 from kb.db import NOW, get_meta, set_meta, tx
 from kb.errors import NotFoundError, ValidationError
-from kb.text import SIMILAR_MIN, bigrams, dice
+from kb.text import BLOCK_MIN_NO_HANGUL, SIMILAR_MIN, bigrams, dice, similar_level
 
 SHARED_EVIDENCE_MIN = 0.4  # 같은 근거·anchor 를 단 두 항목은 이 값부터 중복 후보다
 # qa.evidence_state → (규칙 이름, 설명, 그 상태를 만든 근거 판정). 설명 뒤에 그 근거들의 판정 설명을 붙인다
-EVIDENCE_RULES = {"stale": ("evidence_stale", "근거가 기록한 뒤에 바뀌었습니다", "changed"),
-                  "unknown": ("evidence_unknown", "근거를 판정하지 못했습니다", "unknown")}
+EVIDENCE_RULES = {"stale": ("evidence_stale", "The evidence changed after it was recorded", "changed"),
+                  "unknown": ("evidence_unknown", "The evidence could not be checked", "unknown")}
 RESOLUTIONS = ("fixed", "kept")
 _CHUNK = 500  # IN (...) 자리표시자 수
 
@@ -43,7 +43,7 @@ def fingerprints() -> dict[str, str]:
     rule_violation 은 kb/rules.py 의 소스와 지금 쓰는 패턴, duplicate 는 유사도 기준값이다."""
     return {"rule_violation": _fingerprint([inspect.getsource(rules), [(k, rx.pattern) for k, rx, _ in rules.BANNED],
                                             [(k, rx.pattern) for k, rx in rules.SENSITIVE]]),
-            "duplicate": _fingerprint([SIMILAR_MIN, SHARED_EVIDENCE_MIN])}
+            "duplicate": _fingerprint([SIMILAR_MIN, SHARED_EVIDENCE_MIN, BLOCK_MIN_NO_HANGUL])}
 
 
 def _hash(*texts: str) -> str:
@@ -88,7 +88,7 @@ def _pair(i: int, j: int) -> tuple[int, int]:
 
 
 def _shared_detail(key: tuple, score: float) -> str:
-    return f"같은 근거(anchor '{key[2]}')를 단 항목과 질문 유사도 {score:.2f}"
+    return f"Question similarity {score:.2f} with an item that has the same evidence (anchor '{key[2]}')"
 
 
 def _duplicates(conn: sqlite3.Connection, live: dict, targets: set[int]) -> dict[tuple[int, int], str]:
@@ -122,8 +122,8 @@ def _duplicates(conn: sqlite3.Connection, live: dict, targets: set[int]) -> dict
             if min(la, lb) * (2 * den - num) < num * max(la, lb):
                 continue
             score = 2 * len(a & grams[j]) / (la + lb)
-            if score >= SIMILAR_MIN:
-                out[_pair(i, j)] = f"같은 대분류의 항목과 질문 유사도 {score:.2f}"
+            if score >= SIMILAR_MIN and similar_level(live[i]["question"], live[j]["question"])[1] == "block":
+                out[_pair(i, j)] = f"Question similarity {score:.2f} with an item in the same top-level category"
     for key, ids in _evidence_keys(conn).items():
         ids = sorted(ids & live.keys())
         for i, j in combinations(ids, 2):
@@ -279,8 +279,8 @@ def _still_found(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
         return _violations(conn, live, {r["qa_id"]}).get(r["qa_id"])
     a, b = live[r["qa_id"]], live[r["other_qa_id"]]
     score = dice(bigrams(a["question"]), bigrams(b["question"]))
-    if a["top"] == b["top"] and score >= SIMILAR_MIN:
-        return f"같은 대분류의 항목과 질문 유사도 {score:.2f}"
+    if a["top"] == b["top"] and similar_level(a["question"], b["question"])[1] == "block":
+        return f"Question similarity {score:.2f} with an item in the same top-level category"
     for key, group in _evidence_keys(conn, ids).items():
         if set(ids) <= group and score >= SHARED_EVIDENCE_MIN:
             return _shared_detail(key, score)
@@ -290,18 +290,19 @@ def _still_found(conn: sqlite3.Connection, r: sqlite3.Row) -> str | None:
 def resolve(store, finding_id: int, resolution: str, note: str | None = None) -> dict:
     """열린 정리 건을 닫는다. fixed 는 조건을 다시 확인해 아직 맞으면 거부한다. kept 는 문제가 아니라고 본 것이다."""
     if resolution not in RESOLUTIONS:
-        raise ValidationError(f"resolution 은 {', '.join(RESOLUTIONS)} 중 하나여야 합니다: {resolution}")
+        raise ValidationError(f"resolution must be one of {', '.join(RESOLUTIONS)}: {resolution}", code="resolution_value")
     conn = store.conn
     row = conn.execute(f"SELECT {FINDING_COLS} FROM cleanup_finding WHERE id = ?", (finding_id,)).fetchone()
     if row is None:
-        raise NotFoundError(f"정리 건을 찾지 못했습니다: {finding_id}")
+        raise NotFoundError(f"Cleanup finding not found: {finding_id}")
     if row["resolved_at"] is not None:
-        raise ValidationError(f"이미 닫힌 정리 건입니다({row['resolution']}): {finding_id}")
+        raise ValidationError(f"The cleanup finding is already closed ({row['resolution']}): {finding_id}",
+                              code="finding_closed")
     if resolution == "fixed":
         still = _still_found(conn, row)
         if still:
-            raise ValidationError(f"아직 정리 조건에 걸립니다: {still}. 항목을 고치거나 보관한 뒤 닫아 주세요. "
-                                  "문제가 아니라고 판단했으면 kept 로 닫아 주세요.")
+            raise ValidationError(f"The item still matches the cleanup condition: {still}. Fix or archive the item "
+                                  "before closing. If it is not a problem, close it as kept.", code="finding_still_open")
     with tx(conn) as c:
         c.execute(f"UPDATE cleanup_finding SET resolved_at = {NOW}, resolution = ?, resolved_by = ?, note = ? "
                   "WHERE id = ? AND resolved_at IS NULL", (resolution, store.actor, note, finding_id))
@@ -337,4 +338,5 @@ def hint(conn: sqlite3.Connection, *, force: bool = False, now: datetime | None 
         if (now or datetime.now(timezone.utc)) - at < timedelta(days=HINT_AFTER_DAYS):
             return None
     return {"open": s["open"], "last_resolved_at": last,
-            "message": f"정리 대상이 {s['open']}건 있습니다. 지금 일을 마친 뒤 사용자에게 정리를 권하고, 동의하면 kb_cleanup_list 로 처리합니다."}
+            "message": f"Open cleanup findings: {s['open']}. After the current task, suggest a cleanup to the user "
+                       "and, if they agree, handle it with kb_cleanup_list."}

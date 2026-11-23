@@ -126,7 +126,7 @@ def test_stale_version_and_bad_verdicts(tmp_path):
     r = s.apply_verdicts([{"evidence_id": file_ev["id"], "version": file_ev["version"] + 1, "verdict": "changed"},
                           {"evidence_id": note_ev["id"], "version": note_ev["version"], "verdict": "changed"}])
     assert r == []  # 그사이 재기록된 근거, 판정 대상이 아닌 근거는 쓰지 않는다
-    with pytest.raises(Exception, match="판정"):
+    with pytest.raises(Exception, match="verdict must be one of"):
         s.apply_verdicts([{"evidence_id": file_ev["id"], "version": file_ev["version"], "verdict": "external"}])
     s.conn.close()
 
@@ -142,7 +142,7 @@ def test_unchecked_evidence_turns_unknown(tmp_path):
     time.sleep(0.01)
     assert s.expire_verdicts(days=0) == 1
     got = s.get_qa(item["id"])
-    assert got["evidence_state"] == "unknown" and "판정하지 않았습니다" in got["evidence"][0]["verdict_detail"]
+    assert got["evidence_state"] == "unknown" and "Not checked on the user's PC" in got["evidence"][0]["verdict_detail"]
     s.conn.close()
 
 
@@ -161,7 +161,7 @@ def test_web_form_keeps_existing_path_evidence(cfg, app, tmp_path):
 
         bad = c.patch(f"/api/qa/{item['id']}", json={"version": r.json()["version"],
                                                     "evidence_line": str(tmp_path / "새 파일.txt")})
-        assert bad.status_code == 400 and "로컬 프록시" in bad.json()["error"]
+        assert bad.status_code == 400 and bad.json()["code"] == "remote_path_evidence"
 
 
 def test_local_check_script(cfg, app, tmp_path):
@@ -203,5 +203,5 @@ def test_proxy_capture_rejects_missing_anchor(tmp_path):
     f = tmp_path / "a.txt"
     f.write_text("def foo(): pass\n", encoding="utf-8")
     assert localize({"kind": "file", "path": str(f), "anchor": "def foo"})["captured"]["anchor"] == "def foo"
-    with pytest.raises(ValidationError, match="앵커 'def bar' 가 a.txt 에 없습니다"):
+    with pytest.raises(ValidationError, match="Anchor 'def bar' is not in a.txt"):
         localize({"kind": "file", "path": str(f), "anchor": "def bar"})

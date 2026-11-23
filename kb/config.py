@@ -104,13 +104,13 @@ def load_config(path: Path | None = None) -> Config:
 def _counts(raw: dict, key: str, allowed: tuple[str, ...]) -> dict[str, int]:
     value = raw[key]
     if not isinstance(value, dict):
-        raise ValueError(f"config 의 {key} 는 객체다: {value!r}")
+        raise ValueError(f"config {key} must be an object: {value!r}")
     unknown = sorted(set(value) - set(allowed))
     if unknown:
-        raise ValueError(f"config 의 {key} 에 모르는 키가 있다: {', '.join(unknown)} (쓸 수 있는 키: {', '.join(allowed)})")
+        raise ValueError(f"config {key} has unknown keys: {', '.join(unknown)} (allowed keys: {', '.join(allowed)})")
     bad = [k for k, v in value.items() if not isinstance(v, int) or isinstance(v, bool) or v <= 0]
     if bad:
-        raise ValueError(f"config 의 {key}.{bad[0]} 는 양의 정수다: {value[bad[0]]!r}")
+        raise ValueError(f"config {key}.{bad[0]} must be a positive integer: {value[bad[0]]!r}")
     return dict(value)
 
 
@@ -122,9 +122,9 @@ def _prefix(value) -> str:
 def _mode(raw: dict) -> str:
     mode = raw["mode"]
     if mode not in MODES:
-        raise ValueError(f"config 의 mode 는 {'·'.join(MODES)} 중 하나다: {mode!r}")
+        raise ValueError(f"config mode must be one of {', '.join(MODES)}: {mode!r}")
     if mode == "remote" and not raw["data_dir"]:
-        raise ValueError("mode 가 remote 면 data_dir(사용자 DB 폴더)이 필요하다.")
+        raise ValueError("When mode is remote, data_dir (the user DB folder) is required.")
     return mode
 
 
@@ -134,5 +134,5 @@ def _public_url(raw: dict) -> str:
         return url
     parts = urlsplit(url)
     if parts.scheme not in ("https", "http") or not parts.netloc or parts.path or parts.query:
-        raise ValueError(f"mode 가 remote 면 public_url 은 https://도메인 형식이다(경로 없음): {url!r}")
+        raise ValueError(f"When mode is remote, public_url must be https://<domain> with no path: {url!r}")
     return url

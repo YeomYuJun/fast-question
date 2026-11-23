@@ -42,7 +42,7 @@ def _upgrade(conn: sqlite3.Connection) -> None:
         have = _schema_version(conn)  # 잠금을 얻는 사이 다른 프로세스가 올렸을 수 있어 다시 읽는다
         if have is not None and have.isdigit() and int(have) > int(SCHEMA_VERSION):
             raise sqlite3.DatabaseError(
-                f"이 저장소의 스키마 버전({have})이 프로그램의 버전({SCHEMA_VERSION})보다 높습니다. 프로그램을 최신으로 올려 주세요.")
+                f"This store's schema version ({have}) is newer than the program's ({SCHEMA_VERSION}). Update the program.")
         if have is not None:
             for below, step in MIGRATIONS:
                 if not have.isdigit() or int(have) < below:
@@ -95,12 +95,35 @@ def _widen_evidence_kinds(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA writable_schema = OFF")
 
 
+_OLD_QA_LENS = ("CHECK (length(trim(question)) BETWEEN 1 AND 150)", "CHECK (length(trim(answer)) BETWEEN 1 AND 400)")
+_NEW_QA_LENS = ("CHECK (length(trim(question)) BETWEEN 1 AND 300)", "CHECK (length(trim(answer)) BETWEEN 1 AND 800)")
+
+
+def _widen_qa_lengths(conn: sqlite3.Connection) -> None:
+    """스키마 5 이하의 qa 표는 질문 150자, 답변 400자까지 받는다. _relax_answer_lines 와 같은 writable_schema 절차로
+    표 정의 문자열의 CHECK 만 넓힌다(기존 행은 그대로 맞는다)."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'qa'").fetchone()
+    if row is None or not any(old in row[0] for old in _OLD_QA_LENS):
+        return
+    sql = row[0]
+    for old, new in zip(_OLD_QA_LENS, _NEW_QA_LENS):
+        sql = sql.replace(old, new)
+    ver = conn.execute("PRAGMA schema_version").fetchone()[0]
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'qa'", (sql,))
+        conn.execute(f"PRAGMA schema_version = {ver + 1}")
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
+
+
 # (이 버전 미만의 DB 에 적용, 단계 함수). 버전 순으로 둔다. 표를 새로 만들거나 트리거를 바꾸는 변경은 ddl() 이 하므로
 # 단계가 필요 없다. 기존 표의 정의·데이터를 바꾸는 변경만 SCHEMA_VERSION 을 올리면서 여기에 단계를 더한다.
 # 단계는 _upgrade 의 트랜잭션 안에서 돌고, 이미 적용된 DB 에 다시 돌아도 바뀌는 것이 없어야 한다.
 MIGRATIONS = [
     (3, _relax_answer_lines),
     (5, _widen_evidence_kinds),
+    (6, _widen_qa_lengths),
 ]
 
 

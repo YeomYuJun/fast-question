@@ -5,6 +5,8 @@
   제어 DB 의 서버 전역 사전(kb/control.py global_user_word)을 주입한다(Analyzer(words=...)). web 과 MCP 가 각자
   띄운 Kiwi 는 쓰기·검색 전에 이 버전을 비교해 다르면 다시 띄운다.
 - 색인 행의 ver 가 현재 버전과 다르거나 행이 없으면 재색인 대상이다.
+- 외국어(SL) 단어는 색인에 원형과 영어 어간을 함께 넣고, 질의는 어간만 쓴다. 질의 형태소는 AND 로 묶이므로
+  원형까지 넣으면 어간만 같은 행(configs 와 config)을 찾지 못한다.
 """
 import functools
 import hashlib
@@ -14,11 +16,15 @@ import threading
 from importlib import metadata
 from typing import Callable, Iterable
 
+import snowballstemmer
+
 from kb.dictionary import load_stopwords, load_user_words
 
 KEEP_TAGS = frozenset({"NNG", "NNP", "NR", "NP", "VV", "VA", "XR", "SL", "SH", "SN"})
 XSN_BASE = frozenset({"NNG", "NNP", "XR"})
-RULES = "v1;keep=" + ",".join(sorted(KEEP_TAGS)) + ";xsn-join;lower"
+STEM_TAG = "SL"
+RULES = ("v2;keep=" + ",".join(sorted(KEEP_TAGS)) + ";xsn-join;lower"
+         + f";sl-stem=snowballstemmer-{metadata.version('snowballstemmer')}-english")
 
 
 @functools.lru_cache(maxsize=1)
@@ -60,6 +66,7 @@ class Analyzer:
         self._loader = loader or _default_loader
         self._words = words or load_user_words
         self._lock = threading.RLock()
+        self._stemmer = snowballstemmer.stemmer("english")  # 상태를 가진 객체라 _lock 안에서만 쓴다
         self._kiwi = None
         self.version: str | None = None
         self.enabled = True
@@ -91,14 +98,29 @@ class Analyzer:
         with self._lock:
             return self._kiwi.tokenize(text)
 
-    def _units(self, text: str) -> list[tuple[str, int, int]]:
-        """(형태, 시작, 끝) 목록. 명사 바로 뒤 XSN 은 붙인 형태도 넣는다(암호 + 화 → 암호화)."""
+    def _stem(self, word: str) -> str:
+        with self._lock:
+            return self._stemmer.stemWord(word)
+
+    def stop_forms(self, words: Iterable[str]) -> set[str]:
+        """불용어에 영어 어간을 더한다. 질의 형태소의 SL 단어는 어간이라 불용어도 어간으로 비교해야 걸러진다."""
+        words = set(words)
+        return words | {self._stem(w.lower()) for w in words}
+
+    def _units(self, text: str, query: bool = False) -> list[tuple[str, int, int]]:
+        """(형태, 시작, 끝) 목록. 명사 바로 뒤 XSN 은 붙인 형태도 넣는다(암호 + 화 → 암호화).
+        SL 단어는 원형과 어간을 넣고, query 면 어간만 넣는다."""
         toks = self._tokens(text)
         out = []
         for i, t in enumerate(toks):
             tag = _tag(t)
             if tag in KEEP_TAGS:
-                out.append((t.form.lower(), t.start, t.start + t.len))
+                form, start, end = t.form.lower(), t.start, t.start + t.len
+                stem = self._stem(form) if tag == STEM_TAG else form
+                if not query or stem == form:
+                    out.append((form, start, end))
+                if stem != form:
+                    out.append((stem, start, end))
             if tag == "XSN" and i > 0:
                 p = toks[i - 1]
                 if _tag(p) in XSN_BASE and p.start + p.len == t.start:
@@ -112,7 +134,7 @@ class Analyzer:
         return " ".join(self.morphs(text))
 
     def query_morphs(self, text: str) -> list[str]:
-        return list(dict.fromkeys(self.morphs(text)))
+        return list(dict.fromkeys(u[0] for u in self._units(text, query=True)))
 
     def contains_any(self, text: str, morphs: Iterable[str]) -> bool:
         return bool(set(self.morphs(text)) & set(morphs))
@@ -141,7 +163,8 @@ class Analyzer:
 
     def match_ratio(self, conn: sqlite3.Connection, query: str) -> dict[int, float]:
         """질의 형태소(불용어 제외) 중 몇 개를 가졌는지의 비율."""
-        ms = [m for m in self.query_morphs(query) if m not in load_stopwords(conn)]
+        stop = self.stop_forms(load_stopwords(conn))
+        ms = [m for m in self.query_morphs(query) if m not in stop]
         counts: dict[int, int] = {}
         for m in ms:
             for (rid,) in conn.execute("SELECT rowid FROM qa_morph_fts WHERE qa_morph_fts MATCH ?",

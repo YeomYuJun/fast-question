@@ -2,7 +2,7 @@
 
 예시는 일반적인 웹 개발 내용이고 캔버스 Main 보드(design/screens/Main.dc.html)의 데이터와 같다.
 화면의 상태가 모두 나오도록 넣는다: 사용자·Claude 작성, 근거 없음·외부 근거·바뀐 근거(재확인),
-관련 질문 연결, 글자 수 한도(150/400자), 이모지가 든 강조, Claude 가 고친 이력.
+관련 질문 연결, 가중 길이 한도(300/800), 이모지가 든 강조, Claude 가 고친 이력.
 테스트 표본(tests/conftest.py SAMPLE_QA)과는 따로 둔다. 검색 테스트가 그 내용에 기대기 때문이다.
 사용: .venv\\Scripts\\python.exe scripts\\demo_db.py [폴더] [--port 8766]
       .venv\\Scripts\\python.exe run_web.py --config <출력된 config.json>

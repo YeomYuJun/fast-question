@@ -61,10 +61,10 @@ def test_github_kind_captures_blob_and_plain_url_stays_url(gh):
 
 
 def test_capture_refuses_missing_file_or_github_down(gh):
-    with pytest.raises(ValidationError, match="없습니다"):
+    with pytest.raises(ValidationError, match="does not exist on GitHub"):
         evidence.capture({"kind": "github", "url": "https://github.com/YeomYuJun/fast-question/blob/main/nope.py"})
     gh.down = True
-    with pytest.raises(ValidationError, match="읽지 못해"):
+    with pytest.raises(ValidationError, match="Could not read the file from GitHub"):
         evidence.capture({"kind": "github", "url": URL_MAIN})
 
 
@@ -76,12 +76,12 @@ def test_checker_compares_blob_on_branch_or_default_branch(gh):
     assert checker.check(pinned) == ("same", "")  # 커밋 고정 주소는 기본 브랜치(main)의 지금 blob 과 견준다
     gh.blobs[("main", "kb/query.py")] = "b2"
     checker = evidence.Checker()
-    assert checker.check(branch) == ("changed", "kb/query.py 내용이 main 에서 바뀌었습니다 (앵커 'a | b' 있음)")
-    assert checker.check(pinned) == ("changed", "kb/query.py 내용이 main 에서 바뀌었습니다 (앵커 'zzz' 없음)")
+    assert checker.check(branch) == ("changed", "kb/query.py content changed on main (anchor 'a | b' present)")
+    assert checker.check(pinned) == ("changed", "kb/query.py content changed on main (anchor 'zzz' missing)")
     del gh.blobs[("main", "kb/query.py")]
     assert evidence.Checker().check(branch)[0] == "changed"
     gh.down = True
-    assert evidence.Checker().check(branch) == ("unknown", "GitHub 을 읽지 못했습니다: timeout")
+    assert evidence.Checker().check(branch) == ("unknown", "Could not read GitHub: timeout")
 
 
 def test_checker_caches_api_calls_per_run(gh):

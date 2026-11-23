@@ -12,7 +12,7 @@ KB_FILE = "kb.sqlite3"
 
 def _account_id(account_id) -> int:
     if type(account_id) is not int or account_id <= 0:  # bool 은 int 의 하위형이라 type 으로 막는다
-        raise ValueError(f"계정 id 는 양의 정수다: {account_id!r}")
+        raise ValueError(f"The account id must be a positive integer: {account_id!r}")
     return account_id
 
 

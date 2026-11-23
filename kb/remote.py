@@ -55,11 +55,11 @@ def save_credentials(url: str, token: str, path: Path | None = None, device_id: 
     """자격 증명을 쓴다. device_id·mode 를 주지 않으면 파일에 있던 것을 둔다. device_id 가 없으면 새로 만든다."""
     url, token = url.strip().rstrip("/"), token.strip()
     if not url.startswith(("https://", "http://")):
-        raise ValueError(f"서버 주소는 https:// 로 시작해야 합니다: {url}")
+        raise ValueError(f"The server address must start with https://: {url}")
     if not token.startswith(TOKEN_PREFIX):
-        raise ValueError(f"개인 토큰은 {TOKEN_PREFIX} 로 시작해야 합니다.")
+        raise ValueError(f"The personal token must start with {TOKEN_PREFIX}.")
     if mode is not None and mode not in MODES:
-        raise ValueError(f"mode 는 {', '.join(MODES)} 중 하나입니다: {mode}")
+        raise ValueError(f"mode must be one of {', '.join(MODES)}: {mode}")
     path = path or credentials_path()
     try:
         old = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -79,7 +79,7 @@ def set_mode(mode: str, path: Path | None = None) -> Path:
     """자격 증명 파일의 mode 만 바꾼다. 주소·토큰·device_id 는 그대로 둔다. 읽을 자격 증명이 없으면 ValueError."""
     cred = load_credentials(path)
     if cred is None:
-        raise ValueError(f"원격 자격 증명이 없거나 형식이 틀렸습니다: {path or credentials_path()}")
+        raise ValueError(f"Remote credentials are missing or malformed: {path or credentials_path()}")
     return save_credentials(cred["url"], cred["token"], path=path, device_id=cred["device_id"], mode=mode)
 
 

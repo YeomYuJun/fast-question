@@ -19,7 +19,9 @@ TOKEN_BYTES = 24
 
 
 class ShareRefused(Exception):
-    pass
+    def __init__(self, message: str, code: str = "invalid"):
+        super().__init__(message)
+        self.code = code
 
 
 def _hash(token: str) -> str:
@@ -39,20 +41,22 @@ def create(conn: sqlite3.Connection, account_id: int, kind: str, target_id: int,
            now: datetime | None = None) -> dict:
     """새 링크. 반환값의 token 은 이때 한 번만 알 수 있다. 같은 대상의 살아 있는 링크가 있으면 새로 만들지 않고 거부한다."""
     if kind not in KINDS:
-        raise ShareRefused(f"공개 링크 종류는 {', '.join(KINDS)} 중 하나입니다: {kind}")
+        raise ShareRefused(f"The share link kind must be one of {', '.join(KINDS)}; got {kind}.")
     if type(target_id) is not int or target_id <= 0:
-        raise ShareRefused("대상 번호가 올바르지 않습니다.")
+        raise ShareRefused("The target id is invalid.", "share_target_invalid")
     title = " ".join(str(title or "").split())[:150]
     token = secrets.token_urlsafe(TOKEN_BYTES)
     with tx(conn):
         dup = conn.execute("SELECT id FROM share WHERE account_id = ? AND kind = ? AND target_id = ? AND revoked_at IS NULL",
                            (account_id, kind, target_id)).fetchone()
         if dup is not None:
-            raise ShareRefused("이 대상의 공개 링크가 이미 있습니다. 연결 화면의 공개 링크 목록에서 폐기한 뒤 다시 만들어 주세요.")
+            raise ShareRefused("A share link for this target already exists. Revoke it in the share link list of the "
+                               "connection panel, then create it again.", "share_exists")
         alive = conn.execute("SELECT count(*) FROM share WHERE account_id = ? AND revoked_at IS NULL",
                              (account_id,)).fetchone()[0]
         if alive >= SHARE_MAX:
-            raise ShareRefused(f"공개 링크는 계정당 {SHARE_MAX}개까지입니다. 쓰지 않는 링크를 폐기해 주세요.")
+            raise ShareRefused(f"An account can have up to {SHARE_MAX} share links. Revoke links you do not use.",
+                               "share_limit")
         cur = conn.execute("INSERT INTO share(token_hash, account_id, kind, target_id, title, created_at) VALUES (?,?,?,?,?,?)",
                            (_hash(token), account_id, kind, target_id, title, _now(now)))
     return {"id": cur.lastrowid, "kind": kind, "target_id": target_id, "title": title, "token": token}

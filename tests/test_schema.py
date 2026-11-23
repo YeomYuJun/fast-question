@@ -7,7 +7,8 @@ import pytest
 
 from kb.db import connect, get_meta, set_meta
 from kb.errors import ValidationError, from_sqlite
-from kb.text import check_answer, check_name, check_question
+from kb.schema import SCHEMA_VERSION
+from kb.text import WIDE_RANGES, check_answer, check_name, check_question, weight
 
 
 BUMP = "version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')"
@@ -142,9 +143,9 @@ def test_category_name_unique_under_same_parent(conn):
     "question, answer, name",
     [
         ("한\n줄", "답", "qa_question_line"),
-        ("가" * 151, "답", "qa_question_len"),
+        ("가" * 301, "답", "qa_question_len"),
         ("질문", "1\n2\n3\n4\n5\n6\n7", "qa_answer_lines"),
-        ("질문", "가" * 401, "qa_answer_len"),
+        ("질문", "가" * 801, "qa_answer_len"),
     ],
 )
 def test_qa_constraints(conn, question, answer, name):
@@ -176,7 +177,7 @@ def test_from_sqlite_translates_constraint_names(conn):
         add_qa(conn, cid, "질문", "1\n2\n3\n4\n5\n6\n7")
     err = from_sqlite(ei.value)
     assert err.code == "qa_answer_lines"
-    assert "6줄" in err.message
+    assert "6 lines" in err.message
 
 
 def test_stopwords_seeded_once(tmp_path):
@@ -185,7 +186,7 @@ def test_stopwords_seeded_once(tmp_path):
     c = connect(path)
     words = sorted(r[0] for r in c.execute("SELECT word FROM stopword"))
     assert words == ["경우", "때"]
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
     c.close()
 
 
@@ -196,7 +197,7 @@ def test_connect_existing_db_takes_no_write_lock(tmp_path):
     t0 = time.perf_counter()
     c = connect(path)
     assert time.perf_counter() - t0 < 1.0
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
     holder.execute("ROLLBACK")
     c.close()
     holder.close()
@@ -213,14 +214,78 @@ def test_text_checks():
     nfd = unicodedata.normalize("NFD", "용량")
     assert check_question(f"  {nfd} 질문  ") == "용량 질문"
     assert check_answer("첫 줄\r\n\r\n둘째 줄  ") == "첫 줄\n둘째 줄"
-    with pytest.raises(ValidationError, match="지금 7줄"):
+    with pytest.raises(ValidationError, match="7 lines now"):
         check_answer("1\n2\n3\n4\n5\n6\n7")
-    with pytest.raises(ValidationError, match="한 줄"):
+    with pytest.raises(ValidationError, match="one line"):
         check_question("가\n나")
-    with pytest.raises(ValidationError, match="지금 151자"):
+    with pytest.raises(ValidationError, match="It is 302 now") as e:
         check_question("가" * 151)
-    with pytest.raises(ValidationError, match="비어"):
+    assert e.value.code == "qa_question_len"
+    with pytest.raises(ValidationError, match="empty"):
         check_name("   ")
+
+
+def test_weight_ranges():
+    # 각 범위의 양 끝은 2, 바로 바깥은 1. 보조 평면 문자(이모지)는 1
+    for lo, hi in WIDE_RANGES:
+        assert weight(chr(lo)) == weight(chr(hi)) == 2
+        assert weight(chr(lo - 1)) == weight(chr(hi + 1)) == 1
+    assert weight("abc") == 3 and weight("가나") == 4 and weight("ｶ") == 1 and weight("\U0001F600") == 1
+    assert weight(unicodedata.normalize("NFD", "가")) == 3  # 자모로 나뉜 글자. check_* 는 NFC 로 바꾼 뒤 센다
+
+
+def test_weighted_length_limits():
+    assert check_question("a" * 300) == "a" * 300 and check_question("가" * 150) == "가" * 150
+    for q in ("a" * 301, "가" * 150 + "a"):
+        with pytest.raises(ValidationError, match="up to 300"):
+            check_question(q)
+    assert check_answer("a" * 800) and check_answer("가" * 400)
+    with pytest.raises(ValidationError, match="It is 802 now") as e:
+        check_answer("가" * 401)
+    assert e.value.code == "qa_answer_len"
+
+
+def test_db_accepts_ascii_up_to_new_limits(conn):
+    cid = add_cat(conn, "가")
+    add_qa(conn, cid, "q" * 300, "a" * 800)
+    for q, a in (("q" * 301, "a"), ("q", "a" * 801)):
+        with pytest.raises(sqlite3.IntegrityError, match="qa_(question|answer)_len"):
+            add_qa(conn, cid, q, a)
+
+
+def test_schema_5_qa_lengths_widened_on_connect(tmp_path):
+    from kb import db
+    path = tmp_path / "kb.sqlite3"
+    c = connect(path)
+    cid = add_cat(c, "가")
+    ids = [add_qa(c, cid, f"질문 {i} 원자적", f"답변 {i} rename") for i in range(5)]
+    # 스키마 5 의 qa 표: 질문 150자, 답변 400자
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'qa'").fetchone()[0]
+    for old, new in zip(db._OLD_QA_LENS, db._NEW_QA_LENS):
+        assert new in sql
+        sql = sql.replace(new, old)
+    ver = c.execute("PRAGMA schema_version").fetchone()[0]
+    c.execute("PRAGMA writable_schema = ON")
+    c.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'qa'", (sql,))
+    c.execute(f"PRAGMA schema_version = {ver + 1}")
+    c.execute("PRAGMA writable_schema = OFF")
+    set_meta(c, "schema_version", "5")
+    with pytest.raises(sqlite3.IntegrityError):
+        add_qa(c, cid, "q" * 151)
+    before = {t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("qa", "qa_fts", "revision")}
+    c.close()
+
+    c = connect(path)
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'qa'").fetchone()[0]
+    assert all(new in sql for new in db._NEW_QA_LENS) and not any(old in sql for old in db._OLD_QA_LENS)
+    assert {t: c.execute(f"SELECT count(*) FROM {t}").fetchone()[0] for t in ("qa", "qa_fts", "revision")} == before
+    assert {r[0] for r in c.execute("SELECT rowid FROM qa_fts WHERE qa_fts MATCH '원자적'")} == set(ids)
+    add_qa(c, cid, "q" * 300, "a" * 800)
+    with pytest.raises(sqlite3.IntegrityError):
+        add_qa(c, cid, "q" * 301)
+    assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
+    c.close()
 
 
 @pytest.mark.parametrize(
@@ -288,7 +353,7 @@ def test_old_answer_line_check_relaxed_on_connect(tmp_path):
         add_qa(c, cid, a="1\n2\n3\n4\n5\n6\n7")
     add_qa(c, cid, a="1\n2\n3\n4\n5\n6")
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
     c.close()
 
 
@@ -299,7 +364,7 @@ def test_old_schema_triggers_replaced_on_connect(tmp_path):
     set_meta(c, "schema_version", "1")
     c.close()
     c = connect(path)
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
     assert c.execute("SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND name = 'qa_insert_guard'").fetchone()[0] == 1
     c.close()
 
@@ -323,7 +388,7 @@ def test_schema_4_evidence_kinds_widened_on_connect(tmp_path):
     c = connect(path)
     c.execute("INSERT INTO evidence(qa_id, kind, path, created_by, updated_by) VALUES (?, 'github', 'u', 'claude', 'claude')", (qid,))
     assert c.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert get_meta(c, "schema_version") == "5"
+    assert get_meta(c, "schema_version") == SCHEMA_VERSION
     c.close()
 
 

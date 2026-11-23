@@ -20,7 +20,7 @@ def copy_db(conn: sqlite3.Connection, dst: Path) -> Path:
         target.close()
     if check != "ok":
         Path(dst).unlink(missing_ok=True)
-        raise RuntimeError(f"사본의 quick_check 가 실패했다: {check}")
+        raise RuntimeError(f"quick_check failed on the copy: {check}")
     return Path(dst)
 
 
@@ -32,7 +32,7 @@ def _resolve(cats: dict[int, sqlite3.Row], path: str) -> int:
         found = [cid for cid, r in cats.items()
                  if r["parent_id"] == parent and r["name"] == name and r["deleted_at"] is None]
         if not found:
-            raise ValueError(f"분류를 찾지 못했다: {path}")
+            raise ValueError(f"Category not found: {path}")
         parent = found[0]
     return parent
 
@@ -102,5 +102,5 @@ def prune(path: Path, exclude: list[str] | tuple[str, ...] = ()) -> dict:
     finally:
         conn.close()
     if check != "ok":
-        raise RuntimeError(f"정리한 사본의 quick_check 가 실패했다: {check}")
+        raise RuntimeError(f"quick_check failed on the cleaned copy: {check}")
     return {"system": len(system), "excluded": len(excluded)}

@@ -23,25 +23,31 @@ def test_clean_item_passes():
 def test_missing_fields_and_quote_mismatch_are_reported():
     (r,) = lint_draft.lint([_item(ask_when="", quote="def parse_query(text): return Query(...)")])
     msgs = " ".join(r["problems"])
-    assert "ask_when" in msgs and "quote 의 식별자" in msgs
+    assert "ask_when" in msgs and "identifier from the quote" in msgs
 
 
 def test_similar_questions_and_per_file_limit():
     items = [_item(question=f"fast-question 검색창의 OR 문법 {i} 번째 질문은?") for i in range(6)]
     msgs = " ".join(p for r in lint_draft.lint(items) for p in r["problems"])
-    assert "질문이 비슷하다" in msgs and "5건까지" in msgs
+    assert "similar to item 0" in msgs and "up to 5 items per file" in msgs
 
 
 def test_rules_problems_are_included():
     (r,) = lint_draft.lint([_item(answer="2026-10-08 사용자 결정으로 바꿨다.")])
-    assert any("결정 경위" in p for p in r["problems"])
+    assert any("decision history" in p for p in r["problems"])
+
+
+def test_weighted_length_limits_match_registration():
+    assert lint_draft.lint([_item(question="q" * 300)]) == []
+    (r,) = lint_draft.lint([_item(question="가" * 151)])
+    assert any("up to 300" in p for p in r["problems"])
 
 
 def test_secret_placeholder_passes_and_real_value_is_pointed():
     ok = "docker login 에 --docker-password=<pw> 로 넘긴다."
     assert lint_draft.lint([_item(answer=ok, quote="")]) == lint_draft.lint([_item(quote="")])
     (r,) = lint_draft.lint([_item(answer="docker login 에 --docker-password=hunter2 로 넘긴다.", quote="")])
-    assert any("답변 1번째 줄에 비밀번호·토큰 값(password=hu…)" in p for p in r["problems"])
+    assert any("Answer line 1 contains a password or token value (password=hu…)" in p for p in r["problems"])
 
 
 def test_cli_exit_code_and_utf8_sig(tmp_path):

@@ -46,10 +46,30 @@ def test_set_public_validates_and_drops_guide(cfg, tmp_path, public):
     assert info["items"] == 2 and info["categories"] == 2  # system 분류는 비어서 빠진다
     bad = tmp_path / "bad.sqlite3"
     bad.write_bytes(b"not sqlite" * 20)
-    with pytest.raises(ValueError, match="손상"):
+    with pytest.raises(ValueError, match="damaged"):
         public_db.set_public(cfg.data_dir, bad)
     assert public_db.info(cfg.data_dir)["items"] == 2, "거부된 적재는 기존 공개 DB 를 건드리지 않는다"
     assert public_db.remove(cfg.data_dir) and public_db.info(cfg.data_dir) is None
+
+
+def test_set_public_upgrades_schema_5_file(cfg, tmp_path):
+    from tests.test_import import as_schema_5
+    src = build_source(tmp_path)
+    conn = sqlite3.connect(src)
+    as_schema_5(conn)
+    conn.commit()
+    conn.close()
+    assert public_db.set_public(cfg.data_dir, src)["items"] == 2
+    conn = sqlite3.connect(src)
+    try:
+        assert conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "5", "원본은 그대로다"
+    finally:
+        conn.close()
+    pub = public_kb.open_public(cfg.data_dir)
+    try:
+        assert pub.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] != "5"
+    finally:
+        pub.close()
 
 
 def test_web_search_merges_public_hits_read_only(app, cfg, public):
@@ -114,7 +134,7 @@ def test_mcp_search_carries_public_hits_and_get_reads_them(cfg, app, public):
     err, got = call(app, tok, "kb_get", {"id": ph["id"], "public": True})
     assert not err and got["scope"] == "public" and got["question"] == ph["question"]
     err, msg = call(app, tok, "kb_get", {"id": 999, "public": True})
-    assert err and "찾지 못" in msg
+    assert err and "not found" in msg
     # 공개 항목을 내 DB 에 두는 길은 kb_add 다
     err, added = call(app, tok, "kb_add", {"category": "fast-question", "question": got["question"], "answer": got["answer"]})
     assert not err and added["status"] == "created"

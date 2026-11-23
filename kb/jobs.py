@@ -3,7 +3,7 @@
 마지막 실행 시각은 meta(last_backup, last_recheck)에 DB 시각으로 남는다. web 이 꺼져 있던 동안 밀린 작업은
 기동 직후 한 번 돈다. 작업 하나가 실패해도 나머지는 돈다.
 로컬 모드는 run_due 가 cfg.db_path 하나를 맡는다. 원격 모드는 run_due_all 이 사용자 DB(kb/tenant.py)마다
-백업(users/<id>/backup/), 기본 가이드 갱신(서버의 가이드가 그 DB 의 meta guide_hash 와 다를 때), 재색인을 하고, 제어 DB 를 data_dir/backup/control-YYYYMMDD.sqlite3 로 백업한다.
+백업(users/<id>/backup/), 기본 가이드 갱신(그 DB 언어 meta guide_lang 의 서버 가이드가 meta guide_hash 와 다를 때), 재색인을 하고, 제어 DB 를 data_dir/backup/control-YYYYMMDD.sqlite3 로 백업한다.
 원격 모드는 근거 재검증을 하지 않는다(근거 파일은 사용자 PC 에 있다). 한 사용자의 실패가 다른 사용자를 막지 않는다.
 정리 탐지(kb/cleanup.py, meta last_cleanup_scan)는 두 모드 모두 DB 마다 하루 한 번 돈다. 탐지만 하고 Q&A 는 고치지 않는다.
 backup_s3_bucket 이 있으면 그 주기에 만든 백업 사본을 S3 에 올린다(kb/s3backup.py). 업로드 실패는 백업을 되돌리지 않는다.
@@ -43,7 +43,7 @@ def backup(conn: sqlite3.Connection, backup_dir: Path, keep: int, today: date | 
         target.close()
     if check != "ok":
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"백업 사본의 quick_check 가 실패했다: {check}")
+        raise RuntimeError(f"quick_check failed on the backup copy: {check}")
     tmp.replace(dst)
     for old in sorted(backup_dir.glob(f"{name}-*.sqlite3"))[:-keep]:
         old.unlink()
@@ -104,8 +104,10 @@ def _github_job(conn: sqlite3.Connection, now: datetime) -> list:
     return [("github", job)]
 
 
-def _guide_job(conn: sqlite3.Connection, remote_guide: dict | None, analyzer) -> list:
-    """원격 모드 사용자 DB: 서버의 기본 가이드가 이 DB 에 넣은 판과 다르면 다시 넣는다(사람이 고친 항목은 그대로)."""
+def _guide_job(conn: sqlite3.Connection, remote_guides: dict | None, analyzer) -> list:
+    """원격 모드 사용자 DB: 그 DB 언어(kb.guide.lang_of)의 서버 기본 가이드가 이 DB 에 넣은 판과 다르면 다시 넣는다
+    (사람이 고친 항목은 그대로)."""
+    remote_guide = (remote_guides or {}).get(guide.lang_of(conn))
     if remote_guide is None or get_meta(conn, "guide_hash") == remote_guide["fingerprint"]:
         return []
 
@@ -191,12 +193,13 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
     결과는 {"users": {계정 id: {작업: 결과}}, "control": {작업: 결과}} 에서 돌린 것만 담는다. 없으면 빈 dict."""
     now = now or datetime.now(timezone.utc)
     uploader = _Uploader(cfg, s3)
-    try:
-        data = guide.load_remote(cfg.public_url)
-        remote_guide = {"data": data, "fingerprint": guide.fingerprint(data)}
-    except Exception:  # noqa: BLE001 - 가이드 파일을 못 읽어도 백업은 돈다
-        log.exception("기본 가이드를 읽지 못했다")
-        remote_guide = None
+    remote_guides: dict = {}
+    for lang in guide.LANGS:
+        try:
+            data = guide.load_remote(cfg.public_url, lang=lang)
+            remote_guides[lang] = {"data": data, "fingerprint": guide.fingerprint(data)}
+        except Exception:  # noqa: BLE001 - 가이드 파일을 못 읽어도 백업은 돈다
+            log.exception("기본 가이드를 읽지 못했다: %s", lang)
     done: dict = {}
     users: dict = {}
     for account_id, path in tenant.list_user_dbs(cfg.data_dir):
@@ -212,7 +215,7 @@ def run_due_all(cfg: Config, analyzer=None, now: datetime | None = None, s3=None
             if _due(conn, "last_backup", BACKUP_EVERY_HOURS, now):
                 backup_dir = tenant.user_dir(cfg.data_dir, account_id) / "backup"
                 jobs.append(("backup", lambda: {"path": str(backup(conn, backup_dir, cfg.backup_keep))}))
-            jobs += _guide_job(conn, remote_guide, analyzer)
+            jobs += _guide_job(conn, remote_guides, analyzer)
             result = _run(jobs + _reindex_job(conn, analyzer) + _expire_job(conn, now)
                           + _github_job(conn, now) + _cleanup_scan_job(conn, now), label)
             result.update(_run(uploader.job(result, lambda p, f: s3backup.user_key(p, account_id, f)), label))

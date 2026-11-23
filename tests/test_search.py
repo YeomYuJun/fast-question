@@ -114,7 +114,7 @@ def test_regex_option(store):
 
 def test_bad_regex_is_validation_error(store):
     from kb.errors import ValidationError
-    with pytest.raises(ValidationError, match="정규식"):
+    with pytest.raises(ValidationError, match="regular expression is invalid"):
         store.search("(", regex=True)
 
 
@@ -209,12 +209,12 @@ def test_path_finds_items_by_evidence_file(store, tmp_path):
 
 def test_regex_guard(store):
     from kb.errors import ValidationError
-    with pytest.raises(ValidationError, match="200자"):
+    with pytest.raises(ValidationError, match="up to 200 characters"):
         store.search("a" * 201, regex=True)
     for bad in ("(a+)+$", "(a|a)+$", "(?:a|aa)*b", "(ab){2,}"):
-        with pytest.raises(ValidationError, match="반복"):
+        with pytest.raises(ValidationError, match="cannot repeat a group"):
             store.search(bad, regex=True)
-    with pytest.raises(ValidationError, match="500자"):
+    with pytest.raises(ValidationError, match="up to 500 characters"):
         store.search("가 " * 300)
     assert store.search("(nas|NAS) 안", regex=True)["total"] >= 1  # 반복 없는 그룹은 된다
 

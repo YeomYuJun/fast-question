@@ -1,7 +1,7 @@
 """원격 서버의 형태소 사용자 단어(서버 전역 사전)를 보고 바꾸는 운영자 명령. 제어 DB(data_dir/control.sqlite3)에 쓴다.
 
 사용: python scripts/global_words.py --config <config.json> list | add <단어> [품사] | remove <단어>
-품사는 NNP(기본)·NNG·SL·XR·VV·VA 다. 원격 모드(mode: remote) 설정만 받는다. 로컬 모드의 사용자 단어는 MCP kb_dict 로 바꾼다.
+품사는 NNP(기본)·NNG·SL·XR·VV·VA 다. 원격 모드(mode: remote) 설정만 받는다. 로컬 모드의 사용자 단어는 MCP kb_dict_edit 로 바꾼다.
 바꾸면 분석기는 다음 검색·쓰기 때 Kiwi 를 한 번 다시 띄우고, 주기 작업(10분)이 모든 사용자 DB 를 재색인한다.
 """
 import argparse

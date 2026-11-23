@@ -79,7 +79,8 @@ def list_dir(root: Path) -> tuple[str, int]:
             except OSError:
                 rows.append(f"{rel}\t?")
             if len(rows) > DIR_CAP:
-                raise ValidationError(f"폴더 안 파일이 {DIR_CAP}개를 넘습니다. 더 좁은 경로를 근거로 써 주세요.")
+                raise ValidationError(f"The folder has more than {DIR_CAP} files. Use a narrower path as evidence.",
+                                      code="evidence_dir_too_large")
     rows.sort()
     return _sha("\n".join(rows).encode("utf-8")), len(rows)
 
@@ -125,10 +126,10 @@ def _ignored(top: Path, p: Path) -> bool:
 
 def _exists(path: str | None) -> Path:
     if not path:
-        raise ValidationError("근거 경로가 없습니다: (비어 있음)")
+        raise ValidationError("Evidence path is missing: (empty)", code="evidence_path_missing")
     p = Path(path)
     if not p.exists():
-        raise ValidationError(f"근거 경로가 없습니다: {path}")
+        raise ValidationError(f"Evidence path does not exist: {path}", code="evidence_path_missing")
     return p.resolve()
 
 
@@ -139,12 +140,13 @@ def _check_anchor(anchor: str | None, p: Path) -> None:
     try:
         data = p.read_bytes()
     except OSError:
-        raise ValidationError(f"앵커를 찾으려 했으나 파일을 읽지 못했습니다: {p}") from None
+        raise ValidationError(f"Could not read the file to look for the anchor: {p}", code="evidence_unreadable") from None
     # 압축·이진 문서는 시트 이름·절 제목이 바이트로 드러나지 않는다(rules.md 가 이들에 시트·절 앵커를 쓰게 한다)
     if p.suffix.lower() in BINARY_DOCS or b"\0" in data[:8192]:
         return
     if anchor.encode("utf-8") not in data:
-        raise ValidationError(f"앵커 '{anchor}' 가 {p.name} 에 없습니다. 파일에 있는 문자열을 그대로 써 주세요.")
+        raise ValidationError(f"Anchor '{anchor}' is not in {p.name}. Use a string that appears in the file exactly.",
+                              code="evidence_anchor_missing")
 
 
 def github_get(url: str, raw: bool = False) -> dict | bytes | None:
@@ -160,9 +162,9 @@ def github_get(url: str, raw: bool = False) -> dict | bytes | None:
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        raise RuntimeError(f"GitHub 응답 {e.code}") from None
+        raise RuntimeError(f"GitHub responded {e.code}") from None
     except (urllib.error.URLError, OSError, TimeoutError) as e:
-        raise RuntimeError(f"GitHub 에 닿지 못했습니다: {e}") from None
+        raise RuntimeError(f"Could not reach GitHub: {e}") from None
     return data if raw else json.loads(data.decode("utf-8"))
 
 
@@ -186,9 +188,10 @@ def _capture_github(url: str, anchor: str | None) -> dict:
     try:
         blob = _github_blob(g["owner"], g["repo"], g["ref"], g["file"])
     except RuntimeError as e:
-        raise ValidationError(f"GitHub 에서 파일을 읽지 못해 근거를 기록할 수 없습니다: {e}") from None
+        raise ValidationError(f"Could not read the file from GitHub, so the evidence cannot be recorded: {e}",
+                              code="evidence_github_unreachable") from None
     if blob is None:
-        raise ValidationError(f"GitHub 에 그 파일이 없습니다: {url}")
+        raise ValidationError(f"The file does not exist on GitHub: {url}", code="evidence_github_missing")
     captured = {"owner": g["owner"], "repo": g["repo"], "ref": g["ref"], "file": g["file"], "blob_sha": blob}
     return _row("github", path=url, anchor=anchor, repo=f"{g['owner']}/{g['repo']}",
                 commit_sha=g["ref"] if _HEX40.match(g["ref"]) else None, paths=[g["file"]], captured=captured)
@@ -205,10 +208,10 @@ def _row(kind, *, path=None, anchor=None, repo=None, commit_sha=None, paths=None
 def _capture_git(repo_arg: str, paths: list[str], commit: str | None, anchor: str | None) -> dict:
     top = repo_top(_exists(repo_arg))
     if top is None:
-        raise ValidationError(f"git 저장소가 아니거나 git 을 실행하지 못했습니다: {repo_arg}")
+        raise ValidationError(f"Not a git repository, or git could not be run: {repo_arg}", code="evidence_not_git")
     out = run_git(top, "rev-parse", "--verify", f"{commit or 'HEAD'}^{{commit}}")
     if out is None:
-        raise ValidationError(f"커밋을 찾지 못했습니다: {commit or 'HEAD'}")
+        raise ValidationError(f"Commit not found: {commit or 'HEAD'}", code="evidence_commit_missing")
     commit_sha = out.strip()
     specs = [rel_spec(s, top) for s in (paths or ["."])]
     # 앵커는 경로 하나가 파일을 가리킬 때만 확인한다. 폴더·여러 경로·glob 은 어느 파일에서 찾을지 정할 수 없다
@@ -218,7 +221,7 @@ def _capture_git(repo_arg: str, paths: list[str], commit: str | None, anchor: st
     diff = _nul_list(run_git(top, "diff", "--name-only", "--no-renames", "-z", commit_sha, "--"))
     untr = _nul_list(run_git(top, "ls-files", "-o", "--exclude-standard", "-z"))
     if diff is None or untr is None:
-        raise ValidationError(f"git diff / ls-files 실행에 실패했습니다: {top}")
+        raise ValidationError(f"git diff / ls-files failed: {top}", code="evidence_git_failed")
     dirty = {f: hash_file(top / f) for f in diff if match(f)}
     untracked = {f: hash_file(top / f) for f in untr if match(f)}
     return _row("git", path=str(top / specs[0]) if len(specs) == 1 and specs[0] != "." else None,
@@ -230,7 +233,7 @@ def capture(spec: Mapping) -> dict:
     """근거 spec 을 evidence 테이블 열 값으로 만든다. 경로·저장소가 없으면 ValidationError."""
     kind = spec.get("kind") or "auto"
     if kind not in KINDS:
-        raise ValidationError(f"근거 형식은 {', '.join(KINDS)} 중 하나여야 합니다. 받은 값: {kind}")
+        raise ValidationError(f"Evidence kind must be one of {', '.join(KINDS)}. Got: {kind}", code="evidence_kind")
     anchor = spec.get("anchor") or None
     if kind == "auto":
         p = _exists(spec.get("path"))
@@ -242,13 +245,13 @@ def capture(spec: Mapping) -> dict:
     if kind == "file":
         p = _exists(spec.get("path"))
         if not p.is_file():
-            raise ValidationError(f"파일이 아니다: {p}")
+            raise ValidationError(f"Not a file: {p}", code="evidence_not_file")
         _check_anchor(anchor, p)
         return _row("file", path=str(p), anchor=anchor, captured={"sha256": hash_file(p)})
     if kind == "dir":
         p = _exists(spec.get("path"))
         if not p.is_dir():
-            raise ValidationError(f"폴더가 아니다: {p}")
+            raise ValidationError(f"Not a folder: {p}", code="evidence_not_dir")
         h, n = list_dir(p)
         return _row("dir", path=str(p), anchor=anchor, captured={"list_hash": h, "count": n})
     if kind == "git":
@@ -257,24 +260,25 @@ def capture(spec: Mapping) -> dict:
     if kind == "githead":
         top = repo_top(_exists(spec.get("repo") or spec.get("path")))
         if top is None:
-            raise ValidationError(f"git 저장소가 아니다: {spec.get('repo')}")
+            raise ValidationError(f"Not a git repository: {spec.get('repo')}", code="evidence_not_git")
         head = (run_git(top, "rev-parse", "HEAD") or "").strip()
         branch = (run_git(top, "rev-parse", "--abbrev-ref", "HEAD") or "").strip()
         if not head:
-            raise ValidationError(f"HEAD 를 읽지 못했습니다: {top}")
+            raise ValidationError(f"Could not read HEAD: {top}", code="evidence_git_failed")
         return _row("githead", repo=top.as_posix(), commit_sha=head, captured={"head": head, "branch": branch})
     if kind in ("url", "github"):
         url = (spec.get("url") or spec.get("path") or "").strip()
         if not url:
-            raise ValidationError("url 근거에 주소가 없습니다.")
+            raise ValidationError("url evidence has no address.", code="evidence_url_missing")
         if kind == "github":
             if not parse_github_url(url):
-                raise ValidationError("github 근거는 https://github.com/<owner>/<repo>/blob/<ref>/<경로> 주소여야 합니다.")
+                raise ValidationError("github evidence must be a https://github.com/<owner>/<repo>/blob/<ref>/<path> address.",
+                                      code="evidence_github_url")
             return _capture_github(url, anchor)
         return _row("url", path=url, anchor=anchor)
     text = (spec.get("text") or "").strip()
     if not text:
-        raise ValidationError("note 근거에 내용이 없습니다. 누가 어떻게 확인했는지 적어 주세요.")
+        raise ValidationError("note evidence has no text. Write who confirmed it and how.", code="evidence_note_empty")
     return _row("note", anchor=anchor, captured={"text": text})
 
 
@@ -285,31 +289,32 @@ CAPTURED_MAX_BYTES = 64 * 1024
 def accept_captured(row) -> dict:
     """다른 PC 에서 capture() 로 만든 행을 받는다(원격 모드). 경로는 그 PC 의 것이라 확인하지 않고 형식만 본다."""
     if not isinstance(row, Mapping):
-        raise ValidationError("captured 는 capture() 결과 객체다.")
+        raise ValidationError("captured must be an object returned by capture().", code="captured_format")
     out = {k: row.get(k) for k in ROW_KEYS}
     if out["kind"] not in KINDS or out["kind"] == "auto":
-        raise ValidationError(f"captured 의 kind 가 올바르지 않다: {out['kind']}")
+        raise ValidationError(f"captured has an invalid kind: {out['kind']}", code="captured_format")
     for k in ROW_KEYS[1:]:
         if out[k] is not None and not isinstance(out[k], str):
-            raise ValidationError(f"captured 의 {k} 는 문자열이다.")
+            raise ValidationError(f"captured {k} must be a string.", code="captured_format")
     for k in ("paths_json", "captured_json"):
         if out[k] is not None:
             try:
                 json.loads(out[k])
             except ValueError:
-                raise ValidationError(f"captured 의 {k} 가 JSON 이 아니다.") from None
+                raise ValidationError(f"captured {k} is not JSON.", code="captured_format") from None
     if len(json.dumps(out, ensure_ascii=False).encode("utf-8")) > CAPTURED_MAX_BYTES:
-        raise ValidationError(f"captured 는 {CAPTURED_MAX_BYTES // 1024} KB 까지 받습니다.")
+        raise ValidationError(f"captured can be at most {CAPTURED_MAX_BYTES // 1024} KB.", code="captured_too_large")
     return out
 
 
 LINE_SEP = " ; "
 NOTE_PREFIX = "메모:"
+_NOTE_HEAD = re.compile(r"(?:메모|note):", re.IGNORECASE)
 
 
 def parse_line(line: str) -> list[dict]:
     """화면 편집 폼의 근거 한 줄을 근거 spec 목록으로 바꾼다. 여러 근거는 " ; " 로 나눈다.
-    http(s):// 로 시작하면 url, "메모:" 로 시작하면 note, 나머지는 경로(auto)다.
+    http(s):// 로 시작하면 url, "메모:" 나 "note:" 로 시작하면 note, 나머지는 경로(auto)다.
     경로 뒤 첫 " #" 다음은 anchor 다(경로에는 공백이, anchor 에는 # 이 들어갈 수 있다)."""
     specs = []
     for part in (p.strip() for p in (line or "").split(LINE_SEP)):
@@ -317,8 +322,8 @@ def parse_line(line: str) -> list[dict]:
             continue
         if re.match(r"https?://", part, re.IGNORECASE):
             specs.append({"kind": "url", "url": part})
-        elif part.startswith(NOTE_PREFIX):
-            specs.append({"kind": "note", "text": part[len(NOTE_PREFIX):].strip()})
+        elif m := _NOTE_HEAD.match(part):
+            specs.append({"kind": "note", "text": part[m.end():].strip()})
         else:
             path, _, anchor = part.partition(" #")
             specs.append({"kind": "auto", "path": path.strip(), "anchor": anchor.strip() or None})
@@ -369,10 +374,10 @@ def _anchor_note(anchor: str | None, files: list[Path]) -> str:
     for f in files:
         try:
             if needle in f.read_bytes():
-                return f" (앵커 '{anchor}' 있음)"
+                return f" (anchor '{anchor}' present)"
         except OSError:
             return ""
-    return f" (앵커 '{anchor}' 없음)"
+    return f" (anchor '{anchor}' missing)"
 
 
 class Checker:
@@ -400,24 +405,24 @@ class Checker:
     def _check_github(self, row: Mapping, cap: dict) -> tuple[str, str]:
         owner, repo, ref, file = cap.get("owner"), cap.get("repo"), cap.get("ref"), cap.get("file")
         if not all((owner, repo, ref, file)) or not cap.get("blob_sha"):
-            return "unknown", "GitHub 근거의 기록값이 비어 있습니다"
+            return "unknown", "The recorded GitHub evidence values are empty"
         try:
             compare = self._branch_of(owner, repo) if _HEX40.match(ref) else ref
             if not compare:
-                return "unknown", "GitHub 저장소를 찾지 못했습니다"
+                return "unknown", "GitHub repository not found"
             blob = self._blob_of(owner, repo, compare, file)
             if blob is None:
-                return "changed", f"{file} 이 {compare} 에 없습니다"
+                return "changed", f"{file} does not exist on {compare}"
             if blob == cap["blob_sha"]:
                 return "same", ""
             note = ""
             if row.get("anchor"):
                 body = github_get(f"{GITHUB_RAW}/{owner}/{repo}/{compare}/{file}", raw=True)
                 if isinstance(body, bytes):
-                    note = f" (앵커 '{row['anchor']}' {'있음' if row['anchor'].encode('utf-8') in body else '없음'})"
-            return "changed", f"{file} 내용이 {compare} 에서 바뀌었습니다" + note
+                    note = f" (anchor '{row['anchor']}' {'present' if row['anchor'].encode('utf-8') in body else 'missing'})"
+            return "changed", f"{file} content changed on {compare}" + note
         except RuntimeError as e:
-            return "unknown", f"GitHub 을 읽지 못했습니다: {e}"
+            return "unknown", f"Could not read GitHub: {e}"
 
     def _diff_of(self, repo: str, commit: str):
         k = (repo, commit)
@@ -434,7 +439,7 @@ class Checker:
         try:
             return self._check(row)
         except Exception as e:  # noqa: BLE001 - 판정 실패는 신뢰하지 않음(unknown)으로 간다
-            return "unknown", f"판정 중 오류: {e}"
+            return "unknown", f"Error while checking: {e}"
 
     def _check(self, row: Mapping) -> tuple[str, str]:
         kind = row["kind"]
@@ -446,28 +451,28 @@ class Checker:
         if kind == "file":
             p = Path(row["path"])
             if not p.exists():
-                return "changed", f"{p.name} 파일이 없어졌습니다"
+                return "changed", f"File {p.name} no longer exists"
             h = hash_file(p)
             if h is None:
-                return "unknown", f"{p.name} 파일을 읽지 못했습니다"
+                return "unknown", f"Could not read file {p.name}"
             if h == cap.get("sha256"):
                 return "same", ""
-            return "changed", f"{p.name} 내용이 바뀌었습니다" + _anchor_note(row.get("anchor"), [p])
+            return "changed", f"{p.name} content changed" + _anchor_note(row.get("anchor"), [p])
         if kind == "dir":
             p = Path(row["path"])
             if not p.exists():
-                return "changed", "폴더가 없어졌습니다"
+                return "changed", "The folder no longer exists"
             h, n = list_dir(p)
             if h == cap.get("list_hash"):
                 return "same", ""
-            return "changed", f"폴더 안 파일 목록·크기·수정시각이 바뀌었습니다 ({cap.get('count')} -> {n}개)"
+            return "changed", f"The file list, sizes or modification times in the folder changed ({cap.get('count')} -> {n} files)"
         if kind == "git":
             repo = row["repo"]
             if not Path(repo).exists():
-                return "unknown", "저장소 경로가 없습니다"
+                return "unknown", "The repository path does not exist"
             diff, untr = self._diff_of(repo, row["commit_sha"]), self._untr_of(repo)
             if diff is None or untr is None:
-                return "unknown", "git 으로 비교하지 못했습니다(커밋이 없거나 git 실행 실패)"
+                return "unknown", "Could not compare with git (commit missing or git failed)"
             specs = json.loads(row["paths_json"] or '["."]')
             match = spec_matcher(specs)
             dirty, untracked = cap.get("dirty", {}), cap.get("untracked", {})
@@ -482,22 +487,22 @@ class Checker:
             if not changed:
                 return "same", ""
             uniq = list(dict.fromkeys(changed))
-            more = f" 외 {len(uniq) - 3}개" if len(uniq) > 3 else ""
+            more = f" and {len(uniq) - 3} more" if len(uniq) > 3 else ""
             files = [Path(repo) / s for s in specs if (Path(repo) / s).is_file()]
-            return "changed", ", ".join(uniq[:3]) + more + " 가 기록 뒤에 바뀌었습니다" + _anchor_note(row.get("anchor"), files)
+            return "changed", ", ".join(uniq[:3]) + more + " changed after recording" + _anchor_note(row.get("anchor"), files)
         if kind == "githead":
             repo = row["repo"]
             if not Path(repo).exists():
-                return "unknown", "저장소 경로가 없습니다"
+                return "unknown", "The repository path does not exist"
             head = run_git(repo, "rev-parse", "HEAD")
             branch = run_git(repo, "rev-parse", "--abbrev-ref", "HEAD")
             if head is None or branch is None:
-                return "unknown", "git 으로 HEAD 를 읽지 못했습니다"
+                return "unknown", "Could not read HEAD with git"
             if head.strip() == cap.get("head") and branch.strip() == cap.get("branch"):
                 return "same", ""
-            return "changed", (f"HEAD 가 {cap.get('branch')}@{str(cap.get('head'))[:8]} 에서 "
-                               f"{branch.strip()}@{head.strip()[:8]} 로 바뀌었습니다")
-        return "unknown", f"알 수 없는 근거 형식: {kind}"
+            return "changed", (f"HEAD changed from {cap.get('branch')}@{str(cap.get('head'))[:8]} "
+                               f"to {branch.strip()}@{head.strip()[:8]}")
+        return "unknown", f"Unknown evidence kind: {kind}"
 
 
 def overall_state(verdicts: list[str]) -> str:
