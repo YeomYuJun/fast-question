@@ -36,7 +36,7 @@ PLUGIN_DIR = ROOT / "plugin" / NAME
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
 HOOK_TIMEOUT_S = 10
 DESCRIPTION = ("fast-question 지식 DB 연결: 원격 서버 MCP(파일 근거를 이 PC 에서 캡처), qa·qa-harvest Skill, "
-               "질문하면 KB 를 먼저 찾아 주는 즉석 질문 훅, 응답을 마칠 때 확인한 사실의 등록을 권하는 수확 훅")
+               "질문하면 KB 를 먼저 찾아 주는 즉석 질문 훅, 조사한 턴이 끝날 때 등록 조건을 넣는 수확 훅")
 
 README = """# fast-question Claude Code 플러그인
 
@@ -47,8 +47,11 @@ README = """# fast-question Claude Code 플러그인
 
 - MCP 서버 `fast-question`: 원격 서버의 `kb_*` 도구를 그대로 씁니다. 파일·git 근거는 이 PC 에서 캡처하고 판정합니다.
 - Skill `/fast-question:qa`(등록·검색), `/fast-question:qa-harvest`(프로젝트 폴더에서 Q&A 구축)
-- 즉석 질문 훅: 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다.
-- 세션 끝 수확 훅: 응답을 마칠 때 이 세션에서 파일로 확인한 사실이 KB 에 없으면 등록하도록 Claude 에게 한 번 권합니다(KB 에 있는 프로젝트 폴더에서만).
+- 즉석 질문 훅: 질문하면 KB 에서 맞는 Q&A 를 찾아 그 턴에 넣습니다. 없으면 아무것도 넣지 않습니다.
+- 조사 턴 수확 훅: 파일을 쓰지 않고 여러 번 읽어 답한 턴, `kb_search` 가 0건이었고 그 뒤 파일을 읽은 턴, 질문에 맞는 Q&A 가 없어 파일을 읽고 답한 턴이 끝날 때, 다시 알아내는 데 비용이 드는 사실만 등록하도록 조건을 Claude 에게 넣습니다(KB 에 있는 프로젝트 폴더에서만. 등록하지 않는 것이 기본입니다).
+- 사용 기록(`~/.fast-question/use.jsonl`): 훅과 MCP 서버가 이 PC 에만 적습니다. 적는 것은 찾아진·읽힌·등록된·고쳐진 Q&A 의 id 와 질문, 응답에 주소가 붙은 Q&A 의 id, `kb_search` 가 0건일 때 Claude 가 넣은 검색어입니다. 사용자의 프롬프트는 적지 않고, 기록을 서버로 보내지 않습니다. 훅의 등록 안내가 여러 날 다시 찾아진 질문과 찾았으나 없었던 검색어를 판단 근거로 듭니다.
+- 학습용 분류(`~/.fast-question/settings.json`): `{{"study_categories": ["Kubernetes"]}}` 처럼 대분류 이름을 적으면, MCP 서버가 `kb_search` 결과에서 그 대분류의 Q&A 를 `study` 로 따로 떼어 돌려줍니다. 공부하려고 쌓은 일반 지식이 프로젝트의 사실을 찾는 검색에 섞이지 않습니다. 웹 화면과 즉석 질문 훅은 그대로 보여 주고, `category` 를 준 검색은 그 분류를 그대로 찾습니다. 이 PC 에만 적용됩니다.
+- 사용 지표: `uvx --from fast-question=={version} fast-question stats` 가 사용 기록에서 세 가지를 계산합니다. 찾기(`kb_search` 중 결과가 있던 호출의 비율), 쓰기(찾아진 Q&A 중 그날 응답에 주소가 붙은 비율), 고치기(고친 Q&A 수, 0건이던 검색어 중 뒤의 등록으로 메워진 비율). `--days N`(기본 30), `--since`·`--until <날짜>`, `--here`(지금 폴더만), `--json`.
 
 MCP·훅·Skill 명령은 PC 클라이언트 패키지 `fast-question=={version}` 을 `uvx` 로 실행합니다.
 

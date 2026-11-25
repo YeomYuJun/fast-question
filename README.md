@@ -34,7 +34,10 @@ What it contains
 - MCP server `fast-question`: uses the `kb_*` tools of the remote server through a local proxy. File and git evidence is captured and checked on this PC.
 - Skills `/fast-question:qa` (add and search) and `/fast-question:qa-harvest` (build Q&As from a project folder)
 - Instant question hook (UserPromptSubmit): when you ask a question, it finds matching Q&As in the KB and adds them to that turn.
-- End-of-session hook (Stop): when Claude finishes a response, if facts it confirmed from files in this session are not in the KB, it asks Claude once to add them (only in project folders that are in the KB).
+- Investigation-turn hook (Stop): when a turn ends that read files several times and wrote none, or in which `kb_search` returned nothing and files were read afterwards, or that began with a question the KB had no answer for and read files to answer it, it gives Claude the conditions for adding a fact, so that only facts that are costly to find again are added (only in project folders that are in the KB; not adding is the default).
+- Use log (`%USERPROFILE%\.fast-question\use.jsonl`): written by the hooks and the MCP proxy on this PC only. It holds the id and question of each Q&A that was found, read, added or changed, the id of each Q&A whose url appeared in a response, and the search terms Claude passed to `kb_search` when it returned nothing. Your prompts are not written, and the log is not sent to the server. The hooks cite questions that were found again on several days, and terms that were searched for and missing, as grounds for deciding what to add.
+- Study categories (`%USERPROFILE%\.fast-question\settings.json`): with top-level category names listed as `{"study_categories": ["Kubernetes"]}`, the MCP proxy returns the Q&As of those categories apart from the rest, under `study` in `kb_search` results. General knowledge you keep for study then stays out of searches for facts about your projects. The web screen and the instant question hook still show them, and a search that passes `category` searches that category as it is. This applies to this PC only.
+- Use indicators: `fast-question stats` computes three figures from the use log. Retrieval (the share of `kb_search` calls that returned results), application (the share of found Q&As whose url appeared in a response that day), and evolution (the number of Q&As changed, and the share of missing search terms that a later addition filled). Options: `--days N` (default 30), `--since` / `--until <date>`, `--here` (this folder only), `--json`.
 
 The MCP server, hooks and Skill commands run the PC client package `fast-question` with `uvx`. After installing, do the PC sign-in below once and restart Claude Code. Details are in [plugin/fast-question/README.md](plugin/fast-question/README.md).
 
@@ -136,7 +139,7 @@ python3 -m venv .venv
 - What `scripts/install.py` does
   - Copies the qa and qa-harvest Skills in `skill/` to `~/.claude/skills`.
   - Registers `run_mcp.py` as the MCP server `fast-question` in the Claude Code user scope (the `claude` CLI must be on PATH).
-  - Registers the instant question hook (`hooks/ask_kb.py`) and the end-of-session hook (`hooks/stop_harvest.py`) under UserPromptSubmit and Stop in `~/.claude/settings.json`. The original before the first change is kept as `settings.json.fast-question.bak`.
+  - Registers the instant question hook (`hooks/ask_kb.py`) and the investigation-turn hook (`hooks/stop_harvest.py`) under UserPromptSubmit and Stop in `~/.claude/settings.json`. The original before the first change is kept as `settings.json.fast-question.bak`.
   - Adds the default usage guide to the DB.
   - The MCP server, hooks and Skill commands run with the repository's `.venv` python. Run it again if you move the repository.
 - `run_web.py` serves the web screen at http://127.0.0.1:8765. Settings are in the repository's `config.json` (DB path, port, backup and log folders); use `--config "<another config.json>"` to change them.

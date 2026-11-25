@@ -115,7 +115,7 @@
     {
       "category": "Claude",
       "question": "When does the fast-question instant question hook run?",
-      "answer": "When you type a question into Claude Code (question mark, question ending or question word, up to 300 characters and 4 lines), it searches the KB and adds the results to that turn.\n- Requests that ask for work are not treated as questions\n- If no Q&A matches, it explains the add conditions only when asked from a project folder that is in the KB\n- Other everyday questions are not added",
+      "answer": "When you type a question into Claude Code (question mark, question ending or question word, up to 300 characters and 4 lines), it searches the KB and adds the results to that turn.\n- Requests that ask for work are not treated as questions\n- If no Q&A matches and none is similar, it adds nothing to the turn\n- When asked from a project folder that is in the KB and files were read to answer, the Stop hook explains the add conditions after the turn ends\n- Other everyday questions are not added",
       "evidence": [
         {
           "kind": "auto",
