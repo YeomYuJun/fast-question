@@ -81,6 +81,11 @@ def test_instructions_by_mode(db):
     assert asyncio.run(go(False)) == PROXY_INSTRUCTIONS
     assert asyncio.run(go(True)) == REMOTE_INSTRUCTIONS
     assert REMOTE_INSTRUCTIONS.isascii() and PROXY_INSTRUCTIONS.isascii()
+    # Claude Code 는 MCP 서버 안내문을 4096자에서 자른다. 넘으면 끝 문장이 전달되지 않는다
+    from mcp_server.instructions import MAX_CHARS
+    assert MAX_CHARS < 4096 and len(PROXY_INSTRUCTIONS) <= MAX_CHARS and len(REMOTE_INSTRUCTIONS) <= MAX_CHARS
+    for text in ("kb_delete_category", "confirm=true", "Not adding is the default"):
+        assert text in PROXY_INSTRUCTIONS
     for text in ("even if the user did not ask", "without asking the user", "on the spot"):
         assert text in PROXY_INSTRUCTIONS and text not in REMOTE_INSTRUCTIONS
     assert "only when the user asks to add or change a Q&A" in REMOTE_INSTRUCTIONS

@@ -83,6 +83,23 @@ def set_mode(mode: str, path: Path | None = None) -> Path:
     return save_credentials(cred["url"], cred["token"], path=path, device_id=cred["device_id"], mode=mode)
 
 
+def settings_path() -> Path:
+    return home() / "settings.json"
+
+
+def study_categories(path: Path | None = None) -> list[str]:
+    """이 PC 에서 학습용으로 둔 대분류 이름(소문자). settings.json 의 {"study_categories": ["Kubernetes"]}.
+    학습용 대분류의 Q&A 는 사용자가 공부하려고 쌓은 일반 지식이다. 로컬 프록시(mcp_server/proxy.py set_apart)가
+    kb_search 결과에서 따로 떼어, Claude 가 프로젝트의 사실을 찾을 때 섞이지 않게 한다. 웹 화면과 즉석 질문 훅은 그대로 보여 준다.
+    파일이 없거나 형식이 틀리면 빈 목록이다."""
+    try:
+        data = json.loads((path or settings_path()).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, RuntimeError):
+        return []
+    names = data.get("study_categories") if isinstance(data, dict) else None
+    return [str(n).strip().lower() for n in names if str(n).strip()] if isinstance(names, list) else []
+
+
 def judge(rows: list[dict]) -> list[dict]:
     """서버가 준 근거 행을 이 PC 의 파일·git 으로 판정한다(kb.evidence.Checker 그대로)."""
     from kb.evidence import Checker

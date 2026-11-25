@@ -1,8 +1,10 @@
 """Claude Code UserPromptSubmit 훅. 사용자가 질문하면 fast-question KB 를 찾아 결과와 처리 지시를 그 턴에 넣는다.
 
-- 결과가 있으면 그 Q&A 를 먼저 쓰라고 넣는다.
-- 없으면 질문한 폴더(입력의 cwd)가 KB 에 있는 프로젝트일 때만 등록 조건을 넣는다. 그 밖의 평시 질문에는
-  비슷한 항목이 없으면 아무것도 넣지 않는다.
+- 결과가 있으면 그 Q&A 를 먼저 쓰라고 넣는다. 검색어의 대상 이름을 담지 않은 결과는 버린다(grounded).
+- 없으면 비슷한 항목만 넣고, 그것도 없으면 아무것도 넣지 않는다. 등록 조건(store_conditions)은 이 훅이 넣지 않는다.
+  질문한 폴더(입력의 cwd)가 KB 에 있는 프로젝트이고 맞는 Q&A 가 없었으면 세션 상태 폴더에 표시(mark_asked)만 둔다.
+  조사 턴 수확 훅이 턴이 끝날 때 그 표시와 읽기 수를 보고 등록 조건을 넣는다. 의견을 묻는 질문처럼 읽지 않고 답한
+  턴에는 등록 안내가 붙지 않는다.
 검색은 실행 중인 web 서버(/api/search, 형태소 계층 포함)를 먼저 쓰고, 꺼져 있으면 DB 를 직접 읽는다
 (Kiwi 를 띄우는 데 2.5초가 걸려 직접 읽을 때는 정확히 일치·동의어·비슷한 결과만 쓴다).
 원격 자격 증명(kb/remote.py, %USERPROFILE%\\.fast-question\\credentials.json)이 있고 그 mode 가 local 이 아니면
@@ -11,7 +13,7 @@
 mode 가 local 이면(scripts/install.py --local) 자격 증명이 있어도 로컬 DB 를 쓴다.
 어떤 실패든 아무것도 출력하지 않고 0 으로 끝나 사용자 입력을 막지 않는다.
 
-설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다. 세션 끝 수확 훅은 hooks/stop_harvest.py 다.
+설치: scripts/install.py 가 ~/.claude/settings.json 의 hooks.UserPromptSubmit 에 등록한다. 조사 턴 수확 훅은 hooks/stop_harvest.py 다.
 편집기가 끼워 넣는 태그(<ide_opened_file> 등)는 strip_system_tags 로 벗긴 뒤 판정·검색한다.
 설정 파일: 환경 변수 FAST_QUESTION_CONFIG, 없으면 저장소의 config.json.
 PC 클라이언트 패키지(`fast-question hook`, fq_client/cli.py)는 main(remote_only=True) 로 원격 경로만 쓴다(mode 를 보지 않는다).
@@ -186,29 +188,128 @@ def _line(h: dict, base: str) -> str:
             f"(근거 {h.get('evidence_state', 'none')}{score}, {base}/#qa/{h['id']})")
 
 
-def context(query: str, res: dict, base: str, project: str | None = None) -> str:
-    """Q&A 가 있으면 먼저 쓰라고 넣는다. 없으면 등록하지 않는 것이 기본이다.
-    등록 조건은 질문한 폴더가 KB 에 있는 프로젝트일 때만 넣는다. 그 밖의 평시 질문에는 아무것도 넣지 않는다."""
-    hits, similar = res.get("hits", [])[:SHOW], res.get("similar", [])[:SHOW]
+# 검색어에서 뽑는 낱말: 영문·숫자로 시작하는 식별자(RateLimitFilter, paas.storage.root, 401)와 한글 2글자 이상
+_WORD = re.compile(r"[0-9A-Za-z][0-9A-Za-z._:/\\-]*|[가-힣]{2,}")
+ASCII_MIN = 3  # 영문 낱말은 이 길이부터 대상 이름으로 본다. 숫자가 든 낱말(401, v2)은 2글자부터
+HANGUL_MIN_WORDS = 2  # 한글 낱말만으로 맞았다고 보려면 이만큼의 낱말이 항목에 그대로 있어야 한다
+HANGUL_MIN_CHARS = 5  # 그리고 맞은 글자 수의 합이 이 이상이어야 한다
+JOSA_MAX = 2  # 한글 낱말 끝에서 떼어 보는 조사·어미 글자 수
+
+
+def _has(word: str, text: str) -> int:
+    """한글 낱말이 text 에 그대로 있으면 맞은 글자 수, 없으면 0. 끝의 조사·어미 1~2글자를 떼어도 본다(대기열은 → 대기열)."""
+    return next((len(word) - cut for cut in range(JOSA_MAX + 1)
+                 if len(word) - cut >= 2 and word[:len(word) - cut] in text), 0)
+
+
+def grounded(query: str, item: dict) -> bool:
+    """검색 결과 항목이 검색어의 대상 이름을 실제로 담고 있는가.
+
+    서버의 형태소 계층은 "그럼 해야 돼" 같은 대화 문장을 하다·되다 로 풀어 무관한 항목과 맞춘다(2026-11-24 실측 3건).
+    그래서 검색어의 영문·숫자 낱말 하나, 또는 한글 낱말 HANGUL_MIN_WORDS 개(맞은 글자 합 HANGUL_MIN_CHARS 이상)가
+    항목의 질문·답변에 그대로 있을 때만 맞는 항목으로 본다. 검색어가 한글 3글자 이상 낱말 하나뿐이면 그 낱말 하나로 본다.
+    """
+    text = f"{item.get('question', '')} {item.get('answer', '')}".lower()
+    words = list(dict.fromkeys(w.lower() for w in _WORD.findall(query)))
+    hangul = [w for w in words if "가" <= w[0] <= "힣"]
+    for w in words:
+        if w in hangul:
+            continue
+        w = w.rstrip("._:/\\-")
+        if (len(w) >= ASCII_MIN or (len(w) >= 2 and any(ch.isdigit() for ch in w))) and w in text:
+            return True
+    found = [n for n in (_has(w, text) for w in hangul) if n]
+    if len(words) == 1 and hangul and len(hangul[0]) >= 3:
+        return bool(found)
+    # 2글자 낱말 둘(남는·없는)은 무관한 항목에도 흔히 있다. 맞은 글자를 합쳐 HANGUL_MIN_CHARS 이상이어야 한다
+    return len(found) >= HANGUL_MIN_WORDS and sum(found) >= HANGUL_MIN_CHARS
+
+
+# 등록 보고 양식. "모르면" 구절을 쓰게 해서 다시 알아내는 비용이 없는 건을 등록 전에 거르게 한다
+REPORT = ("등록했을 때만 응답 끝에 '등록: <질문> <주소> (모르면: <다시 치르는 것>)' 한 줄씩 붙인다. "
+          "'모르면' 구절을 쓸 수 없는 건은 등록하지 않는다.")
+
+
+def store_conditions(project: str, used: list[tuple[str, int]] | None = None,
+                     missed: list[tuple[str, int]] | None = None) -> list[str]:
+    """등록 조건 안내. 조사 턴 수확 훅(hooks/stop_harvest.py)이 쓴다. 조건의 원본은 skill/qa/rules.md "등록할 가치" 다.
+    used 는 이 폴더에서 여러 날 다시 찾아진 질문과 날 수(kb/uselog.py examples)다. 있으면 판단의 예로 덧붙인다.
+    missed 는 이 폴더에서 여러 날 찾았으나 없었던 검색어와 날 수(kb/uselog.py open_misses)다. 실제로 필요했던 것의 기록이다."""
+    lines = [
+        "아래를 모두 만족하는 사실만 qa Skill 등록 절차와 rules.md 양식으로 등록한다"
+        "(kb_search 로 중복 확인 → kb_add, 읽은 파일은 auto 근거, 사용자 말·명령 결과는 note 근거).",
+        f"(1) {project} 의 코드·설정·절차·동작에 대한 사실이고 이 세션에서 읽은 파일·명령 결과나 사용자의 말로 확인했다 "
+        "(2) 다음에 이 프로젝트에서 일할 때 모르면 다시 치를 비용이 있다(예: 여러 파일을 이어 읽어야 했다, 읽기 전 예상과 "
+        "달랐다, 오류·증상의 원인이다, 사람에게 확인했다, 쓰지 않기로 했거나 해 보고 안 된 방법과 그 이유다). 파일 하나를 "
+        "열거나 이름으로 검색하면 나오는 것(문서·파일의 위치와 목차, 한 파일에 적힌 값)은 비용이 없다 "
+        "(3) 이 세션에서 만들거나 고친 파일의 내용이 아니다 "
+        "(4) 작업이 끝난 뒤에도 그대로인 사실이다. 논의 중인 안, 결정 전인 것, 진행 상태가 아니다.",
+        "일반 지식(언어·도구 사용법, 개념), 작업 지시, 이 대화에만 해당하는 것은 등록하지 않는다.",
+    ]
+    if used:
+        shown = ", ".join(f"'{q}'({days}일)" for q, days in used)
+        lines.append(f"이 폴더에서 등록 뒤 여러 날 다시 찾아진 항목(이 PC 기록): {shown}. "
+                     "다시 필요해지는 사실이 어떤 것인지 가늠하는 예로만 쓰고, 같은 문형을 따라 쓰지 않는다.")
+    if missed:
+        lines.append(f"이 폴더에서 여러 날 kb_search 로 찾았으나 없었던 검색어(이 PC 기록): {show_terms(missed)}. "
+                     "이 세션에서 그 답을 확인했으면 조건 (2)는 채워진 것이다. 나머지 조건을 보고 등록한다.")
+    return lines
+
+
+def show_terms(missed: list[tuple[str, int]]) -> str:
+    """검색어 목록을 안내문에 적는 꼴로. 이틀 이상 놓친 것에만 날 수를 붙인다."""
+    return ", ".join(f"'{q}'({days}일)" if days > 1 else f"'{q}'" for q, days in missed)
+
+
+MISSED_MIN_DAYS = 2  # 등록 조건에 붙이는 "여러 날 찾았으나 없었던 검색어" 의 날 수 하한. 하루뿐인 것은 작업 시작 때 넣어 본 이름일 수 있다
+
+
+def pick(query: str, res: dict) -> tuple[list[dict], list[dict]]:
+    """검색 결과에서 검색어의 대상 이름을 담은 것만 남긴 (맞는 항목, 비슷한 항목). 각각 SHOW 건까지."""
+    return ([h for h in res.get("hits", []) if grounded(query, h)][:SHOW],
+            [h for h in res.get("similar", []) if grounded(query, h)][:SHOW])
+
+
+def context(query: str, res: dict, base: str) -> str:
+    """Q&A 가 있으면 먼저 쓰라고 넣는다. 비슷한 항목만 있으면 그것을 넣는다. 둘 다 없으면 아무것도 넣지 않는다.
+    검색어의 대상 이름을 담지 않은 결과(grounded)는 맞는 항목·비슷한 항목 어느 쪽으로도 넣지 않는다.
+    등록 조건은 여기서 넣지 않는다. 질문만 보고는 답하느라 조사가 필요한지 알 수 없어서, 조사 턴 수확 훅이 턴이 끝난 뒤에
+    읽기 수를 보고 넣는다(mark_asked)."""
+    hits, similar = pick(query, res)
     if hits:
         return "\n".join([
             "[fast-question 지식 DB] 이 질문과 맞는 Q&A 가 있다. 답할 때 이 내용을 먼저 쓰고 항목 주소를 붙인다.",
             "근거가 stale 인 항목은 qa Skill 조회 절차로 근거를 다시 읽고 정리한다.",
             *[_line(h, base) for h in hits]])
-    lines = []
-    if project:
-        lines += [
-            f"[fast-question 지식 DB] 이 질문의 Q&A 가 없다(검색어: {query}). 등록하지 않는 것이 기본이다.",
-            f"다음을 모두 만족할 때만 답한 뒤 qa Skill 등록 절차와 rules.md 로 저장한다: (1) 질문이 {project} 의 "
-            "코드·설정·절차·동작에 대한 것이다 (2) 답을 이 세션에서 읽은 그 프로젝트의 파일·명령 결과로 확인했다 "
-            "(3) 같은 프로젝트에서 다시 물을 만한 사실이다.",
-            "일반 지식(언어·도구 사용법, 개념), 평시 질문, 작업 지시, 이 대화에만 해당하는 질문은 저장하지 않는다. "
-            "저장했을 때만 응답 끝에 '등록: <질문> <주소>' 한 줄을 붙인다.",
-        ]
     if similar:
-        lines.append("[fast-question 지식 DB] 비슷한 항목이다. 같은 사실을 묻는 것이면 그 항목을 쓴다.")
-        lines += [_line(h, base) for h in similar]
-    return "\n".join(lines)
+        return "\n".join(["[fast-question 지식 DB] 비슷한 항목이다. 같은 사실을 묻는 것이면 그 항목을 쓴다.",
+                          *[_line(h, base) for h in similar]])
+    return ""
+
+
+def session_file(session_id: str, suffix: str, home: Path | None = None) -> Path:
+    """세션마다 두는 훅 상태 파일. %USERPROFILE%\\.fast-question\\stop\\<session_id><suffix>."""
+    from kb.remote import home as cred_home
+    safe = "".join(ch for ch in session_id if ch.isalnum() or ch in "-_")[:80] or "session"
+    return (home or cred_home()) / "stop" / f"{safe}{suffix}"
+
+
+ASKED = ".asked"  # 이 턴이 KB 에 답이 없는 질문으로 시작했다는 표시. 조사 턴 수확 훅이 읽고 지운다
+
+
+def mark_asked(session_id: str, asked: bool) -> None:
+    """표시를 두거나 지운다. 표시에는 내용이 없다(사용자의 질문을 적지 않는다). 실패는 버린다."""
+    if not session_id:
+        return
+    try:
+        path = session_file(session_id, ASKED)
+        if asked:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+    except (OSError, RuntimeError):
+        return
 
 
 def main(remote_only: bool = False) -> int:
@@ -218,23 +319,30 @@ def main(remote_only: bool = False) -> int:
         raw = sys.stdin.buffer.read().decode("utf-8-sig")
         data = json.loads(raw) if raw.strip() else {}
         prompt = data.get("prompt", "")
+        session_id = str(data.get("session_id") or "")
+        mark_asked(session_id, False)  # 앞 턴의 표시가 남아 있으면 지운다(그 턴이 중단되어 수확 훅이 돌지 않은 경우)
         if not isinstance(prompt, str) or not is_question(prompt):
             return 0
         query = to_query(prompt)
         if not query:
             return 0
         from kb.remote import load_credentials
+        from kb import uselog
         cred = load_credentials()
+        cwd = str(data.get("cwd", ""))
         if cred and (remote_only or cred["mode"] != "local"):
-            res = remote_lookup(query, cred)
-            project = project_of(data.get("cwd", ""), None, remote_projects(cred))
-            text = context(query, res, cred["url"], project)
+            res, base = remote_lookup(query, cred), cred["url"]
+            project = project_of(cwd, None, remote_projects(cred))
         elif remote_only:
             return 0
         else:
             env = os.environ.get("FAST_QUESTION_CONFIG")
             cfg = load_config(Path(env) if env else None)
-            text = context(query, lookup(query, cfg), f"http://{cfg.host}:{cfg.port}", project_of(data.get("cwd", ""), cfg))
+            res, base, project = lookup(query, cfg), f"http://{cfg.host}:{cfg.port}", project_of(cwd, cfg)
+        hits, _ = pick(query, res)
+        uselog.record("hook_hit", [(h["id"], h["question"]) for h in hits], cwd)
+        mark_asked(session_id, bool(project and not hits))
+        text = context(query, res, base)
         if not text:
             return 0
         out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}

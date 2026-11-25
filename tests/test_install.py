@@ -31,7 +31,7 @@ def test_install_hook_keeps_other_hooks_and_writes_without_bom(tmp_path, monkeyp
     (hook,) = _ours(data)
     assert hook["type"] == "command" and hook["timeout"] == 10
     assert "python.exe" in hook["command"] and "hooks/ask_kb.py" in hook["command"]
-    # 세션 끝 수확 훅은 Stop 에 더해진다
+    # 조사 턴 수확 훅은 Stop 에 더해진다
     (stop,) = [h for g in data["hooks"]["Stop"] for h in g["hooks"] if "stop_harvest.py" in h["command"]]
     assert stop["timeout"] == 10
     assert (tmp_path / "settings.json.fast-question.bak").exists()

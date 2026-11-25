@@ -72,7 +72,7 @@ def test_client_hook_without_credentials_does_not_read_the_local_db(tmp_path):
 
 
 def test_client_hook_uses_the_remote_server(tmp_path):
-    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")])
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 .part 질문")])
     try:
         cred = _cred_file(tmp_path, remote.url)
         r = _hook(tmp_path, {"prompt": ".part 에 먼저 쓰는 이유가 뭐야?"},

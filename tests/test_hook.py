@@ -50,22 +50,59 @@ def _item(i, q="질문", a="답변", state="trusted"):
 
 
 def test_context_with_hits_lists_items_and_urls():
-    text = ask_kb.context("q", {"hits": [_item(3, state="stale")], "similar": []}, "http://127.0.0.1:8765")
+    text = ask_kb.context("NAS 질문", {"hits": [_item(3, q="NAS 질문", state="stale")], "similar": []},
+                          "http://127.0.0.1:8765")
     assert "#3" in text and "http://127.0.0.1:8765/#qa/3" in text and "stale" in text
     assert "먼저" in text
 
 
-def test_context_without_hits_in_project_gives_store_conditions():
-    text = ask_kb.context("모르는 것", {"hits": [], "similar": [dict(_item(5), score=0.6)]}, "http://127.0.0.1:8765",
-                          "이관")
-    assert "없다" in text and "기본" in text and "이관" in text and "rules.md" in text and "#5" in text
+def test_store_conditions_cover_cost_and_exclusions():
+    text = "\n".join(ask_kb.store_conditions("이관"))
+    assert "이관" in text and "rules.md" in text
+    # 등록 조건: 다시 알아내는 비용, 이 세션이 쓴 파일 제외, 문서 위치 제외
+    assert "비용" in text and "만들거나 고친 파일" in text and "위치" in text
 
 
-def test_context_without_hits_outside_project_never_asks_to_store():
-    res = {"hits": [], "similar": [dict(_item(5), score=0.6)]}
-    text = ask_kb.context("모르는 것", res, "http://127.0.0.1:8765", None)
+def test_hook_marks_a_question_without_answer_instead_of_giving_conditions(tmp_path, monkeypatch):
+    """KB 에 답이 없는 질문에는 등록 조건을 넣지 않고 표시만 둔다. 조건은 수확 훅이 턴이 끝난 뒤 읽기 수를 보고 넣는다."""
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    marker = ask_kb.session_file("s-1", ask_kb.ASKED)
+    ask_kb.mark_asked("s-1", True)
+    assert marker.exists() and marker.read_text(encoding="utf-8") == ""  # 질문을 적지 않는다
+    ask_kb.mark_asked("s-1", False); ask_kb.mark_asked("s-1", False)
+    assert not marker.exists()
+    ask_kb.mark_asked("", True)  # 세션 id 가 없으면 두지 않는다
+    assert ask_kb.context("모르는 것", {"hits": [], "similar": []}, "http://x") == ""
+
+
+@pytest.mark.parametrize("query,question,answer,expected", [
+    ("RateLimitFilter 는 분당 몇 회야", "lea BE 의 요청 수 제한(RateLimitFilter)은 어떻게 걸리나?", "답", True),
+    ("lea 관리자 401 원인이", "lea 관리자(cms) API 가 일부만 401 이 되는 원인은?", "답", True),
+    ("넷퍼넬 대기열은 언제 끝나", "통합예약 포털에서 넷퍼넬 대기열은 언제 끝나나?", "답", True),
+    ("넷퍼넬", "통합예약 넷퍼넬에서 요청이 반복되는 것은 오류인가?", "답", True),
+    # 대화 문장: 형태소 계층이 하다·되다·남다 로 맞춘 무관한 항목
+    ("그럼 해야 돼", "readinessProbe 없이 롤링 업데이트를 하면?", "새 Pod 가 뜨기 전에 트래픽을 받게 해야 한다", False),
+    ("흠 남는 게 없는데 그럼", "Pod 가 Evicted 상태로 남으면 무엇을 뜻하나?", "남는 Pod 는 지워도 된다", False),
+    ("흠 남는 게 없는데 그럼", "Pod 가 Evicted 상태로 남으면?", "남는 Pod 는 자원이 없는 노드에서 지워도 된다", False),
+    ("결제 준비 값은 어디서 정해져", "통합예약 결제 준비에서 MID 값은 어떻게 정해지나?", "답", True),
+    ("여전히 안되는데", "Cocktail 파이프라인으로 배포한 리소스를 직접 고치면?", "다음 배포에서 되돌아간다", False),
+    ("RateLimitFilter 는 분당 몇 회야", "NodePort 로 들어온 요청의 클라이언트 IP 는?", "노드 주소다", False),
+    ("md 는 지워도 돼", "README.md 를 지우면?", "빌드가 실패한다", False),
+])
+def test_grounded_requires_target_name_in_item(query, question, answer, expected):
+    assert ask_kb.grounded(query, {"question": question, "answer": answer}) is expected
+
+
+def test_context_drops_results_without_the_target_name():
+    stray = _item(7, q="readinessProbe 없이 롤링 업데이트를 하면?", a="트래픽을 받게 해야 한다")
+    assert ask_kb.context("그럼 해야 돼", {"hits": [stray], "similar": [dict(stray, score=0.7)]}, "http://x") == ""
+
+
+def test_context_without_hits_never_asks_to_store():
+    res = {"hits": [], "similar": [dict(_item(5, a="NAS 답변"), score=0.6)]}
+    text = ask_kb.context("NAS 답변", res, "http://127.0.0.1:8765")
     assert "#5" in text and "저장" not in text and "등록" not in text
-    assert ask_kb.context("모르는 것", {"hits": [], "similar": []}, "http://127.0.0.1:8765", None) == ""
+    assert ask_kb.context("모르는 것", {"hits": [], "similar": []}, "http://127.0.0.1:8765") == ""
 
 
 def test_project_of_matches_top_category_name_or_harvest_root(tmp_path):
@@ -219,7 +256,7 @@ def _cred_file(tmp_path, url):
 
 
 def test_hook_uses_remote_server_with_token(tmp_path):
-    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")], names=["fast-question"])
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 .part 질문")], names=["fast-question"])
     try:
         cred = _cred_file(tmp_path, remote.url)
         path = tmp_path / "config.json"
@@ -227,7 +264,7 @@ def test_hook_uses_remote_server_with_token(tmp_path):
         r = subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
                            input=json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?", "cwd": r"D:\fast-question"}).encode(),
                            capture_output=True, timeout=60,
-                           env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": "C:\Windows",
+                           env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": r"C:\Windows",
                                 "FQ_CREDENTIALS": str(cred), "USERPROFILE": str(tmp_path / "home")})
     finally:
         remote.close()
@@ -237,8 +274,30 @@ def test_hook_uses_remote_server_with_token(tmp_path):
     assert (tmp_path / "home" / ".fast-question" / "projects.json").exists()
 
 
+def test_hook_leaves_a_mark_and_no_text_when_the_project_has_no_answer(tmp_path):
+    remote = FakeRemote(hits=[], names=["fast-question"])
+    marker = tmp_path / "home" / ".fast-question" / "stop" / "s-1.asked"
+    cred = _cred_file(tmp_path, remote.url)
+
+    def ask(prompt, cwd):
+        return subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
+                              input=json.dumps({"prompt": prompt, "cwd": cwd, "session_id": "s-1"}).encode(),
+                              capture_output=True, timeout=60,
+                              env={"SYSTEMROOT": r"C:\Windows", "FQ_CREDENTIALS": str(cred),
+                                   "USERPROFILE": str(tmp_path / "home")})
+    try:
+        r = ask("uselog 의 measure 는 무엇을 세나?", r"D:\fast-question")
+        assert r.returncode == 0 and r.stdout == b"" and marker.exists()
+        # 다음 입력이 질문이 아니면 앞 턴의 표시를 지운다
+        assert ask("그 파일 고쳐줘", r"D:\fast-question").stdout == b"" and not marker.exists()
+        # 프로젝트가 아닌 폴더의 질문에는 표시를 두지 않는다
+        assert ask("uselog 의 measure 는 무엇을 세나?", r"C:\Users\someone\other").stdout == b"" and not marker.exists()
+    finally:
+        remote.close()
+
+
 def test_hook_reads_local_db_in_local_mode(tmp_path):
-    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")])
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 .part 질문")])
     try:
         cred = _cred_file(tmp_path, remote.url)
         cred.write_text(json.dumps({"url": remote.url, "token": "fq_pat_test", "mode": "local"}), encoding="utf-8")
@@ -257,7 +316,7 @@ def test_hook_reads_local_db_in_local_mode(tmp_path):
 
 def test_client_hook_ignores_local_mode(tmp_path, monkeypatch):
     """플러그인(fq_client hook, remote_only)은 원격 전용이라 mode 를 보지 않는다."""
-    remote = FakeRemote(hits=[_item(7, "원격에 있는 질문")])
+    remote = FakeRemote(hits=[_item(7, "원격에 있는 .part 질문")])
     try:
         cred = _cred_file(tmp_path, remote.url)
         cred.write_text(json.dumps({"url": remote.url, "token": "fq_pat_test", "mode": "local"}), encoding="utf-8")
@@ -280,7 +339,7 @@ def test_hook_is_silent_when_remote_is_down(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "hooks" / "ask_kb.py")],
                        input=json.dumps({"prompt": ".part 에 먼저 쓰는 이유가 뭐야?"}).encode(),
                        capture_output=True, timeout=60,
-                       env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": "C:\Windows", "FQ_CREDENTIALS": str(cred)})
+                       env={"FAST_QUESTION_CONFIG": str(path), "SYSTEMROOT": r"C:\Windows", "FQ_CREDENTIALS": str(cred)})
     assert r.returncode == 0 and r.stdout == b""
 
 

@@ -5,6 +5,7 @@
 - 근거 spec(kb_add, kb_add_many 항목, kb_evidence add)은 이 PC 에서 capture() 해 captured 로 붙인다(url·note 제외).
 - kb_add_many file= 은 이 PC 의 파일을 읽어 items 로 보낸다. 캡처에 실패한 항목은 그 항목만 오류로 돌려준다.
 - kb_evidence recapture 는 원격 kb_evidence_spec 으로 근거 spec 을 받아 이 PC 에서 다시 캡처한 값을 보낸다.
+- kb_search 결과에서 이 PC 가 학습용으로 둔 대분류의 항목을 study 키로 떼어 낸다(set_apart, settings.json).
 - 캡처값에는 이 PC 의 device_id 를 origin 으로 붙인다. kb_recheck 는 원격에서 이 PC 의 근거만 받아
   (/api/evidence/check) 이 PC 에서 판정하고 /api/evidence/verdicts 로 보고한다.
 호출마다 MCP 세션을 새로 연다(원격은 세션을 메모리에 두지 않는다).
@@ -21,9 +22,10 @@ from mcp.client import Client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.server.lowlevel.server import Server
 
+from kb import uselog
 from kb.errors import KbError
 from kb.evidence import capture
-from kb.remote import judge
+from kb.remote import judge, study_categories
 from mcp_server.instructions import ADD_MANY_DOC, ADD_MANY_FILE, PROXY_INSTRUCTIONS, RECHECK_DOC
 
 SERVER_KINDS = ("url", "note", "github")  # 서버가 직접 만드는 근거(github 는 서버가 GitHub API 로 기록·판정한다)
@@ -143,6 +145,58 @@ async def forward(remote: Remote, name: str, args: dict) -> types.CallToolResult
     return await remote.call(name, args)
 
 
+STUDY_NOTE = ("Learning notes: general knowledge the user keeps for study, set apart by study_categories in "
+              "settings.json on this PC. They are not facts about the user's projects. Use them only when the user "
+              "asks about that topic. Passing category searches them directly.")
+
+
+def set_apart(args: dict, result: types.CallToolResult, study: list[str]) -> types.CallToolResult:
+    """kb_search 결과에서 학습용 대분류(kb/remote.py study_categories)의 항목을 hits·similar 에서 빼 study 키로 옮긴다.
+    Claude 가 프로젝트의 사실을 찾을 때 일반 지식이 섞이지 않게 한다. category 를 준 검색은 그 분류를 직접 찾는 것이라
+    그대로 둔다. total·groups 는 서버가 센 값 그대로다. 결과 형식이 다르면 손대지 않는다."""
+    try:
+        if not study or result.is_error or args.get("category"):
+            return result
+        data = json.loads(result.content[0].text)
+        moved = {k: [h for h in data.get(k, []) if str(h.get("category_path", "")).split(" > ")[0].strip().lower() in study]
+                 for k in ("hits", "similar")}
+        if not any(moved.values()):
+            return result
+        for k, gone in moved.items():
+            data[k] = [h for h in data.get(k, []) if h not in gone]
+        data["study"] = {"note": STUDY_NOTE, **moved}
+        return text_result(data)
+    except Exception:  # noqa: BLE001 - 떼어 내지 못하면 서버 결과를 그대로 돌려준다
+        return result
+
+
+USE_KINDS = {"kb_search": "search", "kb_get": "get", "kb_add": "add", "kb_update": "update", "kb_archive": "archive",
+             "kb_evidence": "evidence"}
+
+
+def log_use(name: str, args: dict, result: types.CallToolResult) -> None:
+    """찾아지거나 읽히거나 등록되거나 고쳐진 항목을 이 PC 의 사용 기록(kb/uselog.py)에 적는다. 실패는 버린다.
+    kb_search 가 0건이면 Claude 가 넣은 검색어를 miss 로 적는다. 정규식 검색과 지운 항목까지 보는 검색은 글자 패턴이나
+    복원 대상을 찾는 것이라 적지 않는다."""
+    kind = USE_KINDS.get(name)
+    try:
+        if kind is None or result.is_error:
+            return
+        data = json.loads(result.content[0].text)
+        if kind == "search":
+            items = [(h["id"], h["question"]) for h in data.get("hits", [])[:uselog.SEARCH_TOP]]
+            if not items and not args.get("regex") and not args.get("include_archived"):
+                uselog.record("miss", [], queries=args.get("queries") or [args.get("query")])
+        elif kind == "add":  # {"status": "created", "item": {...}}. similar_found 는 등록하지 않은 것이다
+            item = data.get("item") or {}
+            items = [(item["id"], item.get("question", ""))] if data.get("status") == "created" else []
+        else:
+            items = [(data["id"], data.get("question", ""))]
+        uselog.record(kind, items)
+    except Exception:  # noqa: BLE001 - 기록 실패가 도구 응답을 막지 않게 한다
+        return
+
+
 def build_proxy(remote: Remote) -> Server:
     cache: list[types.Tool] = []
 
@@ -154,7 +208,12 @@ def build_proxy(remote: Remote) -> Server:
 
     async def call_tool(ctx, params: types.CallToolRequestParams) -> types.CallToolResult:
         try:
-            return await forward(remote, params.name, dict(params.arguments or {}))
+            args = dict(params.arguments or {})
+            result = await forward(remote, params.name, args)
+            if params.name == "kb_search":
+                result = set_apart(args, result, study_categories())
+            log_use(params.name, args, result)
+            return result
         except KbError as e:
             return text_result(e.message, is_error=True)
         except (OSError, ValueError) as e:

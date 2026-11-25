@@ -41,7 +41,7 @@ IS_WINDOWS = os.name == "nt"
 ENTRY = ROOT / "run_mcp.py"
 HOOK = ROOT / "hooks" / "ask_kb.py"
 HOOK_EVENT = "UserPromptSubmit"
-# 이벤트 → 훅 스크립트. 즉석 질문 훅(UserPromptSubmit)과 세션 끝 수확 훅(Stop, hooks/stop_harvest.py)
+# 이벤트 → 훅 스크립트. 즉석 질문 훅(UserPromptSubmit)과 조사 턴 수확 훅(Stop, hooks/stop_harvest.py)
 HOOKS = {HOOK_EVENT: HOOK, "Stop": ROOT / "hooks" / "stop_harvest.py"}
 HOOK_TIMEOUT_S = 10
 NAME = "fast-question"

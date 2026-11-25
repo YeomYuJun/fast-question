@@ -55,6 +55,12 @@ def no_real_credentials(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_real_uselog(tmp_path_factory, monkeypatch):
+    """프록시와 훅을 거치는 테스트가 이 PC 의 사용 기록(~/.fast-question/use.jsonl)에 표본 데이터를 적지 않게 한다."""
+    monkeypatch.setenv("FQ_USELOG", str(tmp_path_factory.mktemp("uselog") / "use.jsonl"))
+
+
+@pytest.fixture(autouse=True)
 def no_real_claude_config(tmp_path_factory, monkeypatch):
     """테스트가 실수로 claude CLI 를 실제로 불러도 이 PC 의 사용자 설정(~/.claude.json 의 MCP 등록)을 바꾸지 않게 한다."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path_factory.mktemp("claude-config")))
